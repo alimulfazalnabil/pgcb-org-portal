@@ -21,4 +21,4 @@ azure-identity>=1.19.0
 azure-storage-blob>=12.24.0
 prometheus-client>=0.21.0
 celery>=5.3.6
-
+gunicorn>=23.0.0
