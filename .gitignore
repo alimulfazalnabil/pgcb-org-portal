@@ -8,5 +8,6 @@ __pycache__/
 .pytest_cache/
 *.db
 *.sqlite3
+*.tsbuildinfo
 terraform/.terraform/
 terraform/*.tfstate*

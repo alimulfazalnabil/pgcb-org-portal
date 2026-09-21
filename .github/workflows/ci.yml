@@ -63,8 +63,9 @@ jobs:
           REQUIRE_EMAIL_VERIFICATION: "false"
           RATE_LIMIT_ENABLED: "false"
         run: |
+          python -m app.db.seed
           nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/pgcb-api.log 2>&1 &
-          for i in {1..30}; do curl -fsS http://127.0.0.1:8000/health && break; sleep 2; done
+          for i in {1..30}; do curl -fsS http://127.0.0.1:8000/health && break; sleep 2; done || (cat /tmp/pgcb-api.log && exit 1)
 
       - name: Install Playwright Browsers
         working-directory: ./apps/web
@@ -75,6 +76,7 @@ jobs:
         env:
           CI: "true"
           INTERNAL_API_URL: "http://127.0.0.1:8000"
+          NEXT_PUBLIC_API_URL: "http://localhost:8000/api/v1"
         run: npx playwright test
 
   deploy-to-render:
