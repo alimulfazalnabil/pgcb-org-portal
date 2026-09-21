@@ -1,3 +1,6 @@
+import logging
+from contextlib import asynccontextmanager
+
 from sqlalchemy import text
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,10 +18,25 @@ from app.routers.payment_webhooks import router as payment_webhooks_router
 from app.routers.certificates import router as certificates_router
 from app.routers.workflows import router as workflows_router
 
+logger = logging.getLogger("pgcb.api")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db_target = "sqlite" if settings.database_url.startswith("sqlite") else getattr(engine.url, "host", "postgresql")
+    logger.info(
+        f"[STARTUP] PGCB Portal API v1.0.0-rc1 | Env: {settings.app_env} | "
+        f"Storage: {settings.storage_backend} | DB Host: {db_target}"
+    )
+    yield
+    logger.info("[SHUTDOWN] PGCB Portal API shutting down")
+
+
 app = FastAPI(
     title='PGCB Organization Portal API',
     version='1.0.0-rc1',
     description='Institutional website, membership portal, CMS, events, payments, verification, observability and Azure production API.',
+    lifespan=lifespan,
 )
 
 app.add_middleware(SecurityMiddleware)

@@ -51,27 +51,34 @@ class Settings(BaseSettings):
                 f'postgresql+psycopg://{quote_plus(self.db_user)}:{quote_plus(self.db_password)}'
                 f'@{self.db_host}:{self.db_port}/{self.db_name}?sslmode=require'
             )
+        if self.database_url:
+            if self.database_url.startswith('postgres://'):
+                self.database_url = self.database_url.replace('postgres://', 'postgresql+psycopg://', 1)
+            elif self.database_url.startswith('postgresql://'):
+                self.database_url = self.database_url.replace('postgresql://', 'postgresql+psycopg://', 1)
+            elif self.database_url.startswith('postgresql+psycopg2://'):
+                self.database_url = self.database_url.replace('postgresql+psycopg2://', 'postgresql+psycopg://', 1)
+
         if self.redis_host and self.redis_password:
             self.redis_url = (
                 f'{self.redis_scheme}://:{quote_plus(self.redis_password)}@{self.redis_host}:{self.redis_port}/0'
             )
         if self.app_env.lower() == 'production':
             if self.jwt_secret.startswith('dev-only-secret') or len(self.jwt_secret) < 32:
-                import secrets as _secrets
-                import logging
-                logging.getLogger('pgcb.config').warning(
-                    'JWT_SECRET was insecure or missing in production; auto-generating a secure ephemeral secret. '
-                    'Configure JWT_SECRET in Render Environment for persistent sessions across restarts.'
+                raise ValueError(
+                    'JWT_SECRET must be configured with at least 32 characters in production. '
+                    'Configure JWT_SECRET in your Render Environment or Blueprint shared-secrets.'
                 )
-                self.jwt_secret = _secrets.token_hex(32)
-            if self.storage_backend == 'azure' and not (self.azure_storage_account_url or self.azure_storage_connection_string):
-                import logging
-                logging.getLogger('pgcb.config').warning(
-                    'Azure Blob Storage credentials missing in production. '
-                    'Please set AZURE_STORAGE_CONNECTION_STRING in Render Environment. '
-                    'Falling back to local storage temporarily to prevent startup crashes.'
+            if self.storage_backend != 'azure':
+                raise ValueError(
+                    "Production storage configuration invalid: STORAGE_BACKEND must be set to 'azure' "
+                    "for external persistent storage in production."
                 )
-                self.storage_backend = 'local'
+            if not (self.azure_storage_account_url or self.azure_storage_connection_string):
+                raise ValueError(
+                    "Production storage configuration invalid: STORAGE_BACKEND=azure requires "
+                    "AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT_URL to be configured in environment variables."
+                )
             if self.require_email_verification is False:
                 # Explicitly allowed, but keep production configuration visible in docs/runbooks.
                 pass
