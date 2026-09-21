@@ -44,6 +44,13 @@ def save_bytes(content: bytes, folder: str, filename: str) -> str:
 
     service = _azure_blob_service()
     container = settings.azure_storage_container
+    try:
+        container_client = service.get_container_client(container)
+        if not container_client.exists():
+            container_client.create_container()
+    except Exception:
+        pass
+
     blob_client = service.get_blob_client(container=container, blob=f'{folder.strip("/")}/{_safe_name(filename)}')
     blob_client.upload_blob(
         content,
@@ -51,6 +58,7 @@ def save_bytes(content: bytes, folder: str, filename: str) -> str:
         content_settings=ContentSettings(content_type='application/octet-stream'),
     )
     return blob_client.url
+
 
 
 def is_local_path(value: str) -> bool:

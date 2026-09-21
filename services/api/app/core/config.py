@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60
     cookie_name: str = 'pgcb_access_token'
     frontend_url: str = 'http://localhost:3000'
+    allowed_origins: str | None = None
     password_reset_hours: int = 2
     email_verification_hours: int = 24
     require_email_verification: bool = False

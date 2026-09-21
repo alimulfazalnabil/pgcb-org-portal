@@ -18,13 +18,14 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: '**/package*.json'
+          cache-dependency-path: 'apps/web/package-lock.json'
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: 'services/api/requirements.txt'
 
       - name: Install Backend Dependencies
         working-directory: ./services/api
@@ -32,21 +33,18 @@ jobs:
 
       - name: Install Frontend Dependencies
         working-directory: ./apps/web
-        run: npm ci || npm install
+        run: npm ci
 
-      - name: Lint Frontend
+      - name: Lint & Typecheck Frontend
         working-directory: ./apps/web
         run: npm run lint
-
-      - name: Typecheck Frontend
-        working-directory: ./apps/web
-        run: npx tsc --noEmit
 
       - name: Run Backend Tests
         working-directory: ./services/api
         env:
-          JWT_SECRET: "test-secret"
-          DATABASE_URL: "sqlite:///./test.db" # Use SQLite in memory for CI unit tests
+          APP_ENV: test
+          JWT_SECRET: "test-secret-32-characters-minimum-for-ci"
+          DATABASE_URL: "sqlite:///./test.db"
         run: pytest
 
       - name: Build Frontend
@@ -55,18 +53,34 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: "http://localhost:8000/api/v1"
 
+      - name: Start Background API for E2E
+        working-directory: ./services/api
+        env:
+          APP_ENV: test
+          DATABASE_URL: sqlite:///./e2e.db
+          JWT_SECRET: "e2e-test-secret-change-me-32-characters-minimum"
+          FRONTEND_URL: "http://127.0.0.1:3000"
+          REQUIRE_EMAIL_VERIFICATION: "false"
+          RATE_LIMIT_ENABLED: "false"
+        run: |
+          nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/pgcb-api.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:8000/health && break; sleep 2; done
+
       - name: Install Playwright Browsers
         working-directory: ./apps/web
-        run: npx playwright install --with-deps
+        run: npx playwright install --with-deps chromium
 
       - name: Run Playwright E2E Tests
         working-directory: ./apps/web
+        env:
+          CI: "true"
+          INTERNAL_API_URL: "http://127.0.0.1:8000"
         run: npx playwright test
 
   deploy-to-render:
     needs: validate-and-test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.RENDER_DEPLOY_HOOK_URL != ''
     steps:
       - name: Trigger Render Deployment
         uses: fjogeleit/http-request-action@v1

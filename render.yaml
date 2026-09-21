@@ -4,38 +4,54 @@ services:
   # 1. Next.js Frontend (Web Service)
   - type: web
     name: pgcb-portal-web
-    env: node
+    runtime: node
     rootDir: apps/web
     region: singapore
-    plan: standard
+    plan: starter
     buildCommand: npm install && npm run build
     startCommand: npm run start
     envVars:
       - key: NODE_VERSION
         value: 20.18.0
       - key: NEXT_PUBLIC_API_URL
-        value: https://pgcb-portal-api.onrender.com/api/v1
+        fromService:
+          type: web
+          name: pgcb-portal-api
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: INTERNAL_API_URL
+        fromService:
+          type: web
+          name: pgcb-portal-api
+          envVarKey: RENDER_EXTERNAL_URL
     healthCheckPath: /api/health
 
   # 2. FastAPI Backend (Web Service)
   - type: web
     name: pgcb-portal-api
-    env: python
+    runtime: python
     rootDir: services/api
     region: singapore
-    plan: standard
+    plan: starter
+    preDeployCommand: alembic upgrade head
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: APP_ENV
+        value: production
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: pgcb-portal-web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: DATABASE_URL
         fromDatabase:
           name: pgcb-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: pgcb-redis
           property: connectionString
       - fromGroup: shared-secrets
@@ -44,22 +60,24 @@ services:
   # 3. Background Worker (Celery)
   - type: worker
     name: pgcb-portal-worker
-    env: python
+    runtime: python
     rootDir: services/api
     region: singapore
-    plan: standard
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: celery -A app.worker.celery_app worker --loglevel=info
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: APP_ENV
+        value: production
       - key: DATABASE_URL
         fromDatabase:
           name: pgcb-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: pgcb-redis
           property: connectionString
       - fromGroup: shared-secrets
@@ -67,52 +85,55 @@ services:
   # 4. Scheduled Tasks (Cron)
   - type: cron
     name: pgcb-daily-tasks
-    env: python
+    runtime: python
     rootDir: services/api
     region: singapore
-    schedule: "0 18 * * *" # 18:00 UTC = Midnight BST
+    schedule: "0 18 * * *" # 18:00 UTC = 00:00 BST (Bangladesh Standard Time, UTC+6)
     buildCommand: pip install -r requirements.txt
     startCommand: python -m app.jobs.daily
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: APP_ENV
+        value: production
       - key: DATABASE_URL
         fromDatabase:
           name: pgcb-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: pgcb-redis
           property: connectionString
+      - fromGroup: shared-secrets
 
-  # 5. Redis-backed Key Value Store
-  - type: redis
+  # 5. Redis Key-Value Store
+  - type: keyvalue
     name: pgcb-redis
     region: singapore
-    plan: free
+    plan: starter
     ipAllowList: []
 
 databases:
   # 6. PostgreSQL Database
   - name: pgcb-postgres
     region: singapore
-    plan: standard
+    plan: starter
     databaseName: pgcb_db
     user: pgcb_admin
 
-envGroups:
+envVarGroups:
   - name: shared-secrets
     envVars:
       - key: JWT_SECRET
         generateValue: true
+      - key: MFA_ENCRYPTION_KEY
+        generateValue: true
       - key: STORAGE_BACKEND
-        value: s3
-      - key: S3_ENDPOINT
+        value: azure
+      - key: AZURE_STORAGE_CONTAINER
+        value: pgcb-files
+      - key: AZURE_STORAGE_CONNECTION_STRING
         sync: false
-      - key: S3_BUCKET
-        sync: false
-      - key: S3_ACCESS_KEY
-        sync: false
-      - key: S3_SECRET_KEY
+      - key: AZURE_STORAGE_ACCOUNT_URL
         sync: false

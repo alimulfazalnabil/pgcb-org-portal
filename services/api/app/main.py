@@ -22,15 +22,30 @@ app = FastAPI(
 )
 
 app.add_middleware(SecurityMiddleware)
+
+cors_origins = [
+    settings.frontend_url.rstrip('/'),
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+]
+if settings.allowed_origins:
+    cors_origins.extend([o.strip().rstrip('/') for o in settings.allowed_origins.split(',') if o.strip()])
+cors_origins = list(dict.fromkeys(cors_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url],
+    allow_origins=cors_origins,
+    allow_origin_regex=r'https://.*\.onrender\.com',
     allow_credentials=True,
     allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allow_headers=['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID'],
 )
 
-Base.metadata.create_all(bind=engine)
+# In test and local sqlite environments, automatically provision tables for test suites;
+# Production environments use Alembic preDeployCommand (alembic upgrade head).
+if settings.app_env.lower() in ('development', 'test') and settings.database_url.startswith('sqlite'):
+    Base.metadata.create_all(bind=engine)
+
 app.include_router(auth.router, prefix='/api/v1')
 app.include_router(public.router, prefix='/api/v1')
 app.include_router(membership.router, prefix='/api/v1')
