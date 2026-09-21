@@ -80,11 +80,21 @@ jobs:
   deploy-to-render:
     needs: validate-and-test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.RENDER_DEPLOY_HOOK_URL != ''
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    env:
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+
     steps:
       - name: Trigger Render Deployment
+        if: env.RENDER_DEPLOY_HOOK_URL != ''
         uses: fjogeleit/http-request-action@v1
         with:
-          url: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          url: ${{ env.RENDER_DEPLOY_HOOK_URL }}
           method: 'POST'
           customHeaders: '{"Accept": "application/json"}'
+
+      - name: Skip Render deployment when deploy hook is not configured
+        if: env.RENDER_DEPLOY_HOOK_URL == ''
+        run: echo "RENDER_DEPLOY_HOOK_URL is not configured; skipping Render deployment."
+
