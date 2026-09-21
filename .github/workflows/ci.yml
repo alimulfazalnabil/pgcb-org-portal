@@ -1,0 +1,76 @@
+name: PGCB Portal CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: '**/package*.json'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Backend Dependencies
+        working-directory: ./services/api
+        run: pip install -r requirements.txt pytest
+
+      - name: Install Frontend Dependencies
+        working-directory: ./apps/web
+        run: npm ci || npm install
+
+      - name: Lint Frontend
+        working-directory: ./apps/web
+        run: npm run lint
+
+      - name: Typecheck Frontend
+        working-directory: ./apps/web
+        run: npx tsc --noEmit
+
+      - name: Run Backend Tests
+        working-directory: ./services/api
+        env:
+          JWT_SECRET: "test-secret"
+          DATABASE_URL: "sqlite:///./test.db" # Use SQLite in memory for CI unit tests
+        run: pytest
+
+      - name: Build Frontend
+        working-directory: ./apps/web
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: "http://localhost:8000/api/v1"
+
+      - name: Install Playwright Browsers
+        working-directory: ./apps/web
+        run: npx playwright install --with-deps
+
+      - name: Run Playwright E2E Tests
+        working-directory: ./apps/web
+        run: npx playwright test
+
+  deploy-to-render:
+    needs: validate-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Trigger Render Deployment
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          method: 'POST'
+          customHeaders: '{"Accept": "application/json"}'

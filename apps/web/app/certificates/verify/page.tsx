@@ -1,0 +1,7 @@
+'use client';
+import { useState } from 'react';
+export default function CertificateVerify(){
+  const [token,setToken]=useState(''); const [result,setResult]=useState<any>(null); const [busy,setBusy]=useState(false);
+  async function verify(e:React.FormEvent){e.preventDefault();setBusy(true);setResult(null);try{const r=await fetch(`/backend/api/v1/certificates/verify/${encodeURIComponent(token)}`); const b=await r.json().catch(()=>({})); setResult(r.ok?b:{error:b.detail||'Certificate not found'});}finally{setBusy(false)}}
+  return <section className="section"><div className="container narrow"><div className="section-head"><span className="eyebrow">CERTIFICATE VERIFICATION</span><h1>সনদ যাচাই</h1><p>সনদের verification token দিয়ে অফিসিয়াল সনদ যাচাই করুন।</p></div><div className="card card-body"><form className="search-form" onSubmit={verify}><input required value={token} onChange={e=>setToken(e.target.value)} placeholder="Verification token"/><button className="btn btn-green" disabled={busy}>{busy?'যাচাই হচ্ছে...':'যাচাই'}</button></form>{result&&<div className={result.error?'error-box':'verify-result'} style={{marginTop:20}}>{result.error?<b>{result.error}</b>:<><div className="verified-label">✓ VERIFIED CERTIFICATE</div><h2>{result.recipient_name}</h2><p>{result.title_bn}</p><div className="meta">{result.certificate_no} · {new Date(result.issue_date).toLocaleDateString('bn-BD')}</div></>}</div>}</div></div></section>
+}

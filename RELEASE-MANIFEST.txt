@@ -1,0 +1,15 @@
+PGCB Organization Portal v1.0.0-rc1
+
+Release type: Release Candidate
+Built from: v0.9 baseline
+
+Highlights:
+- Public site-wide search
+- Public aggregate statistics API
+- Mobile navigation and accessibility improvements
+- Privacy / Terms / Accessibility pages
+- 404 / error handling
+- Next.js sitemap / robots / manifest
+- API liveness endpoint
+- Release and launch documentation
+- Existing membership, CMS, events, payments, notifications, security and Azure infrastructure retained

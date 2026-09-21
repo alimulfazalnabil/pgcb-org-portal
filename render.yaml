@@ -1,0 +1,110 @@
+version: "1"
+
+services:
+  # 1. Next.js Frontend (Web Service)
+  - type: web
+    name: pgcb-portal-web
+    env: node
+    rootDir: apps/web
+    region: singapore
+    plan: standard
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://pgcb-portal-api.onrender.com/api/v1
+    healthCheckPath: /api/health
+
+  # 2. FastAPI Backend (Web Service)
+  - type: web
+    name: pgcb-portal-api
+    env: python
+    rootDir: services/api
+    region: singapore
+    plan: standard
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pgcb-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: pgcb-redis
+          property: connectionString
+      - fromGroup: shared-secrets
+    healthCheckPath: /ready
+
+  # 3. Background Worker (Celery)
+  - type: worker
+    name: pgcb-portal-worker
+    env: python
+    rootDir: services/api
+    region: singapore
+    plan: standard
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A app.worker.celery_app worker --loglevel=info
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pgcb-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: pgcb-redis
+          property: connectionString
+      - fromGroup: shared-secrets
+
+  # 4. Scheduled Tasks (Cron)
+  - type: cron
+    name: pgcb-daily-tasks
+    env: python
+    rootDir: services/api
+    region: singapore
+    schedule: "0 18 * * *" # 18:00 UTC = Midnight BST
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.jobs.daily
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pgcb-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: pgcb-redis
+          property: connectionString
+
+  # 5. Redis-backed Key Value Store
+  - type: redis
+    name: pgcb-redis
+    region: singapore
+    plan: free
+    ipAllowList: []
+
+databases:
+  # 6. PostgreSQL Database
+  - name: pgcb-postgres
+    region: singapore
+    plan: standard
+    databaseName: pgcb_db
+    user: pgcb_admin
+
+envGroups:
+  - name: shared-secrets
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false

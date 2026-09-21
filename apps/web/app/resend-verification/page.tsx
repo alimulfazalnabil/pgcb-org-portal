@@ -1,0 +1,7 @@
+'use client';
+import {useState} from 'react';
+export default function ResendVerification(){
+ const [email,setEmail]=useState(''); const [message,setMessage]=useState(''); const [token,setToken]=useState(''); const [busy,setBusy]=useState(false);
+ async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setMessage('');setToken('');const r=await fetch('/backend/api/v1/auth/resend-verification',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});const d=await r.json().catch(()=>({}));if(!r.ok)setMessage(d.detail||'অনুরোধ ব্যর্থ হয়েছে।');else{setMessage(d.message||'অনুরোধ গ্রহণ করা হয়েছে।');if(d.verification_token)setToken(d.verification_token);}setBusy(false)}
+ return <section className="section"><div className="container narrow"><div className="auth-card card card-body"><span className="eyebrow">ACCOUNT SECURITY</span><h1>ইমেইল যাচাই লিংক পুনরায় পাঠান</h1><p className="muted">আপনার নিবন্ধিত ইমেইল ঠিকানা দিন।</p><form className="form-stack" onSubmit={submit}><input type="email" required placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}/><button className="btn btn-primary" disabled={busy}>{busy?'পাঠানো হচ্ছে...':'Verification Link পাঠান'}</button></form>{message&&<div className="notice-success" style={{marginTop:16}}>{message}</div>}{token&&<div className="notice-success"><p className="small">Development verification token</p><a className="btn btn-light" href={`/verify-email?token=${encodeURIComponent(token)}`}>ইমেইল যাচাই করুন</a></div>}</div></div></section>
+}
