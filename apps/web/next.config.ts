@@ -8,7 +8,9 @@ const nextConfig: NextConfig = {
     const rawUrl =
       process.env.INTERNAL_API_URL ||
       process.env.NEXT_PUBLIC_API_URL ||
-      'https://pgcb-org-portal.onrender.com';
+      (process.env.NODE_ENV === 'production'
+        ? 'https://pgcb-portal-api.onrender.com'
+        : 'http://127.0.0.1:8000');
     const baseUrl = rawUrl.replace(/\/+$/, '');
     return [
       {

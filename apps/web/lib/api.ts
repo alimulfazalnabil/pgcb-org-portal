@@ -4,7 +4,15 @@
  */
 
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || 'https://pgcb-org-portal.onrender.com';
+  typeof window !== 'undefined'
+    ? '/backend'
+    : (
+        process.env.INTERNAL_API_URL ||
+        process.env.NEXT_PUBLIC_API_URL ||
+        (process.env.NODE_ENV === 'production'
+          ? 'https://pgcb-portal-api.onrender.com'
+          : 'http://127.0.0.1:8000')
+      ).replace(/\/+$/, '');
 
 export class ApiError extends Error {
   status: number;

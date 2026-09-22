@@ -1,6 +1,7 @@
 'use client';
 import { FormEvent, useState } from 'react';
 import Link from 'next/link';
+import { api, ApiError } from '../../lib/api';
 
 export default function LoginPage(){
   const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [code,setCode]=useState('');
@@ -8,12 +9,20 @@ export default function LoginPage(){
   async function submit(e:FormEvent){
     e.preventDefault(); setBusy(true); setError('');
     try{
-      const r=await fetch('/backend/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,mfa_code:mfa?code:undefined})});
-      const body=await r.json().catch(()=>({}));
-      if(r.ok && body.mfa_required){setMfa(true); return;}
-      if(!r.ok) throw new Error(body.detail||'লগইন ব্যর্থ হয়েছে');
+      const body = await api.login({
+        email,
+        password,
+        mfa_code: mfa ? code : undefined,
+      });
+      if(body.mfa_required){setMfa(true); return;}
       window.location.href = body.role === 'MEMBER' ? '/portal' : '/admin';
-    }catch(err:any){setError(err.message||'লগইন ব্যর্থ হয়েছে');}
+    }catch(err:any){
+      if (err.status === 404) {
+        setError('ব্যাকএন্ড সার্ভার রেসপন্স করছে না (Backend API 404). Render-এ ব্যাকএন্ড সার্ভিস চালু আছে কিনা নিশ্চিত করুন।');
+      } else {
+        setError(err.message || 'লগইন ব্যর্থ হয়েছে');
+      }
+    }
     finally{setBusy(false)}
   }
   return <section className="section"><div className="container narrow"><div className="auth-card card card-body">
