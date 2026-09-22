@@ -70,7 +70,14 @@ app.add_middleware(
 # In test and local sqlite environments, automatically provision tables for test suites;
 # Production environments use Alembic preDeployCommand (alembic upgrade head).
 if settings.app_env.lower() in ('development', 'test') and settings.database_url.startswith('sqlite'):
-    Base.metadata.create_all(bind=engine)
+    try:
+        for table in Base.metadata.sorted_tables:
+            try:
+                table.create(bind=engine, checkfirst=True)
+            except Exception as exc:
+                logger.debug("Skipped existing table/index for %s: %s", table.name, exc)
+    except Exception as exc:
+        logger.warning("Database schema auto-creation notice: %s", exc)
 
 app.include_router(auth.router, prefix='/api/v1')
 app.include_router(public.router, prefix='/api/v1')
