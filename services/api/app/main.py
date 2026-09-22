@@ -91,6 +91,20 @@ app.include_router(payment_webhooks_router, prefix='/api/v1')
 app.include_router(certificates_router, prefix='/api/v1')
 app.include_router(workflows_router, prefix='/api/v1')
 
+@app.get('/')
+@app.head('/')
+def root():
+    return {
+        'service': 'PGCB Organization Portal API',
+        'status': 'online',
+        'version': '1.0.0-rc1',
+        'documentation': '/docs',
+        'health': '/health',
+        'readiness': '/ready',
+        'liveness': '/live',
+    }
+
+
 @app.get('/health')
 def health():
     return {'status': 'ok', 'service': 'pgcb-api', 'version': '1.0.0-rc1', 'environment': settings.app_env}
