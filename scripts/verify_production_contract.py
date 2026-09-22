@@ -131,8 +131,8 @@ def check_contract(mode: str) -> bool:
 
     # 6. Frontend URL (CORS / Redirects)
     if not frontend_url and app_env == "production":
-        warnings.append("FRONTEND_URL is not set. CORS will default to localhost.")
-        print("[-] FRONTEND_URL       : [NOT SET]")
+        warnings.append("FRONTEND_URL is not set. CORS will fallback to https://pgcb-portal-web.onrender.com.")
+        print("[-] FRONTEND_URL       : [FALLBACK TO https://pgcb-portal-web.onrender.com]")
     else:
         print(f"[+] FRONTEND_URL       : {frontend_url or 'http://localhost:3000'}")
 

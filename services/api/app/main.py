@@ -36,6 +36,20 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning(f"Storage root initialization warning: {exc}")
 
+    # Ensure initial database seed exists if database is newly initialized
+    try:
+        from app.db.seed import main as seed_db
+        from app.models import User
+        from sqlalchemy import func, select
+        with SessionLocal() as db:
+            user_count = db.scalar(select(func.count(User.id)))
+            if not user_count:
+                logger.info("[STARTUP] Empty database detected. Running initial seed...")
+                seed_db()
+                logger.info("[STARTUP] Initial database seed completed.")
+    except Exception as exc:
+        logger.warning(f"[STARTUP] Initial database seed check warning: {exc}")
+
     yield
     logger.info("[SHUTDOWN] PGCB Portal API shutting down")
 
@@ -51,6 +65,7 @@ app.add_middleware(SecurityMiddleware)
 
 cors_origins = [
     settings.frontend_url.rstrip('/'),
+    'https://pgcb-portal-web.onrender.com',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
 ]

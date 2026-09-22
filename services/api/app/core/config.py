@@ -72,6 +72,8 @@ class Settings(BaseSettings):
                 )
             if not self.storage_root or self.storage_root == './storage':
                 self.storage_root = '/var/data/uploads'
+            if self.frontend_url == 'http://localhost:3000':
+                self.frontend_url = 'https://pgcb-portal-web.onrender.com'
             if self.require_email_verification is False:
                 # Explicitly allowed, but keep production configuration visible in docs/runbooks.
                 pass
