@@ -800,3 +800,152 @@ def upsert_setting(payload: SiteSettingUpdate, request: Request, admin: User = D
 def audit_logs(limit: int = 100, _: User = Depends(require_permission('audit.read')), db: Session = Depends(get_db)):
     rows = db.scalars(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(min(max(limit, 1), 300))).all()
     return [{'id': x.id, 'user_id': x.user_id, 'action': x.action, 'entity': x.entity, 'entity_id': x.entity_id, 'ip_address': x.ip_address, 'created_at': x.created_at} for x in rows]
+
+
+# ---- Member CSV Import (Batch Processing) ----
+@router.post('/imports/members/preview')
+async def preview_members_csv(
+    file: UploadFile = File(...),
+    _: User = Depends(require_permission('member.import')),
+    db: Session = Depends(get_db),
+):
+    """Parse and validate uploaded members CSV without writing to the database."""
+    content = await file.read()
+    try:
+        text_data = content.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        text_data = content.decode('latin-1')
+
+    reader = csv.DictReader(StringIO(text_data))
+    rows = []
+    seen_emails: set[str] = set()
+    valid_count = 0
+    error_count = 0
+
+    # Cache existing circles and users for fast validation
+    existing_circles = {c.name_bn.strip(): c.id for c in db.scalars(select(Circle)).all()}
+    existing_circles.update({c.name_en.strip(): c.id for c in db.scalars(select(Circle)).all() if c.name_en})
+    existing_users = set(db.scalars(select(User.email)).all())
+
+    for idx, row in enumerate(reader, start=2):
+        errors: list[str] = []
+        name_bn = (row.get('name_bn') or row.get('full_name_bn') or row.get('name') or '').strip()
+        name_en = (row.get('name_en') or row.get('full_name_en') or '').strip() or None
+        email = (row.get('email') or '').strip().lower()
+        phone = (row.get('phone') or '').strip() or None
+        employee_id = (row.get('employee_id') or '').strip() or None
+        designation_bn = (row.get('designation_bn') or row.get('designation') or '').strip() or None
+        circle_val = (row.get('circle') or row.get('circle_id') or '').strip()
+
+        if not name_bn:
+            errors.append('নাম (Bangla name) আবশ্যক (required)')
+        if not email:
+            errors.append('ইমেইল (Email) আবশ্যক (required)')
+        elif '@' not in email or '.' not in email.split('@')[-1]:
+            errors.append('সঠিক ইমেইল ফরম্যাট দিন (Invalid email format)')
+        elif email in seen_emails:
+            errors.append('একই ফাইলে ইমেইল একাধিকবার রয়েছে (Duplicate email in file)')
+        elif email in existing_users:
+            errors.append('ইমেইলটি ইতোমধ্যে নিবন্ধিত (Email already exists in database)')
+
+        circle_id = None
+        if circle_val:
+            if circle_val.isdigit():
+                circle_id = int(circle_val)
+            elif circle_val in existing_circles:
+                circle_id = existing_circles[circle_val]
+
+        is_valid = len(errors) == 0
+        if is_valid:
+            valid_count += 1
+            seen_emails.add(email)
+        else:
+            error_count += 1
+
+        rows.append({
+            'row_number': idx,
+            'name_bn': name_bn,
+            'name_en': name_en,
+            'email': email,
+            'phone': phone,
+            'employee_id': employee_id,
+            'designation_bn': designation_bn,
+            'circle_id': circle_id,
+            'valid': is_valid,
+            'errors': errors,
+        })
+
+    return {
+        'total_rows': len(rows),
+        'valid_count': valid_count,
+        'error_count': error_count,
+        'rows': rows,
+    }
+
+
+@router.post('/imports/members/commit')
+async def commit_members_csv(
+    payload: dict,
+    request: Request,
+    admin: User = Depends(require_permission('member.import')),
+    db: Session = Depends(get_db),
+):
+    """Commit valid member rows from preview into the system."""
+    rows_data = payload.get('rows', [])
+    if not rows_data:
+        raise HTTPException(400, 'No rows to import')
+
+    imported = 0
+    skipped = 0
+    now, expires = membership_dates()
+
+    for item in rows_data:
+        email = (item.get('email') or '').strip().lower()
+        if not email or db.scalar(select(User).where(User.email == email)):
+            skipped += 1
+            continue
+
+        name_bn = (item.get('name_bn') or '').strip()
+        if not name_bn:
+            skipped += 1
+            continue
+
+        temp_password = hash_password('Pgcb@2026!')
+        user = User(
+            email=email,
+            password_hash=temp_password,
+            name_bn=name_bn,
+            name_en=item.get('name_en'),
+            phone=item.get('phone'),
+            role='MEMBER',
+            is_active=True,
+            email_verified=True,
+        )
+        db.add(user)
+        db.flush()
+
+        member = Member(
+            user_id=user.id,
+            membership_id=next_membership_id(db),
+            employee_id=item.get('employee_id'),
+            designation_bn=item.get('designation_bn'),
+            designation_en=item.get('designation_en') or item.get('designation_bn'),
+            circle_id=item.get('circle_id'),
+            status='ACTIVE',
+            membership_type=item.get('membership_type', 'GENERAL'),
+            issue_date=now,
+            validity_date=expires,
+        )
+        db.add(member)
+        imported += 1
+
+    audit(db, admin, 'IMPORT_MEMBERS_CSV', 'MEMBER', None, _actor_ip(request))
+    db.commit()
+
+    return {
+        'ok': True,
+        'imported_count': imported,
+        'skipped_count': skipped,
+        'message': f'সফলভাবে {imported} জন সদস্য অন্তর্ভুক্ত করা হয়েছে।'
+    }
+

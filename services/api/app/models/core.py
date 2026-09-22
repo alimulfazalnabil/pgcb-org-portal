@@ -38,6 +38,8 @@ class Member(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), unique=True, index=True)
     membership_id: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True, index=True)
+    membership_type: Mapped[str] = mapped_column(String(50), default='GENERAL', index=True)
+    application_no: Mapped[str | None] = mapped_column(String(60), unique=True, nullable=True, index=True)
     designation_bn: Mapped[str | None] = mapped_column(String(200), nullable=True)
     designation_en: Mapped[str | None] = mapped_column(String(200), nullable=True)
     employee_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -330,3 +332,39 @@ class ContentWorkflow(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Notice(Base):
+    __tablename__ = 'notices'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title_bn: Mapped[str] = mapped_column(String(500), index=True)
+    title_en: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    content_bn: Mapped[str] = mapped_column(Text)
+    content_en: Mapped[str | None] = mapped_column(Text, nullable=True)
+    priority: Mapped[str] = mapped_column(String(20), default='NORMAL', index=True)  # NORMAL, IMPORTANT, URGENT
+    category: Mapped[str] = mapped_column(String(60), default='GENERAL', index=True)
+    attachment_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Document(Base):
+    __tablename__ = 'documents'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title_bn: Mapped[str] = mapped_column(String(500), index=True)
+    title_en: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    category: Mapped[str] = mapped_column(String(60), default='POLICIES', index=True)  # POLICIES, REPORTS, FORMS, GUIDELINES, ANNUAL_REPORTS, MEETINGS
+    description_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_path: Mapped[str] = mapped_column(String(1000))
+    file_size: Mapped[int] = mapped_column(Integer, default=0)
+    content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    version: Mapped[str] = mapped_column(String(30), default='1.0')
+    is_published: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    download_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+

@@ -4,12 +4,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.models import AuditLog, Member, Notification, User
 from app.core.config import settings
+from app.services.email import EmailService
 
 try:
     BASE_STORAGE = Path(settings.storage_root).resolve()
     BASE_STORAGE.mkdir(parents=True, exist_ok=True)
 except Exception:
-    BASE_STORAGE = Path(__file__).resolve().parents[1] / 'storage'
+    BASE_STORAGE = Path(__file__).resolve().parents[2] / 'storage'
     BASE_STORAGE.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_DOC_TYPES = {'NID', 'CERTIFICATE', 'PHOTO', 'OTHER'}
@@ -24,9 +25,6 @@ def notify(db: Session, user_id: int, title_bn: str, body_bn: str, notification_
 
 def next_membership_id(db: Session) -> str:
     # Return the next sequential membership id for the current year.
-    # Derives the sequence from the highest existing suffix rather than a row
-    # count, so deletions or gaps cannot make the generated id collide with an
-    # existing one (membership_id is uniquely constrained).
     year = datetime.utcnow().year
     prefix = f'PGD-{year}-'
     latest = db.scalar(
@@ -43,3 +41,15 @@ def next_membership_id(db: Session) -> str:
 def membership_dates():
     now = datetime.utcnow()
     return now, now + timedelta(days=365)
+
+__all__ = [
+    'audit',
+    'notify',
+    'next_membership_id',
+    'membership_dates',
+    'ALLOWED_DOC_TYPES',
+    'MAX_UPLOAD_BYTES',
+    'ALLOWED_CONTENT_TYPES',
+    'BASE_STORAGE',
+    'EmailService',
+]

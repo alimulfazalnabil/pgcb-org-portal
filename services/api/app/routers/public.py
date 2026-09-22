@@ -2,20 +2,95 @@ from datetime import datetime
 import hashlib, hmac
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 from fastapi.responses import FileResponse
 from pathlib import Path
 
+import uuid
+from pydantic import BaseModel, EmailStr, Field
 from app.core.config import settings
+from app.core.security import hash_password
 from app.db.session import get_db
-from app.models import Circular, Circle, CommitteeMember, ContactMessage, Event, Journal, MediaAsset, Member
+from app.models import Circular, Circle, CommitteeMember, ContactMessage, Document, Event, Journal, MediaAsset, Member, Notice, SiteSetting, User
 from app.schemas.content import ContactCreate
 from app.schemas.member import VerificationResponse
-from app.services import BASE_STORAGE
+from app.services import BASE_STORAGE, EmailService
 from app.utils.storage import is_local_path
 
 router = APIRouter(prefix='/public', tags=['public'])
+
+
+
+@router.get('/settings')
+def public_settings(db: Session = Depends(get_db)):
+    """Retrieve public institutional site settings."""
+    rows = db.scalars(select(SiteSetting)).all()
+    # Provide baseline defaults merged with database values
+    settings_dict = {
+        'org_name_bn': 'পাওয়ার গ্রিড কোম্পানি অব বাংলাদেশ (পিজিসিবি)',
+        'org_name_en': 'Power Grid Company of Bangladesh (PGCB)',
+        'contact_email': 'info@pgcb.gov.bd',
+        'contact_phone': '+880-2-9553663',
+        'address_bn': 'পিজিসিবি ভবন, আফতাবনগর, ঢাকা-১২১২',
+        'address_en': 'PGCB Bhaban, Aftabnagar, Dhaka-1212',
+    }
+    for row in rows:
+        if row.value is not None:
+            settings_dict[row.key] = row.value
+    return settings_dict
+
+
+@router.get('/members')
+def public_members(
+    q: str | None = Query(default=None, max_length=100),
+    circle_id: int | None = None,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Public member directory with privacy protection (PII excluded)."""
+    offset = (page - 1) * limit
+    stmt = (
+        select(Member)
+        .options(selectinload(Member.user), selectinload(Member.circle))
+        .where(Member.status == 'ACTIVE')
+        .order_by(Member.membership_id.asc())
+    )
+    if circle_id:
+        stmt = stmt.where(Member.circle_id == circle_id)
+    if q:
+        term = f'%{q.strip()}%'
+        stmt = stmt.where(
+            or_(
+                Member.membership_id.like(term),
+                Member.designation_bn.like(term),
+                Member.designation_en.like(term),
+                Member.employee_id.like(term),
+            )
+        )
+    
+    total = db.scalar(select(func.count(Member.id)).where(Member.status == 'ACTIVE')) or 0
+    members = db.scalars(stmt.offset(offset).limit(limit)).all()
+    
+    return {
+        'total': total,
+        'page': page,
+        'limit': limit,
+        'items': [
+            {
+                'membership_id': m.membership_id,
+                'name_bn': (m.user.name_bn if m.user else None) or getattr(m, 'full_name_bn', None) or '—',
+                'name_en': (m.user.name_en if m.user else None) or getattr(m, 'full_name_en', None),
+                'designation_bn': m.designation_bn,
+                'designation_en': m.designation_en,
+                'circle_name_bn': m.circle.name_bn if m.circle else None,
+                'circle_name_en': m.circle.name_en if m.circle else None,
+                'status': m.status,
+            }
+            for m in members
+        ],
+    }
 
 
 def _verification_response(m: Member) -> VerificationResponse:
@@ -165,10 +240,36 @@ def media(media_type: str | None = None, limit: int = 100, offset: int = 0, db: 
 
 @router.get('/search')
 def site_search(q: str = Query(..., min_length=2, max_length=100), limit: int = Query(30, ge=1, le=60), db: Session = Depends(get_db)):
-    """Search only publicly published content; never query members or private documents."""
+    """Search publicly published content: notices, circulars, journals, documents, events, media."""
     term = f'%{q.strip()}%'
-    per_type = max(5, min(20, limit // 3 or 5))
+    per_type = max(4, min(15, limit // 5 or 4))
     results: list[dict] = []
+
+    # Notices
+    notice_rows = db.scalars(
+        select(Notice)
+        .where(
+            Notice.is_published == True,
+            or_(Notice.title_bn.like(term), Notice.title_en.like(term), Notice.content_bn.like(term)),
+        )
+        .order_by(Notice.is_pinned.desc(), Notice.published_at.desc())
+        .limit(per_type)
+    ).all()
+    for x in notice_rows:
+        results.append({'type': 'NOTICE', 'id': x.id, 'title_bn': x.title_bn, 'summary_bn': x.content_bn[:150] if x.content_bn else '', 'date': x.published_at, 'href': f'/notices/{x.id}'})
+
+    # Documents
+    doc_rows = db.scalars(
+        select(Document)
+        .where(
+            Document.is_published == True,
+            or_(Document.title_bn.like(term), Document.title_en.like(term), Document.description_bn.like(term)),
+        )
+        .order_by(Document.created_at.desc())
+        .limit(per_type)
+    ).all()
+    for x in doc_rows:
+        results.append({'type': 'DOCUMENT', 'id': x.id, 'title_bn': x.title_bn, 'summary_bn': x.description_bn or '', 'date': x.created_at, 'href': f'/documents'})
 
     circular_rows = db.scalars(
         select(Circular)
@@ -224,16 +325,19 @@ def site_search(q: str = Query(..., min_length=2, max_length=100), limit: int = 
 
 @router.get('/stats')
 def public_stats(db: Session = Depends(get_db)):
-    from sqlalchemy import func
     active_members = db.scalar(select(func.count(Member.id)).where(Member.status == 'ACTIVE')) or 0
     active_circles = db.scalar(select(func.count(Circle.id)).where(Circle.active == True)) or 0
     publications = db.scalar(select(func.count(Journal.id)).where(Journal.is_published == True)) or 0
     upcoming_events = db.scalar(select(func.count(Event.id)).where(Event.is_published == True, Event.event_date >= datetime.utcnow())) or 0
+    notices_count = db.scalar(select(func.count(Notice.id)).where(Notice.is_published == True)) or 0
+    documents_count = db.scalar(select(func.count(Document.id)).where(Document.is_published == True)) or 0
     return {
         'active_members': active_members,
         'active_circles': active_circles,
         'publications': publications,
         'upcoming_events': upcoming_events,
+        'notices_count': notices_count,
+        'documents_count': documents_count,
     }
 
 @router.post('/contact')
@@ -241,3 +345,146 @@ def contact(payload: ContactCreate, db: Session = Depends(get_db)):
     item = ContactMessage(name=payload.name, email=payload.email.lower(), phone=payload.phone, subject=payload.subject, message=payload.message)
     db.add(item); db.commit(); db.refresh(item)
     return {'ok': True, 'message_id': item.id}
+
+
+class PublicMembershipApplyRequest(BaseModel):
+    name_bn: str = Field(min_length=2, max_length=200)
+    name_en: str | None = None
+    email: EmailStr
+    phone: str = Field(min_length=11, max_length=20)
+    employee_id: str | None = None
+    designation_bn: str = Field(min_length=2, max_length=200)
+    circle_id: int | None = None
+    diploma_institution: str | None = None
+    graduation_year: int | None = None
+    nid_number: str | None = None
+    date_of_birth: datetime | None = None
+    current_address: str | None = None
+    permanent_address: str | None = None
+    membership_type: str = "GENERAL"
+    password: str = Field(min_length=8, max_length=128)
+
+
+@router.post('/membership/apply')
+def public_membership_apply(payload: PublicMembershipApplyRequest, db: Session = Depends(get_db)):
+    """Public multi-step membership application submission."""
+    email = payload.email.lower().strip()
+    if db.scalar(select(User).where(User.email == email)):
+        raise HTTPException(
+            status_code=409,
+            detail='এই ইমেইল ঠিকানাটি দিয়ে ইতোমধ্যে একটি একাউন্ট খোলা আছে। অনুগ্রহ করে লগইন করুন।'
+        )
+
+    # Generate sequential or unique application tracking number
+    year = datetime.utcnow().year
+    app_no = f"APP-{year}-{uuid.uuid4().hex[:6].upper()}"
+
+    user = User(
+        email=email,
+        password_hash=hash_password(payload.password),
+        name_bn=payload.name_bn,
+        name_en=payload.name_en,
+        phone=payload.phone,
+        role='MEMBER',
+        is_active=True,
+        email_verified=False,
+    )
+    db.add(user)
+    db.flush()
+
+    member = Member(
+        user_id=user.id,
+        application_no=app_no,
+        employee_id=payload.employee_id,
+        designation_bn=payload.designation_bn,
+        designation_en=payload.name_en,
+        circle_id=payload.circle_id,
+        diploma_institution=payload.diploma_institution,
+        graduation_year=payload.graduation_year,
+        nid_number=payload.nid_number,
+        date_of_birth=payload.date_of_birth,
+        current_address=payload.current_address,
+        permanent_address=payload.permanent_address,
+        membership_type=payload.membership_type,
+        status='SUBMITTED',
+        application_note='আবেদনটি সফলভাবে জমা হয়েছে এবং প্রাথমিক পর্যালোচনার অপেক্ষায় রয়েছে।',
+    )
+    db.add(member)
+    db.commit()
+
+    # Send confirmation email
+    try:
+        EmailService.send_application_submitted(
+            to_email=user.email,
+            name=user.name_bn,
+            application_no=app_no,
+        )
+    except Exception:
+        pass
+
+    return {
+        'ok': True,
+        'application_no': app_no,
+        'message': 'আপনার আবেদনটি সফলভাবে জমা হয়েছে। ট্র্যাকিং নম্বরটি সংরক্ষণ করুন।',
+    }
+
+
+@router.get('/membership/track/{application_no}')
+def track_membership_application(application_no: str, db: Session = Depends(get_db)):
+    """Track the verification and review progress of a membership application."""
+    normalized_app_no = application_no.strip().upper()
+    member = db.scalar(
+        select(Member)
+        .options(selectinload(Member.circle), selectinload(Member.user))
+        .where(Member.application_no == normalized_app_no)
+    )
+    if not member:
+        raise HTTPException(
+            status_code=404,
+            detail=f"আবেদন নম্বর '{application_no}' সঠিক নয় বা ডাটাবেজে পাওয়া যায়নি।"
+        )
+
+    user_name = member.user.name_bn if member.user else ''
+    masked_name = user_name[0] + '***' if len(user_name) > 1 else '—'
+
+    # Build clear chronological steps
+    is_active = member.status == 'ACTIVE'
+    is_rejected = member.status == 'REJECTED'
+    is_under_review = member.status in ('UNDER_REVIEW', 'ACTION_REQUIRED')
+
+    timeline = [
+        {
+            'step': 1,
+            'title': 'আবেদন দাখিল সম্পন্ন (Application Submitted)',
+            'status': 'COMPLETED',
+            'date': member.created_at.strftime('%d-%m-%Y %H:%M') if member.created_at else None,
+            'description': 'আবেদনপত্র সিস্টেমে সফলভাবে গৃহীত হয়েছে।'
+        },
+        {
+            'step': 2,
+            'title': 'নথি ও তথ্যাদি যাচাইকরণ (Document Verification)',
+            'status': 'COMPLETED' if is_active else ('IN_PROGRESS' if is_under_review or member.status == 'SUBMITTED' else 'PENDING'),
+            'date': member.updated_at.strftime('%d-%m-%Y %H:%M') if member.updated_at and member.status != 'SUBMITTED' else None,
+            'description': 'সার্কেল ও কেন্দ্রীয় কর্মকর্তা কর্তৃক এনআইডি ও শিক্ষাগত যোগ্যতা পর্যালোচনা।'
+        },
+        {
+            'step': 3,
+            'title': 'কার্যনির্বাহী পরিষদ অনুমোদন (Final Approval)',
+            'status': 'COMPLETED' if is_active else ('REJECTED' if is_rejected else 'PENDING'),
+            'date': member.issue_date.strftime('%d-%m-%Y') if member.issue_date and is_active else None,
+            'description': 'সদস্যপদ সক্রিয়করণ ও ডিজিটাল সদস্য আইডি প্রদান।'
+        }
+    ]
+
+    return {
+        'application_no': member.application_no,
+        'status': member.status,
+        'applicant_name_masked': masked_name,
+        'circle_bn': member.circle.name_bn if member.circle else 'অনির্ধারিত',
+        'submission_date': member.created_at.strftime('%d-%m-%Y') if member.created_at else None,
+        'application_note': member.application_note,
+        'timeline': timeline,
+        'membership_id': member.membership_id if is_active else None,
+    }
+
+

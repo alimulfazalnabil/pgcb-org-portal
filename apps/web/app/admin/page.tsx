@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { MemberDataTable } from '@/components/MemberDataTable';
 
-type Tab = 'overview'|'reports'|'members'|'circulars'|'circles'|'committee'|'journals'|'events'|'registrations'|'payments'|'media'|'messages'|'notifications'|'users'|'settings'|'security'|'audit'|'workflows'|'certificates';
+type Tab = 'overview'|'reports'|'members'|'notices'|'documents'|'circulars'|'circles'|'committee'|'journals'|'events'|'registrations'|'payments'|'media'|'messages'|'notifications'|'users'|'settings'|'security'|'audit'|'workflows'|'certificates';
 const api='/backend/api/v1';
 
 async function apiFetch(path:string, init?:RequestInit){
@@ -16,6 +16,8 @@ const put=(path:string,body:unknown)=>apiFetch(path,{method:'PUT',headers:{'Cont
 const patch=(path:string,body:unknown)=>apiFetch(path,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
 const roles=['SUPER_ADMIN','CONTENT_EDITOR','MEMBERSHIP_OFFICER','CIRCLE_ADMIN','FINANCE_OFFICER','AUDITOR','MEMBER'];
+const emptyNotice={category:'GENERAL',title_bn:'',title_en:'',content_bn:'',content_en:'',priority:'NORMAL',attachment_url:'',is_pinned:false,is_published:true};
+const emptyDoc={category:'FORMS',title_bn:'',title_en:'',description_bn:'',file_path:'',file_size:0,content_type:'',version:'1.0',is_published:true};
 const emptyCircular={category:'GENERAL',reference_no:'',title_bn:'',title_en:'',summary_bn:'',document_url:'',published_at:null,is_published:false,priority:0};
 const emptyCircle={name_bn:'',name_en:'',description_bn:'',active:true};
 const emptyCommittee={name_bn:'',name_en:'',designation_bn:'',designation_en:'',message_bn:'',photo_url:'',circle_id:null,term_start:2025,term_end:2027,display_order:1,active:true};
@@ -30,6 +32,8 @@ function Status({value}:{value:string}){return <span className={`status-pill sta
 export default function AdminPage(){
   const [me,setMe]=useState<any>(null), [tab,setTab]=useState<Tab>('overview'), [stats,setStats]=useState<any>({}), [report,setReport]=useState<any>(null), [permissions,setPermissions]=useState<string[]>([]), [error,setError]=useState(''), [notice,setNotice]=useState('');
   const [members,setMembers]=useState<any[]>([]), [selectedMember,setSelectedMember]=useState<any>(null), [membersQ,setMembersQ]=useState(''), [memberStatus,setMemberStatus]=useState('');
+  const [notices,setNotices]=useState<any[]>([]), [noticeForm,setNoticeForm]=useState<any>(emptyNotice), [editingNotice,setEditingNotice]=useState<number|null>(null);
+  const [docItems,setDocItems]=useState<any[]>([]), [docForm,setDocForm]=useState<any>(emptyDoc), [editingDoc,setEditingDoc]=useState<number|null>(null), [docUploadFile,setDocUploadFile]=useState<File|null>(null), [docUploading,setDocUploading]=useState(false);
   const [circulars,setCirculars]=useState<any[]>([]), [circular,setCircular]=useState<any>(emptyCircular), [editingCircular,setEditingCircular]=useState<number|null>(null);
   const [circles,setCircles]=useState<any[]>([]), [circle,setCircle]=useState<any>(emptyCircle), [editingCircle,setEditingCircle]=useState<number|null>(null);
   const [committee,setCommittee]=useState<any[]>([]), [committeeForm,setCommitteeForm]=useState<any>(emptyCommittee), [editingCommittee,setEditingCommittee]=useState<number|null>(null);
@@ -54,6 +58,8 @@ export default function AdminPage(){
       overview:async()=>{},
       reports:async()=>setReport(await apiFetch('/admin/reports/overview')),
       members:async()=>setMembers(await apiFetch(`/admin/members?limit=100&q=${encodeURIComponent(membersQ)}${memberStatus?`&status=${memberStatus}`:''}`)),
+      notices:async()=>setNotices(await apiFetch('/notices')),
+      documents:async()=>setDocItems(await apiFetch('/documents')),
       circulars:async()=>setCirculars(await apiFetch('/admin/circulars')),
       circles:async()=>setCircles(await apiFetch('/admin/circles')),
       committee:async()=>setCommittee(await apiFetch('/admin/committee')),
@@ -77,6 +83,12 @@ export default function AdminPage(){
   async function memberAction(id:number,action:string){setBusy(true);try{await post(`/admin/members/${id}/review?action=${action}`);msg(`সদস্যের স্ট্যাটাস ${action} সম্পন্ন হয়েছে।`);setMembers(await apiFetch(`/admin/members?limit=100&q=${encodeURIComponent(membersQ)}${memberStatus?`&status=${memberStatus}`:''}`));setStats(await apiFetch('/admin/stats'));if(selectedMember?.id===id)setSelectedMember(await apiFetch(`/admin/members/${id}`));}catch(e){fail(e)}finally{setBusy(false)}}
   async function openMember(id:number){try{setSelectedMember(await apiFetch(`/admin/members/${id}`))}catch(e){fail(e)}}
   async function reviewDoc(id:number,action:string){try{await post(`/admin/documents/${id}/review?action=${action}`);msg('নথির review status আপডেট হয়েছে।');if(selectedMember)setSelectedMember({...selectedMember,documents:selectedMember.documents.map((d:any)=>d.id===id?{...d,review_status:action}:d)})}catch(e){fail(e)}}
+
+  async function saveNotice(e:FormEvent){e.preventDefault();setBusy(true);try{if(editingNotice)await put(`/notices/${editingNotice}`,noticeForm);else await post('/notices',noticeForm);setNoticeForm(emptyNotice);setEditingNotice(null);setNotices(await apiFetch('/notices'));msg(editingNotice?'নোটিশ আপডেট হয়েছে।':'নতুন নোটিশ তৈরি হয়েছে।');}catch(e){fail(e)}finally{setBusy(false)}}
+  async function deleteNotice(id:number){if(!confirm('নোটিশটি মুছে ফেলতে চান?'))return;setBusy(true);try{await apiFetch(`/notices/${id}`,{method:'DELETE'});setNotices(await apiFetch('/notices'));msg('নোটিশ মুছে ফেলা হয়েছে।');}catch(e){fail(e)}finally{setBusy(false)}}
+
+  async function saveDocumentItem(e:FormEvent){e.preventDefault();setBusy(true);try{let payload={...docForm};if(docUploadFile){setDocUploading(true);const fd=new FormData();fd.append('file',docUploadFile);const uploaded=await apiFetch('/documents/upload',{method:'POST',body:fd});payload.file_path=uploaded.file_path;payload.file_size=uploaded.file_size;payload.content_type=uploaded.content_type;setDocUploadFile(null);setDocUploading(false);}if(editingDoc)await put(`/documents/${editingDoc}`,payload);else await post('/documents',payload);setDocForm(emptyDoc);setEditingDoc(null);setDocItems(await apiFetch('/documents'));msg(editingDoc?'নথি আপডেট হয়েছে।':'নতুন অফিসিয়াল নথি সংরক্ষিত হয়েছে।');}catch(e){setDocUploading(false);fail(e)}finally{setBusy(false)}}
+  async function deleteDocumentItem(id:number){if(!confirm('নথিটি মুছে ফেলতে চান?'))return;setBusy(true);try{await apiFetch(`/documents/${id}`,{method:'DELETE'});setDocItems(await apiFetch('/documents'));msg('নথি মুছে ফেলা হয়েছে।');}catch(e){fail(e)}finally{setBusy(false)}}
 
   async function saveCircular(e:FormEvent){e.preventDefault();setBusy(true);try{const payload={...circular,published_at:circular.is_published?(circular.published_at||new Date().toISOString()):null}; if(editingCircular)await put(`/admin/circulars/${editingCircular}`,payload);else await post('/admin/circulars',payload);setCircular(emptyCircular);setEditingCircular(null);setCirculars(await apiFetch('/admin/circulars'));msg(editingCircular?'সার্কুলার আপডেট হয়েছে।':'সার্কুলার প্রকাশ/সংরক্ষণ হয়েছে।')}catch(e){fail(e)}finally{setBusy(false)}}
   async function archiveCircular(id:number){if(!confirm('সার্কুলারটি archive করবেন?'))return;try{await apiFetch(`/admin/circulars/${id}`,{method:'DELETE'});setCirculars(await apiFetch('/admin/circulars'));msg('সার্কুলার archive হয়েছে।')}catch(e){fail(e)}}
@@ -105,6 +117,8 @@ export default function AdminPage(){
     ['overview','ড্যাশবোর্ড','content.read'],
     ['reports','রিপোর্ট','content.read'],
     ['members','সদস্য','member.read'],
+    ['notices','জরুরি ও সাধারণ নোটিশ','notice.read'],
+    ['documents','অফিসিয়াল ডকুমেন্টস','document.read'],
     ['circulars','সার্কুলার','content.read'],
     ['circles','গ্রিড সার্কেল','circle.read'],
     ['committee','কমিটি','content.read'],
@@ -156,6 +170,175 @@ export default function AdminPage(){
           onReviewDoc={reviewDoc}
           apiBase={api}
         />}
+
+        {tab==='notices'&&<div className="crud-grid">
+          <div className="card card-body">
+            <div className="split-head">
+              <div>
+                <span className="kicker orange">NOTICES & ALERTS</span>
+                <h2>{editingNotice ? 'নোটিশ সম্পাদনা' : 'নতুন নোটিশ তৈরি'}</h2>
+              </div>
+              {editingNotice && <button className="btn btn-light" onClick={()=>{setEditingNotice(null);setNoticeForm(emptyNotice)}}>নতুন</button>}
+            </div>
+            <form className="form-stack" onSubmit={saveNotice}>
+              <div className="form-grid">
+                <Field label="Category">
+                  <select value={noticeForm.category} onChange={e=>setNoticeForm({...noticeForm, category: e.target.value})}>
+                    <option>GENERAL</option>
+                    <option>EMERGENCY</option>
+                    <option>ELECTION</option>
+                    <option>ADVISORY</option>
+                    <option>EVENT</option>
+                  </select>
+                </Field>
+                <Field label="Priority (জরুরি মাত্রা)">
+                  <select value={noticeForm.priority} onChange={e=>setNoticeForm({...noticeForm, priority: e.target.value})}>
+                    <option value="NORMAL">NORMAL</option>
+                    <option value="HIGH">HIGH</option>
+                    <option value="URGENT">URGENT (শীর্ষ ব্যানার)</option>
+                  </select>
+                </Field>
+              </div>
+              <Field label="বাংলা শিরোনাম (আবশ্যক)">
+                <input required value={noticeForm.title_bn} onChange={e=>setNoticeForm({...noticeForm, title_bn: e.target.value})} placeholder="নোটিশের শিরোনাম"/>
+              </Field>
+              <Field label="English Title">
+                <input value={noticeForm.title_en||''} onChange={e=>setNoticeForm({...noticeForm, title_en: e.target.value})} placeholder="Title in English"/>
+              </Field>
+              <Field label="বাংলা বিস্তারিত বিবরণ (আবশ্যক)">
+                <textarea required rows={5} value={noticeForm.content_bn} onChange={e=>setNoticeForm({...noticeForm, content_bn: e.target.value})} placeholder="নোটিশের বিস্তারিত বার্তা লিখুন..."/>
+              </Field>
+              <Field label="English Content">
+                <textarea rows={3} value={noticeForm.content_en||''} onChange={e=>setNoticeForm({...noticeForm, content_en: e.target.value})} placeholder="Notice details in English..."/>
+              </Field>
+              <Field label="সংযুক্ত ফাইল / URL">
+                <input value={noticeForm.attachment_url||''} onChange={e=>setNoticeForm({...noticeForm, attachment_url: e.target.value})} placeholder="https://... বা /uploads/..."/>
+              </Field>
+              <div className="form-grid">
+                <label className="check-row">
+                  <input type="checkbox" checked={noticeForm.is_pinned} onChange={e=>setNoticeForm({...noticeForm, is_pinned: e.target.checked})}/>
+                  পিন করুন (শীর্ষে থাকবে)
+                </label>
+                <label className="check-row">
+                  <input type="checkbox" checked={noticeForm.is_published} onChange={e=>setNoticeForm({...noticeForm, is_published: e.target.checked})}/>
+                  তাত্ক্ষণিক প্রকাশ করুন
+                </label>
+              </div>
+              <button className="btn btn-green" disabled={busy}>{editingNotice ? 'আপডেট করুন' : 'প্রকাশ/সংরক্ষণ করুন'}</button>
+            </form>
+          </div>
+          <div className="card card-body">
+            <div className="split-head">
+              <div>
+                <span className="kicker blue">REGISTRY</span>
+                <h2>নোটিশ তালিকা ({notices.length})</h2>
+              </div>
+              <button className="btn btn-light" onClick={()=>apiFetch('/notices').then(setNotices).catch(fail)}>Refresh</button>
+            </div>
+            <div className="content-list">
+              {notices.length ? notices.map(n => (
+                <article className="content-row" key={n.id}>
+                  <div>
+                    <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:4}}>
+                      <span className={`tag ${n.priority==='URGENT'?'red':n.priority==='HIGH'?'orange':'blue'}`}>{n.priority}</span>
+                      <span className="tag green">{n.category}</span>
+                      {n.is_pinned && <span className="tag orange">PINNED</span>}
+                      {!n.is_published && <span className="tag gray">DRAFT</span>}
+                    </div>
+                    <h3>{n.title_bn}</h3>
+                    <small>{new Date(n.created_at).toLocaleDateString('bn-BD')} {n.attachment_url ? '· [সংযুক্তি আছে]' : ''}</small>
+                  </div>
+                  <div className="row-actions compact">
+                    <button className="btn btn-light" onClick={()=>{setEditingNotice(n.id);setNoticeForm({...n})}}>Edit</button>
+                    <button className="btn btn-light" onClick={()=>deleteNotice(n.id)}>Delete</button>
+                  </div>
+                </article>
+              )) : <Empty children="কোনো নোটিশ পাওয়া যায়নি।"/>}
+            </div>
+          </div>
+        </div>}
+
+        {tab==='documents'&&<div className="crud-grid">
+          <div className="card card-body">
+            <div className="split-head">
+              <div>
+                <span className="kicker green">DOCUMENTS & FORMS</span>
+                <h2>{editingDoc ? 'নথি সম্পাদনা' : 'নতুন অফিসিয়াল নথি আপলোড'}</h2>
+              </div>
+              {editingDoc && <button className="btn btn-light" onClick={()=>{setEditingDoc(null);setDocForm(emptyDoc)}}>নতুন</button>}
+            </div>
+            <form className="form-stack" onSubmit={saveDocumentItem}>
+              <div className="form-grid">
+                <Field label="Category">
+                  <select value={docForm.category} onChange={e=>setDocForm({...docForm, category: e.target.value})}>
+                    <option>FORMS</option>
+                    <option>CONSTITUTION</option>
+                    <option>BYLAWS</option>
+                    <option>WELFARE</option>
+                    <option>CIRCULAR</option>
+                    <option>REPORT</option>
+                  </select>
+                </Field>
+                <Field label="Version (সংস্করণ)">
+                  <input value={docForm.version||'1.0'} onChange={e=>setDocForm({...docForm, version: e.target.value})}/>
+                </Field>
+              </div>
+              <Field label="বাংলা শিরোনাম (আবশ্যক)">
+                <input required value={docForm.title_bn} onChange={e=>setDocForm({...docForm, title_bn: e.target.value})} placeholder="নথির শিরোনাম"/>
+              </Field>
+              <Field label="English Title">
+                <input value={docForm.title_en||''} onChange={e=>setDocForm({...docForm, title_en: e.target.value})} placeholder="Document title"/>
+              </Field>
+              <Field label="সংক্ষিপ্ত বিবরণ">
+                <textarea rows={3} value={docForm.description_bn||''} onChange={e=>setDocForm({...docForm, description_bn: e.target.value})} placeholder="নথির উদ্দেশ্য ও বিবরণ"/>
+              </Field>
+              <Field label="ফাইল আপলোড (PDF/DOCX/Image)">
+                <input type="file" onChange={e=>setDocUploadFile(e.target.files?.[0]||null)}/>
+              </Field>
+              {docForm.file_path && (
+                <Field label="বিদ্যমান ফাইল পাথ">
+                  <input readOnly value={docForm.file_path} style={{fontSize:11,background:'#f4f4f5'}}/>
+                </Field>
+              )}
+              <label className="check-row">
+                <input type="checkbox" checked={docForm.is_published} onChange={e=>setDocForm({...docForm, is_published: e.target.checked})}/>
+                প্রকাশিত রাখুন (পাবলিক পোর্টালে ডাউনলোডের জন্য উন্মুক্ত)
+              </label>
+              <button className="btn btn-green" disabled={busy||docUploading}>
+                {docUploading ? 'ফাইল আপলোড হচ্ছে...' : editingDoc ? 'আপডেট করুন' : 'সংরক্ষণ করুন'}
+              </button>
+            </form>
+          </div>
+          <div className="card card-body">
+            <div className="split-head">
+              <div>
+                <span className="kicker blue">REGISTRY</span>
+                <h2>ডকুমেন্ট রেজিস্ট্রি ({docItems.length})</h2>
+              </div>
+              <button className="btn btn-light" onClick={()=>apiFetch('/documents').then(setDocItems).catch(fail)}>Refresh</button>
+            </div>
+            <div className="content-list">
+              {docItems.length ? docItems.map(d => (
+                <article className="content-row" key={d.id}>
+                  <div>
+                    <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:4}}>
+                      <span className="tag blue">{d.category}</span>
+                      <span className="tag orange">v{d.version}</span>
+                      <span className="tag green">{d.download_count} downloads</span>
+                    </div>
+                    <h3>{d.title_bn}</h3>
+                    <small>{d.title_en || 'Official Document'} · {new Date(d.created_at).toLocaleDateString('bn-BD')}</small>
+                  </div>
+                  <div className="row-actions compact">
+                    <a className="btn btn-light" href={`${api}/documents/${d.id}/download`} target="_blank">ডাউনলোড</a>
+                    <button className="btn btn-light" onClick={()=>{setEditingDoc(d.id);setDocForm({...d})}}>Edit</button>
+                    <button className="btn btn-light" onClick={()=>deleteDocumentItem(d.id)}>Delete</button>
+                  </div>
+                </article>
+              )) : <Empty children="কোনো নথি পাওয়া যায়নি।"/>}
+            </div>
+          </div>
+        </div>}
 
         {tab==='circulars'&&<div className="crud-grid"><div className="card card-body"><div className="split-head"><div><span className="kicker green">CONTENT</span><h2>{editingCircular?'সার্কুলার সম্পাদনা':'নতুন সার্কুলার'}</h2></div>{editingCircular&&<button className="btn btn-light" onClick={()=>{setEditingCircular(null);setCircular(emptyCircular)}}>নতুন</button>}</div><form className="form-stack" onSubmit={saveCircular}><div className="form-grid"><Field label="Category"><select value={circular.category} onChange={e=>setCircular({...circular,category:e.target.value})}><option>GENERAL</option><option>CIRCULAR</option><option>WELFARE</option><option>OFFICE_ORDER</option><option>EVENT</option></select></Field><Field label="Reference No"><input value={circular.reference_no||''} onChange={e=>setCircular({...circular,reference_no:e.target.value})}/></Field></div><Field label="বাংলা শিরোনাম"><input required value={circular.title_bn} onChange={e=>setCircular({...circular,title_bn:e.target.value})}/></Field><Field label="English title"><input value={circular.title_en||''} onChange={e=>setCircular({...circular,title_en:e.target.value})}/></Field><Field label="সারাংশ"><textarea rows={5} value={circular.summary_bn||''} onChange={e=>setCircular({...circular,summary_bn:e.target.value})}/></Field><Field label="PDF / document URL"><input value={circular.document_url||''} onChange={e=>setCircular({...circular,document_url:e.target.value})}/></Field><div className="form-grid"><Field label="Priority"><input type="number" value={circular.priority} onChange={e=>setCircular({...circular,priority:Number(e.target.value)})}/></Field><Field label="Publication"><label className="check-row"><input type="checkbox" checked={circular.is_published} onChange={e=>setCircular({...circular,is_published:e.target.checked})}/> Published</label></Field></div><button className="btn btn-green" disabled={busy}>{editingCircular?'আপডেট করুন':'সংরক্ষণ করুন'}</button></form></div><div className="card card-body"><div className="split-head"><div><span className="kicker blue">REGISTRY</span><h2>সার্কুলার তালিকা</h2></div><span className="tag green">{circulars.length} items</span></div><div className="content-list">{circulars.length?circulars.map(c=><article className="content-row" key={c.id}><div><span className="tag blue">{c.category}</span><h3>{c.title_bn}</h3><small>{c.reference_no||'No reference'} · {c.published_at?new Date(c.published_at).toLocaleDateString('bn-BD'):'Draft'}</small></div><div className="row-actions compact"><button className="btn btn-light" onClick={()=>{setEditingCircular(c.id);setCircular({...c,published_at:c.published_at})}}>Edit</button><button className="btn btn-light" onClick={()=>archiveCircular(c.id)}>Archive</button></div></article>):<Empty/>}</div></div></div>}
 

@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from fastapi import Request
 from app.models.core import User
 from app.db.session import Base
-from sqlalchemy import Column, String, DateTime, JSON
+from sqlalchemy import Column, String, DateTime, JSON, Integer
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 import uuid
 from datetime import datetime
@@ -10,11 +10,11 @@ from datetime import datetime
 JSON_VARIANT = JSON().with_variant(JSONB, "postgresql")
 
 class AuditLog(Base):
-    __tablename__ = "audit_logs"
+    __tablename__ = "security_audit_logs"
     __table_args__ = {'extend_existing': True}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), nullable=True) # Nullable for anonymous actions (e.g. failed login)
+    user_id = Column(Integer, nullable=True) # Nullable for anonymous actions (e.g. failed login)
     role = Column(String, nullable=True)
     
     action = Column(String, index=True, nullable=False) # e.g., "APPROVE_MEMBER", "PUBLISH_CIRCULAR"

@@ -57,11 +57,27 @@ def test_review_member_transitions_and_audit():
     cookies = login()
     db = SessionLocal()
     try:
-        member = db.query(Member).first()
-        member_id = member.id
-        member.status = 'PENDING'
-        member.membership_id = None
+        ts = int(datetime.utcnow().timestamp())
+        user = User(
+            email=f'transition.{ts}@example.org',
+            password_hash=hash_password('TestPass123!'),
+            name_bn='ট্রানজিশন পরীক্ষক',
+            name_en='Transition Tester',
+            phone='01799887766',
+            role='MEMBER'
+        )
+        db.add(user)
+        db.flush()
+        member = Member(
+            user_id=user.id,
+            status='PENDING',
+            employee_id=f'EMP-{ts}',
+            designation_bn='সহকারী প্রকৌশলী'
+        )
+        db.add(member)
         db.commit()
+        db.refresh(member)
+        member_id = member.id
     finally:
         db.close()
 

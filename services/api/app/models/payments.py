@@ -1,7 +1,7 @@
 import uuid
 import enum
 from datetime import datetime
-from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Enum, Boolean, JSON
+from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Enum, Boolean, JSON, Integer
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.db.session import Base
@@ -24,11 +24,11 @@ class PaymentProviderType(str, enum.Enum):
     SSLCOMMERZ = "SSLCOMMERZ"
 
 class PaymentTransaction(Base):
-    __tablename__ = "payment_transactions"
+    __tablename__ = "gateway_payment_transactions"
     __table_args__ = {'extend_existing': True}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="SET NULL"), nullable=True)
+    member_id = Column(Integer, ForeignKey("members.id", ondelete="SET NULL"), nullable=True)
     
     amount = Column(Float, nullable=False)
     currency = Column(String(3), default="BDT")
@@ -48,7 +48,7 @@ class PaymentWebhook(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     provider = Column(Enum(PaymentProviderType), nullable=False)
-    transaction_id = Column(UUID(as_uuid=True), ForeignKey("payment_transactions.id"), nullable=True)
+    transaction_id = Column(UUID(as_uuid=True), ForeignKey("gateway_payment_transactions.id"), nullable=True)
     
     payload = Column(JSON_VARIANT, nullable=False) # Store the raw payload for audit/replay
     is_processed = Column(Boolean, default=False)

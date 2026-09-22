@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.middleware import SecurityMiddleware
 from app.db.session import Base, engine, SessionLocal
 from app.models import *  # noqa: F401,F403
-from app.routers import admin, auth, public, membership, card
+from app.routers import admin, auth, public, membership, card, notices, documents
 from app.routers.event_registration import router as event_registration_router
 from app.routers.events_public import router as event_public_router
 from app.routers.payments import router as payments_router
@@ -86,13 +86,10 @@ app.add_middleware(
 # Production environments use Alembic preDeployCommand (alembic upgrade head).
 if settings.app_env.lower() in ('development', 'test') and settings.database_url.startswith('sqlite'):
     try:
-        for table in Base.metadata.sorted_tables:
-            try:
-                table.create(bind=engine, checkfirst=True)
-            except Exception as exc:
-                logger.debug("Skipped existing table/index for %s: %s", table.name, exc)
+        Base.metadata.create_all(bind=engine, checkfirst=True)
     except Exception as exc:
-        logger.warning("Database schema auto-creation notice: %s", exc)
+        logger.debug("Database schema auto-creation notice: %s", exc)
+
 
 app.include_router(auth.router, prefix='/api/v1')
 app.include_router(public.router, prefix='/api/v1')
@@ -105,6 +102,9 @@ app.include_router(payments_router, prefix='/api/v1')
 app.include_router(payment_webhooks_router, prefix='/api/v1')
 app.include_router(certificates_router, prefix='/api/v1')
 app.include_router(workflows_router, prefix='/api/v1')
+app.include_router(notices.router, prefix='/api/v1')
+app.include_router(documents.router, prefix='/api/v1')
+
 
 @app.get('/')
 @app.head('/')

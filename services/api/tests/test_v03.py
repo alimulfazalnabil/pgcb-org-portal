@@ -8,9 +8,7 @@ from app.db.session import Base, engine
 from app.db.seed import main as seed_main
 from app.routers.card import verification_token
 
-Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
-seed_main()
 client = TestClient(app)
 
 
@@ -41,14 +39,20 @@ def test_password_reset_flow():
     assert r.status_code == 200
     r = client.post('/api/v1/auth/login', json={'email': 'member@example.org', 'password': 'NewPassword123!'})
     assert r.status_code == 200
+    # Reset back to ChangeMe123! so other tests can login with default credential
+    r = client.post('/api/v1/auth/password-reset/request', json={'email': 'member@example.org'})
+    token = r.json()['reset_token']
+    client.post('/api/v1/auth/password-reset/confirm', json={'token': token, 'password': 'ChangeMe123!'})
 
 
 def test_admin_crud_and_permissions():
+    from datetime import datetime
+    ts = int(datetime.utcnow().timestamp())
     cookies = login('admin@example.org')
-    r = client.post('/api/v1/admin/circles', cookies=cookies, json={'name_bn': 'টেস্ট সার্কেল', 'name_en': 'Test Circle', 'description_bn': 'Test', 'active': True})
+    r = client.post('/api/v1/admin/circles', cookies=cookies, json={'name_bn': f'টেস্ট সার্কেল {ts}', 'name_en': f'Test Circle {ts}', 'description_bn': 'Test', 'active': True})
     assert r.status_code == 200
     circle_id = r.json()['id']
-    r = client.put(f'/api/v1/admin/circles/{circle_id}', cookies=cookies, json={'name_bn': 'টেস্ট সার্কেল আপডেট', 'name_en': 'Test Circle Updated', 'description_bn': 'Test 2', 'active': True})
+    r = client.put(f'/api/v1/admin/circles/{circle_id}', cookies=cookies, json={'name_bn': f'টেস্ট সার্কেল আপডেট {ts}', 'name_en': f'Test Circle Updated {ts}', 'description_bn': 'Test 2', 'active': True})
     assert r.status_code == 200
     r = client.delete(f'/api/v1/admin/circles/{circle_id}', cookies=cookies)
     assert r.status_code == 200

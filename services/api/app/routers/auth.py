@@ -12,7 +12,8 @@ from app.core.tokens import hash_reset_token, random_token, reset_expiry
 from app.core.deps import current_user
 from app.db.session import get_db
 from app.models import EmailVerificationToken, Member, PasswordResetToken, User, UserSession
-from app.schemas.auth import LoginRequest, MeResponse, PasswordResetConfirm, PasswordResetRequest, RegisterRequest, RegisterResponse, VerifyEmailRequest
+from app.schemas.auth import LoginRequest, MeResponse, PasswordChangeRequest, PasswordResetConfirm, PasswordResetRequest, RegisterRequest, RegisterResponse, VerifyEmailRequest
+from app.services import EmailService, audit
 
 router = APIRouter(prefix='/auth', tags=['auth'])
 
@@ -191,3 +192,28 @@ def confirm_password_reset(p: PasswordResetConfirm, db: Session = Depends(get_db
     db.execute(delete(UserSession).where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None)))
     db.commit()
     return {'ok': True}
+
+
+@router.post('/password/change')
+def change_password(p: PasswordChangeRequest, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Allow an authenticated user to change their password."""
+    if not verify_password(p.old_password, user.password_hash):
+        raise HTTPException(status_code=400, detail='Current password does not match')
+    
+    user.password_hash = hash_password(p.new_password)
+    user.updated_at = datetime.utcnow()
+    
+    ip_addr = request.client.host if request.client else 'unknown'
+    audit(db, user, 'PASSWORD_CHANGE', 'user', user.id, ip=ip_addr)
+    db.commit()
+    
+    # Send security notification
+    EmailService.send_security_alert(
+        to_email=user.email,
+        name=user.name_bn or user.email,
+        action_desc='পাসওয়ার্ড পরিবর্তন (Password Change)',
+        time_str=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'),
+        ip_addr=ip_addr,
+    )
+    return {'ok': True, 'message': 'Password changed successfully'}
+

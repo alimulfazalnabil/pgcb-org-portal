@@ -1,27 +1,696 @@
 'use client';
-import { useEffect,useState } from 'react';
-import Link from 'next/link';
 
-export default function Portal(){
- const [me,setMe]=useState<any>(); const [profile,setProfile]=useState<any>(); const [circles,setCircles]=useState<any[]>([]); const [application,setApplication]=useState<any>(); const [docs,setDocs]=useState<any[]>([]); const [notes,setNotes]=useState<any[]>([]); const [registrations,setRegistrations]=useState<any[]>([]); const [payments,setPayments]=useState<any[]>([]); const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false); const [uploading,setUploading]=useState(false);
- async function load(){
-  const meRes=await fetch('/backend/api/v1/auth/me'); if(!meRes.ok){setLoading(false);return;} const meData=await meRes.json(); setMe(meData);
-  const [p,a,d,n,c,regRes,pay]=await Promise.all([fetch('/backend/api/v1/member/profile'),fetch('/backend/api/v1/member/application'),fetch('/backend/api/v1/member/documents'),fetch('/backend/api/v1/member/notifications'),fetch('/backend/api/v1/public/circles'),fetch('/backend/api/v1/events/registrations/me'),fetch('/backend/api/v1/member/payments')]);
-  if(p.ok)setProfile(await p.json()); if(a.ok)setApplication(await a.json()); if(d.ok)setDocs(await d.json()); if(n.ok)setNotes(await n.json()); if(c.ok)setCircles(await c.json()); if(regRes.ok)setRegistrations(await regRes.json()); if(pay.ok)setPayments(await pay.json()); setLoading(false);
- }
- useEffect(()=>{load()},[]);
- async function saveProfile(e:React.FormEvent){e.preventDefault();if(!profile)return;setSaving(true);const r=await fetch('/backend/api/v1/member/profile',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(profile)});if(r.ok){alert('প্রোফাইল সংরক্ষণ হয়েছে।');load()}else alert((await r.json().catch(()=>null))?.detail||'প্রোফাইল সংরক্ষণ ব্যর্থ');setSaving(false)}
- async function submitApplication(){const r=await fetch('/backend/api/v1/member/application',{method:'POST'});if(r.ok){setApplication(await r.json());alert('আবেদন জমা হয়েছে।')}else alert((await r.json().catch(()=>null))?.detail||'আবেদন জমা দেওয়া যায়নি।')}
- async function upload(e:React.ChangeEvent<HTMLInputElement>,type:string){const file=e.target.files?.[0];if(!file)return;setUploading(true);const fd=new FormData();fd.append('file',file);const r=await fetch(`/backend/api/v1/member/documents?document_type=${type}`,{method:'POST',body:fd});if(r.ok){const newDoc=await r.json();setDocs(prev=>[newDoc,...prev]);}else alert((await r.json().catch(()=>null))?.detail||'আপলোড ব্যর্থ');setUploading(false);e.target.value='';}
- if(loading)return <section className="section"><div className="container">লোড হচ্ছে...</div></section>;
- if(!me)return <section className="section"><div className="container narrow"><div className="card card-body"><h1>সদস্য পোর্টাল</h1><p className="muted">প্রবেশ করতে লগইন করুন।</p><Link className="btn btn-primary" href="/login">Login</Link></div></div></section>;
- return <section className="section"><div className="container"><div className="section-head left"><span className="eyebrow">MEMBER PORTAL</span><h1>স্বাগতম, {me.name_bn}</h1><p>সদস্যতা, আবেদন, প্রোফাইল, নথি ও ডিজিটাল কার্ড পরিচালনা করুন।</p><div className="row-actions"><Link className="btn btn-light" href="/portal/security">সেশন ও নিরাপত্তা</Link></div></div>
-   <div className="grid-4"><div className="card card-body"><span className="kicker green">MEMBERSHIP</span><h2>{me.membership_id||'Pending'}</h2><span className="status-pill">{me.membership_status||'PENDING'}</span></div><div className="card card-body"><span className="kicker blue">CIRCLE</span><h2>{me.circle_bn||'Not assigned'}</h2><p className="muted">{me.designation_bn||'Designation not set'}</p></div><div className="card card-body"><span className="kicker orange">DIGITAL CARD</span><h3>{me.membership_status==='ACTIVE'?'Ready':'Available after approval'}</h3>{me.membership_status==='ACTIVE'&&<div className="row-actions"><a className="btn btn-blue" href="/backend/api/v1/member/card" target="_blank" download>PNG</a><a className="btn btn-light" href="/backend/api/v1/member/card/pdf" target="_blank" download>PDF</a></div>}</div><div className="card card-body"><span className="kicker red">NOTIFICATIONS</span><h2>{notes.filter(n=>!n.read_at).length}</h2><p className="muted">Unread notifications</p></div></div>
-   {me.membership_status==='ACTIVE'&&<div className="card card-body" style={{marginTop:20}}><div className="split-head"><div><span className="kicker green">DIGITAL CREDENTIAL</span><h2>অফিসিয়াল ডিজিটাল পরিচয়পত্র (ID Card)</h2></div><div className="row-actions"><a className="btn btn-primary" href="/backend/api/v1/member/card" target="_blank" download>ডাউনলোড PNG</a><a className="btn btn-light" href="/backend/api/v1/member/card/pdf" target="_blank" download>মুদ্রণযোগ্য PDF</a></div></div><div style={{marginTop:15,borderRadius:12,overflow:'hidden',border:'2px solid rgba(245, 158, 11, 0.4)',maxWidth:620}}><img src="/backend/api/v1/member/card" alt="Digital ID Card Preview" style={{width:'100%',height:'auto',display:'block'}}/></div></div>}
-   <div className="portal-grid" style={{marginTop:20}}>
-    <div className="card card-body"><div className="split-head"><div><span className="kicker blue">PROFILE</span><h2>সদস্য প্রোফাইল</h2></div></div><form onSubmit={saveProfile} className="form-grid">{[['name_bn','বাংলা নাম'],['name_en','ইংরেজি নাম'],['phone','মোবাইল'],['designation_bn','পদবি'],['designation_en','Designation'],['employee_id','Employee ID'],['diploma_institution','ডিপ্লোমা প্রতিষ্ঠান'],['graduation_year','পাসের বছর'],['nid_number','NID নম্বর']].map(([key,label])=><input key={key} placeholder={label} required={['name_bn'].includes(key)} value={profile?.[key]??''} onChange={e=>setProfile({...profile,[key]:e.target.value})}/>)}<select value={profile?.circle_id??''} onChange={e=>setProfile({...profile,circle_id:e.target.value?Number(e.target.value):null})}><option value="">গ্রিড সার্কেল নির্বাচন</option>{circles.map(c=><option key={c.id} value={c.id}>{c.name_bn}</option>)}</select><textarea className="span-2" rows={3} placeholder="বর্তমান ঠিকানা" value={profile?.current_address??''} onChange={e=>setProfile({...profile,current_address:e.target.value})}/><textarea className="span-2" rows={3} placeholder="স্থায়ী ঠিকানা" value={profile?.permanent_address??''} onChange={e=>setProfile({...profile,permanent_address:e.target.value})}/><button className="btn btn-primary span-2" disabled={saving}>{saving?'সংরক্ষণ হচ্ছে...':'প্রোফাইল সংরক্ষণ'}</button></form></div>
-    <div className="card card-body"><div className="split-head"><div><span className="kicker green">APPLICATION</span><h2>সদস্য আবেদন</h2></div><span className="status-pill">{application?.status}</span></div><p className="muted">প্রোফাইল ও প্রয়োজনীয় নথি সম্পূর্ণ করার পর আবেদন জমা দিন।</p><button className="btn btn-green" onClick={submitApplication} disabled={['SUBMITTED','UNDER_REVIEW','ACTIVE'].includes(application?.status)}>{application?.status==='ACTIVE'?'অনুমোদিত':application?.status==='SUBMITTED'?'পর্যালোচনার অপেক্ষায়':'আবেদন জমা দিন'}</button><hr/><div><span className="kicker blue">DOCUMENTS</span><h3>নথি আপলোড</h3><div className="upload-grid"><label className="upload-box">NID<input type="file" accept="image/*,application/pdf" hidden onChange={e=>upload(e,'NID')}/></label><label className="upload-box">Certificate<input type="file" accept="image/*,application/pdf" hidden onChange={e=>upload(e,'CERTIFICATE')}/></label><label className="upload-box">Photo<input type="file" accept="image/*" hidden onChange={e=>upload(e,'PHOTO')}/></label></div>{uploading&&<p className="muted small">আপলোড হচ্ছে...</p>}<div className="doc-list">{docs.map(d=><div key={d.id}><span>{d.document_type}</span><span>{d.filename}</span><span className="status-pill">{d.review_status}</span></div>)}</div></div></div>
-   </div>
-   <div className="portal-grid" style={{marginTop:20}}><div className="card card-body"><span className="kicker orange">MY EVENTS</span><h2>ইভেন্ট নিবন্ধন</h2>{registrations.length?registrations.map(r=><div className="timeline-item" key={r.id}><strong>Ticket: {r.ticket_code}</strong><p>Registration: {r.registration_status} · Attendance: {r.attendance_status} · Payment: {r.payment_status}</p><a className="btn btn-light" href={`/events/ticket/${encodeURIComponent(r.ticket_token||r.ticket_code)}`}>টিকিট দেখুন</a></div>):<p className="muted">কোনো ইভেন্ট নিবন্ধন নেই।</p>}</div><div className="card card-body"><span className="kicker green">PAYMENTS</span><h2>পেমেন্ট ইতিহাস</h2>{payments.length?payments.slice(0,8).map(p=><div className="timeline-item" key={p.id}><strong>{p.purpose} · {p.amount} {p.currency}</strong><p>{p.provider} · {p.status} {p.transaction_ref?`· ${p.transaction_ref}`:''}</p></div>):<p className="muted">কোনো পেমেন্ট রেকর্ড নেই।</p>}</div></div><div className="card card-body" style={{marginTop:20}}><span className="kicker blue">NOTIFICATIONS</span><h2>সাম্প্রতিক বার্তা</h2>{notes.length?notes.slice(0,8).map(n=><div className="timeline-item" key={n.id}><strong>{n.title_bn}</strong><p>{n.body_bn}</p><small className="muted">{new Date(n.created_at).toLocaleString('bn-BD')}</small></div>):<p className="muted">কোনো নতুন নোটিফিকেশন নেই।</p>}</div>
- </div></section>
+import { useEffect, useState, FormEvent, ChangeEvent } from 'react';
+import Link from 'next/link';
+import { api, ApiError, CircleItem } from '@/lib/api';
+import {
+  User,
+  Shield,
+  CreditCard,
+  Bell,
+  FileText,
+  Upload,
+  Calendar,
+  CheckCircle,
+  AlertCircle,
+  Clock,
+  ArrowRight,
+  ExternalLink,
+  Download,
+  Building,
+  Briefcase,
+  IdCard,
+} from 'lucide-react';
+
+export default function MemberPortal() {
+  const [me, setMe] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
+  const [circles, setCircles] = useState<CircleItem[]>([]);
+  const [application, setApplication] = useState<any>(null);
+  const [docs, setDocs] = useState<any[]>([]);
+  const [notes, setNotes] = useState<any[]>([]);
+  const [registrations, setRegistrations] = useState<any[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  function notify(text: string, type: 'success' | 'error' = 'success') {
+    setStatusMessage({ text, type });
+    window.setTimeout(() => setStatusMessage(null), 4000);
+  }
+
+  async function loadData() {
+    try {
+      const meData = await api.getMe();
+      setMe(meData);
+
+      const [p, a, d, n, c, regRes, pay] = await Promise.allSettled([
+        api.getProfile(),
+        api.getMemberApplication(),
+        api.getMemberDocuments(),
+        api.getMemberNotifications(),
+        api.getCircles(),
+        api.getMyEventRegistrations(),
+        api.getMemberPayments(),
+      ]);
+
+      if (p.status === 'fulfilled') setProfile(p.value);
+      if (a.status === 'fulfilled') setApplication(a.value);
+      if (d.status === 'fulfilled') setDocs(d.value);
+      if (n.status === 'fulfilled') setNotes(n.value);
+      if (c.status === 'fulfilled') setCircles(c.value);
+      if (regRes.status === 'fulfilled') setRegistrations(regRes.value);
+      if (pay.status === 'fulfilled') setPayments(pay.value);
+    } catch (err: any) {
+      console.error('Portal load failed', err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  async function saveProfile(e: FormEvent) {
+    e.preventDefault();
+    if (!profile) return;
+    setSaving(true);
+    try {
+      await api.updateProfile(profile);
+      notify('প্রোফাইল তথ্য সফলভাবে সংরক্ষণ করা হয়েছে।', 'success');
+      loadData();
+    } catch (err: any) {
+      notify(err.message || 'প্রোফাইল সংরক্ষণ ব্যর্থ হয়েছে।', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitApplication() {
+    try {
+      const res = await api.submitMemberApplication();
+      setApplication(res);
+      notify('আপনার সদস্য আবেদন সফলভাবে জমা দেওয়া হয়েছে। সচিবালয় পর্যালোচনার পর অবহিত করা হবে।', 'success');
+    } catch (err: any) {
+      notify(err.message || 'আবেদন জমা দেওয়া যায়নি।', 'error');
+    }
+  }
+
+  async function uploadDoc(e: ChangeEvent<HTMLInputElement>, type: string) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const newDoc = await api.uploadMemberDocument(type, file);
+      setDocs((prev) => [newDoc, ...prev]);
+      notify(`${type} নথি সফলভাবে আপলোড হয়েছে।`, 'success');
+    } catch (err: any) {
+      notify(err.message || 'আপলোড ব্যর্থ হয়েছে। সঠিক ফরম্যাট ও সাইজ যাচাই করুন।', 'error');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  }
+
+  if (loading) {
+    return (
+      <section className="section py-20 min-h-screen bg-background">
+        <div className="container max-w-4xl mx-auto px-4 text-center">
+          <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-primary border-t-transparent mb-4"></div>
+          <p className="text-secondary font-medium">সদস্য তথ্য লোড হচ্ছে...</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (!me) {
+    return (
+      <section className="section py-20 min-h-screen bg-background">
+        <div className="container max-w-md mx-auto px-4">
+          <div className="bg-card border border-border rounded-2xl p-8 text-center shadow-lg">
+            <Shield className="mx-auto text-primary mb-4" size={48} />
+            <h1 className="text-2xl font-bold text-foreground mb-2">সদস্য পোর্টাল প্রবেশাধিকার</h1>
+            <p className="text-secondary text-sm mb-6">
+              সদস্য পোর্টালে প্রবেশ করতে আপনার প্রাতিষ্ঠানিক অ্যাকাউন্ট দিয়ে লগইন করুন।
+            </p>
+            <Link
+              href="/login"
+              className="inline-flex items-center justify-center w-full py-2.5 px-4 rounded-xl bg-primary text-white font-semibold text-sm hover:opacity-90 transition-all shadow-sm"
+            >
+              লগইন করুন
+            </Link>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const unreadNotes = notes.filter((n) => !n.read_at);
+
+  return (
+    <section className="section py-10 min-h-screen bg-background">
+      <div className="container max-w-6xl mx-auto px-4 space-y-8">
+        {/* Top Notification Toast */}
+        {statusMessage && (
+          <div
+            className={`p-4 rounded-xl text-sm flex items-center gap-3 border shadow-sm ${
+              statusMessage.type === 'success'
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                : 'bg-rose-500/10 border-rose-500/20 text-rose-700 dark:text-rose-400'
+            }`}
+          >
+            {statusMessage.type === 'success' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
+            <span className="font-medium">{statusMessage.text}</span>
+          </div>
+        )}
+
+        {/* Header Header */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-6 border-b border-border">
+          <div>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-primary/10 text-primary mb-2">
+              <IdCard size={14} /> PGCB MEMBER DASHBOARD
+            </span>
+            <h1 className="text-3xl font-extrabold text-foreground">স্বাগতম, {me.name_bn || me.name_en}</h1>
+            <p className="text-secondary text-sm mt-1">
+              সদস্যতা স্ট্যাটাস, ডিজিটাল পরিচয়পত্র, প্রোফাইল ও প্রাতিষ্ঠানিক কার্যাবলী পরিচালনা করুন।
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Link
+              href="/portal/security"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-card hover:bg-surface text-foreground text-sm font-semibold transition-all shadow-sm"
+            >
+              <Shield size={16} /> সেশন ও নিরাপত্তা
+            </Link>
+          </div>
+        </div>
+
+        {/* Quick KPI Overview */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+              MEMBERSHIP ID
+            </span>
+            <div className="text-xl font-extrabold text-foreground mt-1">
+              {me.membership_id || 'প্রক্রিয়াধীন'}
+            </div>
+            <div className="mt-2">
+              <span
+                className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                  me.membership_status === 'ACTIVE'
+                    ? 'bg-emerald-500/10 text-emerald-600'
+                    : 'bg-amber-500/10 text-amber-600'
+                }`}
+              >
+                {me.membership_status || 'PENDING'}
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
+            <span className="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+              GRID CIRCLE
+            </span>
+            <div className="text-xl font-extrabold text-foreground mt-1 truncate">
+              {me.circle_bn || 'নির্ধারিত হয়নি'}
+            </div>
+            <p className="text-xs text-secondary mt-2 truncate">
+              {me.designation_bn || 'পদবি নির্ধারিত হয়নি'}
+            </p>
+          </div>
+
+          <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
+            <span className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+              DIGITAL ID CARD
+            </span>
+            <div className="text-lg font-bold text-foreground mt-1">
+              {me.membership_status === 'ACTIVE' ? 'সক্রিয় ও প্রস্তুত' : 'অনুমোদনের পর লভ্য'}
+            </div>
+            {me.membership_status === 'ACTIVE' && (
+              <div className="flex gap-2 mt-2">
+                <a
+                  href={api.getDigitalCardUrl()}
+                  target="_blank"
+                  download
+                  className="px-2.5 py-1 text-xs font-bold rounded-lg bg-primary text-white hover:opacity-90 transition-all"
+                >
+                  PNG
+                </a>
+                <a
+                  href={api.getDigitalCardPdfUrl()}
+                  target="_blank"
+                  download
+                  className="px-2.5 py-1 text-xs font-bold rounded-lg border border-border bg-surface hover:bg-border/50 text-foreground transition-all"
+                >
+                  PDF
+                </a>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
+            <span className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+              NOTIFICATIONS
+            </span>
+            <div className="text-xl font-extrabold text-foreground mt-1">
+              {unreadNotes.length} টি অপঠিত
+            </div>
+            <p className="text-xs text-secondary mt-2">মোট {notes.length} টি বার্তা</p>
+          </div>
+        </div>
+
+        {/* Digital ID Card Preview (If Active) */}
+        {me.membership_status === 'ACTIVE' && (
+          <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4 pb-4 border-b border-border">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">
+                  DIGITAL CREDENTIAL
+                </span>
+                <h2 className="text-xl font-bold text-foreground">অফিসিয়াল ডিজিটাল পরিচয়পত্র (ID Card)</h2>
+                <p className="text-xs text-secondary">
+                  যাচাইযোগ্য কিউআর কোডসহ আপনার অফিসিয়াল সদস্য পরিচয়পত্র
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <a
+                  href={api.getDigitalCardUrl()}
+                  target="_blank"
+                  download
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-primary text-white hover:opacity-90 transition-all shadow-sm"
+                >
+                  <Download size={14} /> ডাউনলোড PNG
+                </a>
+                <a
+                  href={api.getDigitalCardPdfUrl()}
+                  target="_blank"
+                  download
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl border border-border bg-surface hover:bg-border/50 text-foreground transition-all"
+                >
+                  <Download size={14} /> মুদ্রণযোগ্য PDF
+                </a>
+              </div>
+            </div>
+
+            <div className="flex justify-center p-4 bg-surface/50 rounded-xl border border-border">
+              <div className="max-w-md w-full rounded-xl overflow-hidden border-2 border-amber-500/40 shadow-md">
+                <img
+                  src={api.getDigitalCardUrl()}
+                  alt="Digital Member ID Card"
+                  className="w-full h-auto object-contain block"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Profile & Application / Documents Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Profile Form */}
+          <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-border">
+              <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600">
+                <User size={20} />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-foreground">সদস্য প্রোফাইল তথ্য</h2>
+                <p className="text-xs text-secondary">আপনার পেশাগত ও ব্যক্তিগত তথ্য হালনাগাদ রাখুন</p>
+              </div>
+            </div>
+
+            <form onSubmit={saveProfile} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">
+                    বাংলা নাম <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={profile?.name_bn ?? ''}
+                    onChange={(e) => setProfile({ ...profile, name_bn: e.target.value })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">English Name</label>
+                  <input
+                    type="text"
+                    value={profile?.name_en ?? ''}
+                    onChange={(e) => setProfile({ ...profile, name_en: e.target.value })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">মোবাইল নম্বর</label>
+                  <input
+                    type="text"
+                    value={profile?.phone ?? ''}
+                    onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">কর্মকর্তা / কর্মচারী আইডি</label>
+                  <input
+                    type="text"
+                    value={profile?.employee_id ?? ''}
+                    onChange={(e) => setProfile({ ...profile, employee_id: e.target.value })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">পদবি (বাংলা)</label>
+                  <input
+                    type="text"
+                    value={profile?.designation_bn ?? ''}
+                    onChange={(e) => setProfile({ ...profile, designation_bn: e.target.value })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">Designation (English)</label>
+                  <input
+                    type="text"
+                    value={profile?.designation_en ?? ''}
+                    onChange={(e) => setProfile({ ...profile, designation_en: e.target.value })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">ডিপ্লোমা প্রতিষ্ঠান</label>
+                  <input
+                    type="text"
+                    value={profile?.diploma_institution ?? ''}
+                    onChange={(e) => setProfile({ ...profile, diploma_institution: e.target.value })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">পাসের বছর</label>
+                  <input
+                    type="number"
+                    value={profile?.graduation_year ?? ''}
+                    onChange={(e) => setProfile({ ...profile, graduation_year: e.target.value ? Number(e.target.value) : null })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">জাতীয় পরিচয়পত্র (NID) নম্বর</label>
+                  <input
+                    type="text"
+                    value={profile?.nid_number ?? ''}
+                    onChange={(e) => setProfile({ ...profile, nid_number: e.target.value })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">গ্রিড সার্কেল</label>
+                  <select
+                    value={profile?.circle_id ?? ''}
+                    onChange={(e) => setProfile({ ...profile, circle_id: e.target.value ? Number(e.target.value) : null })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  >
+                    <option value="">গ্রিড সার্কেল নির্বাচন করুন</option>
+                    {circles.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name_bn} ({c.name_en})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">বর্তমান ঠিকানা</label>
+                <textarea
+                  rows={2}
+                  value={profile?.current_address ?? ''}
+                  onChange={(e) => setProfile({ ...profile, current_address: e.target.value })}
+                  className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">স্থায়ী ঠিকানা</label>
+                <textarea
+                  rows={2}
+                  value={profile?.permanent_address ?? ''}
+                  onChange={(e) => setProfile({ ...profile, permanent_address: e.target.value })}
+                  className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="w-full py-2.5 px-4 rounded-xl bg-primary text-white font-semibold text-sm hover:opacity-90 disabled:opacity-50 transition-all shadow-sm"
+              >
+                {saving ? 'সংরক্ষণ হচ্ছে...' : 'প্রোফাইল তথ্য সংরক্ষণ করুন'}
+              </button>
+            </form>
+          </div>
+
+          {/* Application & Documents */}
+          <div className="space-y-8">
+            {/* Membership Application Box */}
+            <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
+              <div className="flex items-center justify-between gap-3 mb-4 pb-4 border-b border-border">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600">
+                    <FileText size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-foreground">সদস্য আবেদন স্থিতি</h2>
+                    <p className="text-xs text-secondary">আবেদনের পর্যালোচনা অবস্থা</p>
+                  </div>
+                </div>
+
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-bold ${
+                    application?.status === 'ACTIVE'
+                      ? 'bg-emerald-500/10 text-emerald-600'
+                      : application?.status === 'SUBMITTED'
+                      ? 'bg-blue-500/10 text-blue-600'
+                      : 'bg-amber-500/10 text-amber-600'
+                  }`}
+                >
+                  {application?.status || 'PENDING'}
+                </span>
+              </div>
+
+              <p className="text-xs text-secondary mb-4 leading-relaxed">
+                প্রোফাইল তথ্য ও প্রয়োজনীয় নথিপত্র (জাতীয় পরিচয়পত্র, ডিপ্লোমা সনদ, ছবি) আপলোড করার পর আপনার সদস্য আবেদন পর্যালোচনা ও অনুমোদনের জন্য সচিবালয়ে জমা দিন।
+              </p>
+
+              <button
+                onClick={submitApplication}
+                disabled={['SUBMITTED', 'UNDER_REVIEW', 'ACTIVE'].includes(application?.status)}
+                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 text-white font-semibold text-sm hover:bg-emerald-700 disabled:opacity-50 transition-all shadow-sm"
+              >
+                {application?.status === 'ACTIVE'
+                  ? 'সদস্যপদ অনুমোদিত'
+                  : application?.status === 'SUBMITTED'
+                  ? 'পর্যালোচনার অপেক্ষায় আছে'
+                  : 'আবেদন জমা দিন'}
+              </button>
+            </div>
+
+            {/* Document Uploads */}
+            <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
+              <div className="flex items-center gap-3 mb-4 pb-4 border-b border-border">
+                <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600">
+                  <Upload size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-foreground">প্রয়োজনীয় নথিপত্র</h2>
+                  <p className="text-xs text-secondary">PDF অথবা ইমেজ ফরম্যাট (সর্বোচ্চ ১০ এমবি)</p>
+                </div>
+              </div>
+
+              {uploading && (
+                <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 text-xs flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-amber-600 border-t-transparent"></div>
+                  নথি আপলোড ও যাচাই হচ্ছে...
+                </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-3 mb-6">
+                {[
+                  { type: 'NID', label: 'জাতীয় পরিচয়পত্র' },
+                  { type: 'CERTIFICATE', label: 'ডিপ্লোমা সনদ' },
+                  { type: 'PHOTO', label: 'পাসপোর্ট ছবি' },
+                ].map((docItem) => (
+                  <label
+                    key={docItem.type}
+                    className="flex flex-col items-center justify-center p-3 rounded-xl border border-dashed border-border bg-surface/50 hover:bg-surface cursor-pointer text-center transition-all group"
+                  >
+                    <Upload size={18} className="text-secondary group-hover:text-primary mb-1 transition-colors" />
+                    <span className="text-xs font-semibold text-foreground">{docItem.label}</span>
+                    <span className="text-[10px] text-secondary mt-0.5">আপলোড</span>
+                    <input
+                      type="file"
+                      accept={docItem.type === 'PHOTO' ? 'image/*' : 'image/*,application/pdf'}
+                      hidden
+                      onChange={(e) => uploadDoc(e, docItem.type)}
+                    />
+                  </label>
+                ))}
+              </div>
+
+              <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                {docs.length === 0 ? (
+                  <p className="text-xs text-secondary text-center py-4">এখনো কোনো নথি আপলোড করা হয়নি।</p>
+                ) : (
+                  docs.map((d) => (
+                    <div
+                      key={d.id}
+                      className="p-3 rounded-xl border border-border bg-surface text-xs flex items-center justify-between gap-2"
+                    >
+                      <div className="truncate">
+                        <span className="font-bold text-foreground mr-2">[{d.document_type}]</span>
+                        <span className="text-secondary truncate">{d.filename}</span>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                          d.review_status === 'APPROVED'
+                            ? 'bg-emerald-500/10 text-emerald-600'
+                            : d.review_status === 'REJECTED'
+                            ? 'bg-rose-500/10 text-rose-600'
+                            : 'bg-amber-500/10 text-amber-600'
+                        }`}
+                      >
+                        {d.review_status}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Events, Payments & Notifications */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Events */}
+          <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
+              <Calendar size={18} className="text-primary" />
+              <h2 className="text-base font-bold text-foreground">আমার ইভেন্ট নিবন্ধন</h2>
+            </div>
+            <div className="space-y-3">
+              {registrations.length === 0 ? (
+                <p className="text-xs text-secondary py-4 text-center">কোনো ইভেন্ট নিবন্ধন নেই।</p>
+              ) : (
+                registrations.map((r) => (
+                  <div key={r.id} className="p-3 rounded-xl border border-border bg-surface text-xs space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <strong className="text-foreground">টিকিট: {r.ticket_code}</strong>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary">
+                        {r.registration_status}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-secondary">
+                      উপস্থিতি: {r.attendance_status} · পেমেন্ট: {r.payment_status}
+                    </div>
+                    <Link
+                      href={`/events/ticket/${encodeURIComponent(r.ticket_token || r.ticket_code)}`}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+                    >
+                      টিকিট বিস্তারিত দেখুন <ArrowRight size={12} />
+                    </Link>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Payments */}
+          <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
+              <CreditCard size={18} className="text-emerald-600" />
+              <h2 className="text-base font-bold text-foreground">পেমেন্ট ইতিহাস</h2>
+            </div>
+            <div className="space-y-3">
+              {payments.length === 0 ? (
+                <p className="text-xs text-secondary py-4 text-center">কোনো পেমেন্ট রেকর্ড পাওয়া যায়নি।</p>
+              ) : (
+                payments.slice(0, 5).map((p) => (
+                  <div key={p.id} className="p-3 rounded-xl border border-border bg-surface text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <strong className="text-foreground">{p.purpose}</strong>
+                      <span className="font-bold text-emerald-600">
+                        {p.amount} {p.currency}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-secondary flex items-center justify-between">
+                      <span>{p.provider}</span>
+                      <span
+                        className={`font-semibold ${
+                          p.status === 'PAID' ? 'text-emerald-600' : 'text-amber-600'
+                        }`}
+                      >
+                        {p.status}
+                      </span>
+                    </div>
+                    {p.transaction_ref && (
+                      <div className="text-[10px] text-secondary font-mono truncate">
+                        Ref: {p.transaction_ref}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Notifications */}
+          <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
+              <Bell size={18} className="text-amber-600" />
+              <h2 className="text-base font-bold text-foreground">সাম্প্রতিক বার্তা</h2>
+            </div>
+            <div className="space-y-3">
+              {notes.length === 0 ? (
+                <p className="text-xs text-secondary py-4 text-center">কোনো নতুন বার্তা নেই।</p>
+              ) : (
+                notes.slice(0, 5).map((n) => (
+                  <div key={n.id} className="p-3 rounded-xl border border-border bg-surface text-xs space-y-1">
+                    <strong className="text-foreground block">{n.title_bn}</strong>
+                    <p className="text-secondary text-[11px] line-clamp-2">{n.body_bn}</p>
+                    <small className="text-[10px] text-secondary block font-mono">
+                      {new Date(n.created_at).toLocaleString('bn-BD')}
+                    </small>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }

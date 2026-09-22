@@ -89,3 +89,68 @@ class SiteSettingUpdate(BaseModel):
     key: str = Field(min_length=2, max_length=120)
     value: str | None = None
     category: str = Field(default='GENERAL', max_length=80)
+
+
+class NoticeCreate(BaseModel):
+    title_bn: str = Field(min_length=2, max_length=300)
+    title_en: str | None = None
+    content_bn: str = Field(min_length=2)
+    content_en: str | None = None
+    priority: str = Field(default='NORMAL')
+    category: str = Field(default='GENERAL')
+    attachment_url: str | None = None
+    is_pinned: bool = False
+    is_published: bool = True
+    published_at: datetime | None = None
+    expires_at: datetime | None = None
+
+
+class NoticeUpdate(BaseModel):
+    title_bn: str | None = None
+    title_en: str | None = None
+    content_bn: str | None = None
+    content_en: str | None = None
+    priority: str | None = None
+    category: str | None = None
+    attachment_url: str | None = None
+    is_pinned: bool | None = None
+    is_published: bool | None = None
+    expires_at: datetime | None = None
+
+
+class NoticeResponse(NoticeCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class DocumentCreate(BaseModel):
+    title_bn: str = Field(min_length=2, max_length=300)
+    title_en: str | None = None
+    category: str = Field(default='FORM')
+    description_bn: str | None = None
+    file_path: str = Field(min_length=1, max_length=500)
+    file_size: int | None = None
+    content_type: str | None = None
+    version: str = Field(default='1.0')
+    is_published: bool = True
+
+
+class DocumentUpdate(BaseModel):
+    title_bn: str | None = None
+    title_en: str | None = None
+    category: str | None = None
+    description_bn: str | None = None
+    file_path: str | None = None
+    version: str | None = None
+    is_published: bool | None = None
+
+
+class DocumentResponse(DocumentCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    download_count: int
+    created_at: datetime
+    updated_at: datetime
+

@@ -7,10 +7,23 @@ from app.models import Event, User
 client = TestClient(app)
 
 
+from app.core.security import hash_password
+
+
 def login(email='admin@example.org', password='ChangeMe123!'):
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            user.password_hash = hash_password(password)
+            user.mfa_enabled = False
+            db.commit()
+    finally:
+        db.close()
     r = client.post('/api/v1/auth/login', json={'email': email, 'password': password})
     assert r.status_code == 200, r.text
     return r.cookies
+
 
 
 def test_readiness_and_security_headers():

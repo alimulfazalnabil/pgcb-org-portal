@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import current_user
 from app.db.session import get_db
 from app.models.payments import PaymentTransaction, PaymentWebhook, PaymentStatus, PaymentProviderType
-from app.models import Event, EventRegistration, Member, User
+from app.models import Event, EventRegistration, Member, User, PaymentTransaction as CorePaymentTransaction
 from app.schemas.events import PaymentCreate
 from app.core.audit import log_audit_action
 from app.integrations.payments import get_payment_provider, create_checkout, normalize_provider
@@ -129,20 +129,16 @@ def create_payment(payload: PaymentCreate, request: Request, user: User = Depend
         if not member:
             raise HTTPException(404, 'Member profile not found')
 
-    provider_enum = PaymentProviderType.MANUAL
-    try:
-        provider_enum = PaymentProviderType[payload.provider.upper()]
-    except KeyError:
-        pass
-
-    item = PaymentTransaction(
+    item = CorePaymentTransaction(
+        user_id=user.id,
         member_id=member.id if member else None,
-        amount=float(payload.amount),
+        event_registration_id=payload.event_registration_id,
+        amount=int(payload.amount),
         currency=payload.currency.upper(),
-        provider=provider_enum,
-        provider_transaction_id=payload.transaction_ref,
-        reference=payload.purpose,
-        status=PaymentStatus.PENDING
+        provider=payload.provider.upper() if payload.provider else 'MANUAL',
+        purpose=payload.purpose.upper() if payload.purpose else 'MEMBERSHIP',
+        transaction_ref=payload.transaction_ref,
+        status='PENDING'
     )
     db.add(item)
     db.flush()
@@ -159,12 +155,12 @@ def create_payment(payload: PaymentCreate, request: Request, user: User = Depend
     db.refresh(item)
 
     return {
-        'id': str(item.id),
-        'status': item.status.value if hasattr(item.status, 'value') else str(item.status),
+        'id': item.id,
+        'status': item.status,
         'amount': item.amount,
         'currency': item.currency,
-        'provider': item.provider.value if hasattr(item.provider, 'value') else str(item.provider),
-        'transaction_ref': item.provider_transaction_id,
+        'provider': item.provider,
+        'transaction_ref': item.transaction_ref,
         'message': 'Payment intent created. Connect a configured gateway or submit transaction reference for verification.'
     }
 
@@ -192,19 +188,21 @@ def create_checkout_intent(payload: PaymentCreate, request: Request, user: User 
 
     provider_enum = PaymentProviderType[provider] if provider in PaymentProviderType.__members__ else PaymentProviderType.TEST
 
-    item = PaymentTransaction(
+    item = CorePaymentTransaction(
+        user_id=user.id,
         member_id=member.id if member else None,
+        event_registration_id=registration.id if registration else None,
         amount=float(payload.amount),
         currency=payload.currency.upper(),
-        provider=provider_enum,
-        reference=payload.purpose.upper(),
-        status=PaymentStatus.PENDING
+        provider=provider,
+        purpose=payload.purpose.upper(),
+        status='PENDING'
     )
     db.add(item)
     db.flush()
 
-    checkout = create_checkout(provider, 1, item.amount, item.currency)
-    item.provider_transaction_id = checkout.provider_transaction_id
+    checkout = create_checkout(provider, 1, float(item.amount), item.currency)
+    item.transaction_ref = checkout.provider_transaction_id
 
     if registration and registration.payment_status == 'NOT_REQUIRED':
         registration.payment_status = 'PENDING'
@@ -215,18 +213,18 @@ def create_checkout_intent(payload: PaymentCreate, request: Request, user: User 
         entity="PAYMENT",
         entity_id=str(item.id),
         user=user,
-        new_value={"provider": provider, "trx_id": checkout.provider_transaction_id, "amount": item.amount}
+        new_value={"provider": provider, "trx_id": checkout.provider_transaction_id, "amount": float(item.amount)}
     )
     db.commit()
     db.refresh(item)
 
     return {
-        'payment_id': str(item.id),
+        'payment_id': item.id,
         'provider': provider,
         'provider_transaction_id': checkout.provider_transaction_id,
         'checkout_url': checkout.checkout_url,
-        'status': item.status.value if hasattr(item.status, 'value') else str(item.status),
-        'amount': item.amount,
+        'status': item.status,
+        'amount': float(item.amount),
         'currency': item.currency
     }
 
@@ -237,22 +235,21 @@ def list_payments(user: User = Depends(current_user), db: Session = Depends(get_
     member_id = member.id if member else None
     
     rows = db.scalars(
-        select(PaymentTransaction)
-        .where(PaymentTransaction.member_id == member_id)
-        .order_by(PaymentTransaction.created_at.desc())
+        select(CorePaymentTransaction)
+        .where(CorePaymentTransaction.member_id == member_id)
+        .order_by(CorePaymentTransaction.created_at.desc())
     ).all() if member_id else []
 
     return [
         {
-            'id': str(p.id),
-            'purpose': p.reference or 'MEMBERSHIP',
-            'amount': p.amount,
+            'id': p.id,
+            'purpose': p.purpose or 'MEMBERSHIP',
+            'amount': float(p.amount),
             'currency': p.currency,
-            'provider': p.provider.value if hasattr(p.provider, 'value') else str(p.provider),
-            'transaction_ref': p.provider_transaction_id,
-            'status': p.status.value if hasattr(p.status, 'value') else str(p.status),
-            'created_at': p.created_at,
-            'completed_at': p.completed_at
+            'provider': p.provider,
+            'transaction_ref': p.transaction_ref,
+            'status': p.status,
+            'created_at': p.created_at
         }
         for p in rows
     ]

@@ -57,6 +57,15 @@ async def get_current_user(
         raise credentials_exception
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user account")
+
+    session_hash = hash_session_token(token)
+    session_row = db.scalar(select(UserSession).where(UserSession.token_hash == session_hash))
+    if session_row:
+        if session_row.revoked_at is not None:
+            raise credentials_exception
+        if session_row.expires_at < datetime.utcnow():
+            raise credentials_exception
+
     return user
 
 

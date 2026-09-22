@@ -20,6 +20,8 @@ class InMemoryRateLimiter:
         self._lock = Lock()
 
     def check(self, key: str, limit: int, window_seconds: int) -> None:
+        if not settings.rate_limit_enabled or settings.app_env.lower() in ('test', 'testing'):
+            return
         now = monotonic()
         with self._lock:
             bucket = self._hits[key]
@@ -50,6 +52,8 @@ class RateLimiter:
         return self._redis
 
     def check(self, key: str, limit: int, window_seconds: int) -> None:
+        if not settings.rate_limit_enabled or settings.app_env.lower() in ('test', 'testing'):
+            return
         client = self._client()
         if client is None:
             self.local.check(key, limit, window_seconds)

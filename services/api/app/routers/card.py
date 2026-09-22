@@ -214,9 +214,10 @@ def build_card(member: Member, user: User | None = None) -> Path:
     draw.rectangle((12, 555, width - 12, height - 12), fill='#070D1E')
     draw.line((12, 555, width - 12, 555), fill='#1E293B', width=1)
     draw.text((35, 575), 'গণপ্রজাতন্ত্রী বাংলাদেশ সরকার অনুমোদিত সংগঠন • CENTRAL EXECUTIVE COUNCIL', font=font_bn_body, fill='#94A3B8')
-    draw.text((710, 578), 'ELECTRONIC CREDENTIAL • PGCB PORTAL V1.0', font=font_en_tiny, fill='#64748B')
-
-    img.save(png_path, 'PNG', optimize=True)
+    safe_id = "".join(c for c in (member.membership_id or 'unknown') if c.isalnum() or c in ('-', '_'))
+    png_path = folder / f'{safe_id}.png'
+    with open(png_path, 'wb') as f:
+        img.save(f, 'PNG', optimize=True)
     return png_path
 
 
@@ -244,7 +245,9 @@ def digital_card_pdf(user: User = Depends(current_user), db: Session = Depends(g
         raise HTTPException(409, 'Active membership is required')
     png_path = build_card(m, user)
     pdf_path = png_path.with_suffix('.pdf')
-    Image.open(png_path).convert('RGB').save(pdf_path, 'PDF', resolution=300.0)
+    with Image.open(png_path) as im:
+        with open(pdf_path, 'wb') as f:
+            im.convert('RGB').save(f, 'PDF', resolution=300.0)
     return FileResponse(pdf_path, media_type='application/pdf', filename=pdf_path.name)
 
 
@@ -282,5 +285,7 @@ def admin_download_card_pdf(
         raise HTTPException(404, 'Approved member with membership ID not found')
     png_path = build_card(m, m.user)
     pdf_path = png_path.with_suffix('.pdf')
-    Image.open(png_path).convert('RGB').save(pdf_path, 'PDF', resolution=300.0)
+    with Image.open(png_path) as im:
+        with open(pdf_path, 'wb') as f:
+            im.convert('RGB').save(f, 'PDF', resolution=300.0)
     return FileResponse(pdf_path, media_type='application/pdf', filename=pdf_path.name)

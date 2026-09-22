@@ -5,6 +5,11 @@ from app.db.session import Base, engine
 from app.db.seed import main as seed_main
 
 
+from app.core.config import settings
+settings.app_env = 'test'
+settings.rate_limit_enabled = False
+
+
 @pytest.fixture(scope="session", autouse=True)
 def initialize_test_database():
     """Ensure database schema and baseline demo fixtures exist before test suite runs."""
