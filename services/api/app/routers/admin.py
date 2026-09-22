@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -47,7 +47,7 @@ from app.services import MAX_UPLOAD_BYTES, audit, membership_dates, next_members
 from app.integrations.notifications import DeliveryResult, create_in_app, deliver_email, deliver_sms, record_delivery
 from app.domain.notifications import queue_delivery
 from app.services import BASE_STORAGE
-from app.utils.storage import is_local_path, save_bytes, _safe_name
+from app.utils.storage import is_local_path, save_bytes, _safe_name, get_file_bytes
 
 router = APIRouter(prefix='/admin', tags=['admin'])
 ADMIN_ROLES = ('SUPER_ADMIN', 'CONTENT_EDITOR', 'MEMBERSHIP_OFFICER', 'CIRCLE_ADMIN', 'FINANCE_OFFICER', 'AUDITOR')
@@ -356,12 +356,19 @@ def review_document(document_id: int, action: str, request: Request, admin: User
 @router.get('/documents/{document_id}/download')
 def download_document(document_id: int, _: User = Depends(require_permission('document.review')), db: Session = Depends(get_db)):
     d = db.get(MemberDocument, document_id)
-    if not d or not is_local_path(d.storage_path):
+    if not d or not d.storage_path:
         raise HTTPException(404, 'Document not available')
-    path = Path(d.storage_path).resolve()
-    if not path.exists() or not path.is_file():
+    try:
+        content = get_file_bytes(d.storage_path)
+        return Response(
+            content=content,
+            media_type=d.content_type or 'application/octet-stream',
+            headers={'Content-Disposition': f'attachment; filename="{d.filename}"'},
+        )
+    except FileNotFoundError:
         raise HTTPException(404, 'Document not found')
-    return FileResponse(path, media_type=d.content_type or 'application/octet-stream', filename=d.filename)
+    except Exception as exc:
+        raise HTTPException(502, f'Failed to retrieve document: {exc}')
 
 
 

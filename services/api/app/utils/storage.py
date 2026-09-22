@@ -69,3 +69,75 @@ def is_local_path(value: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def get_file_bytes(storage_path: str) -> bytes:
+    """Retrieve file bytes from either local storage or Azure Blob Storage."""
+    if not storage_path:
+        raise FileNotFoundError('Empty storage path provided')
+
+    if is_local_path(storage_path):
+        p = Path(storage_path).resolve()
+        if not p.exists() or not p.is_file():
+            raise FileNotFoundError(f'Local file not found: {storage_path}')
+        return p.read_bytes()
+
+    if settings.storage_backend == 'azure' or storage_path.startswith(('http://', 'https://')):
+        service = _azure_blob_service()
+        container = settings.azure_storage_container
+
+        if storage_path.startswith(('http://', 'https://')):
+            from urllib.parse import urlparse, unquote
+            parsed = urlparse(storage_path)
+            clean_path = unquote(parsed.path.lstrip('/'))
+            parts = clean_path.split('/', 1)
+            if len(parts) == 2:
+                container_name, blob_name = parts
+            else:
+                container_name = container
+                blob_name = parts[0]
+            blob_client = service.get_blob_client(container=container_name, blob=blob_name)
+        else:
+            blob_client = service.get_blob_client(container=container, blob=storage_path.strip('/'))
+
+        download_stream = blob_client.download_blob()
+        return download_stream.readall()
+
+    p = Path(storage_path).resolve()
+    if p.exists() and p.is_file():
+        return p.read_bytes()
+
+    raise FileNotFoundError(f'File not found: {storage_path}')
+
+
+def delete_file(storage_path: str) -> bool:
+    """Safely delete a stored file from local storage or Azure Blob Storage."""
+    if not storage_path:
+        return False
+    try:
+        if is_local_path(storage_path):
+            p = Path(storage_path).resolve()
+            if p.exists() and p.is_file():
+                p.unlink()
+                return True
+            return False
+
+        if settings.storage_backend == 'azure' or storage_path.startswith(('http://', 'https://')):
+            service = _azure_blob_service()
+            container = settings.azure_storage_container
+            if storage_path.startswith(('http://', 'https://')):
+                from urllib.parse import urlparse, unquote
+                parsed = urlparse(storage_path)
+                clean_path = unquote(parsed.path.lstrip('/'))
+                parts = clean_path.split('/', 1)
+                container_name = parts[0] if len(parts) == 2 else container
+                blob_name = parts[1] if len(parts) == 2 else parts[0]
+                blob_client = service.get_blob_client(container=container_name, blob=blob_name)
+            else:
+                blob_client = service.get_blob_client(container=container, blob=storage_path.strip('/'))
+            blob_client.delete_blob()
+            return True
+    except Exception:
+        return False
+    return False
+

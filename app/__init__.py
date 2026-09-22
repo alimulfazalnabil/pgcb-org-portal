@@ -1,8 +1,9 @@
 import sys
 from pathlib import Path
 
-# Add services/api to sys.path so submodules are discovered
-_api_dir = Path(__file__).resolve().parent / "services" / "api"
+# Repo root is parent of the root `app` folder
+_repo_root = Path(__file__).resolve().parent.parent
+_api_dir = _repo_root / "services" / "api"
 if str(_api_dir) not in sys.path:
     sys.path.insert(0, str(_api_dir))
 

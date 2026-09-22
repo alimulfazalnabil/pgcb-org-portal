@@ -1,3 +1,4 @@
+import io
 from pathlib import Path
 import hashlib, hmac
 from datetime import datetime
@@ -13,7 +14,7 @@ from app.core.deps import current_user, RoleChecker
 from app.db.session import get_db
 from app.models import Member, User, MemberDocument
 from app.services import BASE_STORAGE
-from app.utils.storage import is_local_path
+from app.utils.storage import is_local_path, get_file_bytes
 
 router = APIRouter(prefix='/member', tags=['card'])
 
@@ -114,28 +115,26 @@ def build_card(member: Member, user: User | None = None) -> Path:
 
     if member.documents:
         for doc in member.documents:
-            if doc.document_type == 'PHOTO' and is_local_path(doc.storage_path):
-                p_file = Path(doc.storage_path)
-                if p_file.exists():
-                    try:
-                        p_img = Image.open(p_file).convert('RGB')
-                        p_img = p_img.resize(photo_target_size, Image.Resampling.LANCZOS)
-                        img.paste(p_img, (47, 142))
-                        photo_inserted = True
-                        break
-                    except Exception:
-                        pass
+            if doc.document_type == 'PHOTO' and doc.storage_path:
+                try:
+                    p_bytes = get_file_bytes(doc.storage_path)
+                    p_img = Image.open(io.BytesIO(p_bytes)).convert('RGB')
+                    p_img = p_img.resize(photo_target_size, Image.Resampling.LANCZOS)
+                    img.paste(p_img, (47, 142))
+                    photo_inserted = True
+                    break
+                except Exception:
+                    pass
 
-    if not photo_inserted and member.photo_url and is_local_path(member.photo_url):
-        p_file = Path(member.photo_url)
-        if p_file.exists():
-            try:
-                p_img = Image.open(p_file).convert('RGB')
-                p_img = p_img.resize(photo_target_size, Image.Resampling.LANCZOS)
-                img.paste(p_img, (47, 142))
-                photo_inserted = True
-            except Exception:
-                pass
+    if not photo_inserted and member.photo_url:
+        try:
+            p_bytes = get_file_bytes(member.photo_url)
+            p_img = Image.open(io.BytesIO(p_bytes)).convert('RGB')
+            p_img = p_img.resize(photo_target_size, Image.Resampling.LANCZOS)
+            img.paste(p_img, (47, 142))
+            photo_inserted = True
+        except Exception:
+            pass
 
     if not photo_inserted:
         # Sleek placeholder silhouette

@@ -105,5 +105,12 @@ def ready():
     try:
         db.execute(text('SELECT 1'))
         return {'status': 'ready', 'database': 'ok'}
+    except Exception as exc:
+        logger.error(f"[READINESS ERROR] Database health check failed: {exc}")
+        return Response(
+            content='{"status":"not_ready","database":"error"}',
+            status_code=503,
+            media_type='application/json'
+        )
     finally:
         db.close()

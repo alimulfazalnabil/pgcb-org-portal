@@ -1,6 +1,6 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -11,7 +11,7 @@ from app.models import Member, MemberDocument, Notification, User
 from app.schemas.membership import ApplicationResponse, MemberDocumentResponse, MemberProfileUpdate
 from app.services import ALLOWED_CONTENT_TYPES, ALLOWED_DOC_TYPES, audit, membership_dates, next_membership_id, notify
 from app.services import BASE_STORAGE
-from app.utils.storage import is_local_path, save_bytes
+from app.utils.storage import get_file_bytes, is_local_path, save_bytes
 
 router = APIRouter(prefix='/member', tags=['membership'])
 
@@ -116,12 +116,19 @@ def list_documents(user: User = Depends(current_user), db: Session = Depends(get
 def download_document(document_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     m = get_member(user, db)
     doc = db.scalar(select(MemberDocument).where(MemberDocument.id == document_id, MemberDocument.member_id == m.id))
-    if not doc or not is_local_path(doc.storage_path):
+    if not doc or not doc.storage_path:
         raise HTTPException(404, 'Document not available')
-    path = __import__('pathlib').Path(doc.storage_path).resolve()
-    if not path.exists() or not path.is_file():
+    try:
+        content = get_file_bytes(doc.storage_path)
+        return Response(
+            content=content,
+            media_type=doc.content_type or 'application/octet-stream',
+            headers={'Content-Disposition': f'attachment; filename="{doc.filename}"'},
+        )
+    except FileNotFoundError:
         raise HTTPException(404, 'Document not found')
-    return FileResponse(path, media_type=doc.content_type or 'application/octet-stream', filename=doc.filename)
+    except Exception as exc:
+        raise HTTPException(502, f'Failed to retrieve document: {exc}')
 
 
 @router.get('/notifications')
