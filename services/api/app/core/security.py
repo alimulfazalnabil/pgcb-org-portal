@@ -4,11 +4,15 @@ import hashlib
 import os
 import uuid
 
-from jose import jwt
-from passlib.context import CryptContext
-
-# Argon2id is highly recommended for modern secure password hashing
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+try:
+    from jose import jwt
+except ImportError:
+    import jwt
+try:
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+except ImportError:
+    pwd_context = None
 
 ALGORITHM = "HS256"
 SECRET_KEY = os.getenv("JWT_SECRET", "super-secret-development-key-change-me")
@@ -16,23 +20,30 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TTL", 30))
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    try:
-        return pwd_context.verify(plain_password, hashed_password)
-    except Exception:
-        # Fallback to legacy scrypt for demo accounts if present
+    if pwd_context is not None:
         try:
-            import base64, hmac
-            s, d = hashed_password.split('.', 1)
-            salt = base64.b64decode(s)
-            expected = base64.b64decode(d)
-            actual = hashlib.scrypt(plain_password.encode(), salt=salt, n=2**14, r=8, p=1)
-            return hmac.compare_digest(actual, expected)
+            return pwd_context.verify(plain_password, hashed_password)
         except Exception:
-            return False
+            pass
+    # Fallback to legacy scrypt for demo accounts if present
+    try:
+        import base64, hmac
+        s, d = hashed_password.split('.', 1)
+        salt = base64.b64decode(s)
+        expected = base64.b64decode(d)
+        actual = hashlib.scrypt(plain_password.encode(), salt=salt, n=2**14, r=8, p=1)
+        return hmac.compare_digest(actual, expected)
+    except Exception:
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    if pwd_context is not None:
+        return pwd_context.hash(password)
+    import base64
+    salt = os.urandom(16)
+    hashed = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
+    return f"{base64.b64encode(salt).decode('utf-8')}.{base64.b64encode(hashed).decode('utf-8')}"
 
 
 # Backward-compatible alias for existing callers

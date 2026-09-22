@@ -24,11 +24,7 @@ class Settings(BaseSettings):
     require_email_verification: bool = False
     max_upload_mb: int = 10
     storage_backend: str = 'local'
-    azure_storage_connection_string: str | None = None
-    azure_storage_account_url: str | None = None
-    azure_storage_container: str = 'pgcb-files'
-    azure_storage_use_managed_identity: bool = True
-    azure_key_vault_uri: str | None = None
+    storage_root: str = './storage'
     mfa_encryption_key: str | None = None
     rate_limit_enabled: bool = True
     redis_rate_limit_enabled: bool = True
@@ -69,16 +65,13 @@ class Settings(BaseSettings):
                     'JWT_SECRET must be configured with at least 32 characters in production. '
                     'Configure JWT_SECRET in your Render Environment or Blueprint shared-secrets.'
                 )
-            if self.storage_backend != 'azure':
+            if self.storage_backend != 'persistent_disk':
                 raise ValueError(
-                    "Production storage configuration invalid: STORAGE_BACKEND must be set to 'azure' "
-                    "for external persistent storage in production."
+                    "Production storage configuration invalid: STORAGE_BACKEND must be set to 'persistent_disk' "
+                    "for Render Persistent Disk storage in production."
                 )
-            if not (self.azure_storage_account_url or self.azure_storage_connection_string):
-                raise ValueError(
-                    "Production storage configuration invalid: STORAGE_BACKEND=azure requires "
-                    "AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT_URL to be configured in environment variables."
-                )
+            if not self.storage_root or self.storage_root == './storage':
+                self.storage_root = '/var/data/uploads'
             if self.require_email_verification is False:
                 # Explicitly allowed, but keep production configuration visible in docs/runbooks.
                 pass

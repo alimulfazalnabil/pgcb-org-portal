@@ -99,7 +99,7 @@ def upload_document(request: Request, document_type: str, file: UploadFile = Fil
         storage_path=stored, content_type=file.content_type, review_status='PENDING'
     )
     db.add(doc)
-    if document_type == 'PHOTO' and stored.startswith('http'):
+    if document_type == 'PHOTO':
         member.photo_url = stored
     audit(db, user, 'UPLOAD_DOCUMENT', 'MEMBER_DOCUMENT', member.id, request.client.host if request.client else None)
     db.commit(); db.refresh(doc)

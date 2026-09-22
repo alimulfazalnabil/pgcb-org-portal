@@ -18,6 +18,8 @@ from app.routers.payment_webhooks import router as payment_webhooks_router
 from app.routers.certificates import router as certificates_router
 from app.routers.workflows import router as workflows_router
 
+from app.storage import get_storage
+
 logger = logging.getLogger("pgcb.api")
 
 
@@ -26,8 +28,14 @@ async def lifespan(app: FastAPI):
     db_target = "sqlite" if settings.database_url.startswith("sqlite") else getattr(engine.url, "host", "postgresql")
     logger.info(
         f"[STARTUP] PGCB Portal API v1.0.0-rc1 | Env: {settings.app_env} | "
-        f"Storage: {settings.storage_backend} | DB Host: {db_target}"
+        f"Storage: {settings.storage_backend} ({settings.storage_root}) | DB Host: {db_target}"
     )
+    # Ensure storage root and subdirectories are created on persistent disk
+    try:
+        get_storage().ensure_root_exists()
+    except Exception as exc:
+        logger.warning(f"Storage root initialization warning: {exc}")
+
     yield
     logger.info("[SHUTDOWN] PGCB Portal API shutting down")
 
@@ -35,7 +43,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title='PGCB Organization Portal API',
     version='1.0.0-rc1',
-    description='Institutional website, membership portal, CMS, events, payments, verification, observability and Azure production API.',
+    description='Institutional website, membership portal, CMS, events, payments, verification, observability and production API.',
     lifespan=lifespan,
 )
 

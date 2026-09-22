@@ -12,10 +12,12 @@ import sys
 from pathlib import Path
 
 # Add services/api and repo root to sys.path so project modules can be loaded
-_repo_root = Path(__file__).resolve().parent.parent
-_api_dir = _repo_root / "services" / "api"
+_script_dir = Path(__file__).resolve().parent
+_api_dir = _script_dir.parent if _script_dir.name == "scripts" and _script_dir.parent.name == "api" else _script_dir.parent / "services" / "api"
+_repo_root = _api_dir.parent.parent if _api_dir.name == "api" else _script_dir.parent
+
 for path in (_repo_root, _api_dir):
-    if str(path) not in sys.path:
+    if path.is_dir() and str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 
@@ -35,10 +37,8 @@ def check_contract(mode: str) -> bool:
     app_env = os.getenv("APP_ENV", mode).lower()
     db_url = os.getenv("DATABASE_URL", "")
     redis_url = os.getenv("REDIS_URL", "")
-    storage_backend = os.getenv("STORAGE_BACKEND", "azure" if app_env == "production" else "local").lower()
-    azure_conn = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
-    azure_acc = os.getenv("AZURE_STORAGE_ACCOUNT_URL", "")
-    azure_container = os.getenv("AZURE_STORAGE_CONTAINER", "pgcb-files")
+    storage_backend = os.getenv("STORAGE_BACKEND", "persistent_disk" if app_env == "production" else "local").lower()
+    storage_root = os.getenv("STORAGE_ROOT", "/var/data/uploads" if app_env == "production" else "./storage")
     jwt_secret = os.getenv("JWT_SECRET", "")
     mfa_key = os.getenv("MFA_ENCRYPTION_KEY", "")
     frontend_url = os.getenv("FRONTEND_URL", "")
@@ -88,29 +88,23 @@ def check_contract(mode: str) -> bool:
             warnings.append(f"Unrecognized Redis scheme '{scheme}'")
             print(f"[!] REDIS_URL          : {scheme}://... {mask(redis_url)}")
 
-    # 4. Storage Backend Validation
+    # 4. Storage Backend Validation (Render Persistent Disk)
     print(f"[*] STORAGE_BACKEND    : {storage_backend}")
     if app_env == "production":
-        if storage_backend != "azure":
+        if storage_backend != "persistent_disk":
             failures.append(
-                f"STORAGE_BACKEND is '{storage_backend}'. Production strictly requires 'azure' "
-                f"to prevent permanent data loss when container instances restart."
+                f"STORAGE_BACKEND is '{storage_backend}'. Production strictly requires 'persistent_disk' "
+                f"with Render Persistent Disk (/var/data) to ensure file durability across container restarts."
             )
-            print(f"[-] STORAGE_BACKEND    : '{storage_backend}' [MUST BE 'azure' IN PRODUCTION]")
+            print(f"[-] STORAGE_BACKEND    : '{storage_backend}' [MUST BE 'persistent_disk' IN PRODUCTION]")
         else:
-            if not (azure_conn or azure_acc):
-                failures.append(
-                    "Azure Blob Storage credentials missing. Set AZURE_STORAGE_CONNECTION_STRING "
-                    "or AZURE_STORAGE_ACCOUNT_URL in environment or shared-secrets."
-                )
-                print("[-] AZURE_STORAGE_CONN : [MISSING REQUIRED CREDENTIALS]")
-            else:
-                cred_type = "connection_string" if azure_conn else "account_url"
-                val = azure_conn or azure_acc
-                print(f"[+] AZURE_STORAGE_CONN : ({cred_type}) {mask(val)}")
-            print(f"[+] AZURE_CONTAINER    : '{azure_container}'")
+            print(f"[+] STORAGE_BACKEND    : 'persistent_disk' (Render Persistent Disk)")
+            print(f"[+] STORAGE_ROOT       : '{storage_root}'")
+            if not storage_root or storage_root == "./storage":
+                warnings.append("STORAGE_ROOT is set to local default; in Render production this should be '/var/data/uploads'.")
     else:
         print(f"[+] STORAGE_BACKEND    : '{storage_backend}' (permitted in {app_env})")
+        print(f"[*] STORAGE_ROOT       : '{storage_root}'")
 
     # 5. Security Credentials Validation
     if not jwt_secret:

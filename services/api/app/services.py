@@ -3,9 +3,14 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.models import AuditLog, Member, Notification, User
+from app.core.config import settings
 
-BASE_STORAGE = Path(__file__).resolve().parents[1] / 'storage'
-BASE_STORAGE.mkdir(parents=True, exist_ok=True)
+try:
+    BASE_STORAGE = Path(settings.storage_root).resolve()
+    BASE_STORAGE.mkdir(parents=True, exist_ok=True)
+except Exception:
+    BASE_STORAGE = Path(__file__).resolve().parents[1] / 'storage'
+    BASE_STORAGE.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_DOC_TYPES = {'NID', 'CERTIFICATE', 'PHOTO', 'OTHER'}
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024

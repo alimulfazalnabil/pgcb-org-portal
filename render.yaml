@@ -32,6 +32,10 @@ services:
     rootDir: services/api
     region: singapore
     plan: starter
+    disk:
+      name: pgcb-api-data
+      mountPath: /var/data
+      sizeGB: 10
     preDeployCommand: python scripts/verify_production_contract.py && alembic upgrade head
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -130,10 +134,6 @@ envVarGroups:
       - key: MFA_ENCRYPTION_KEY
         generateValue: true
       - key: STORAGE_BACKEND
-        value: azure
-      - key: AZURE_STORAGE_CONTAINER
-        value: pgcb-files
-      - key: AZURE_STORAGE_CONNECTION_STRING
-        sync: false
-      - key: AZURE_STORAGE_ACCOUNT_URL
-        sync: false
+        value: persistent_disk
+      - key: STORAGE_ROOT
+        value: /var/data/uploads
