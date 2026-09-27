@@ -120,7 +120,47 @@ async def handle_payment_webhook(
     if not is_valid:
         raise HTTPException(status_code=400, detail="Invalid webhook signature")
 
-    # 4. Idempotency Check & Transaction Update
+    # 4. Look up CorePaymentTransaction first, then fallback to legacy PaymentTransaction
+    core_tx = None
+    if provider_trx_id:
+        core_tx = db.scalar(
+            select(CorePaymentTransaction).where(CorePaymentTransaction.transaction_ref == provider_trx_id)
+        )
+    if not core_tx and payload.get("payment_id") and str(payload["payment_id"]).isdigit():
+        core_tx = db.get(CorePaymentTransaction, int(payload["payment_id"]))
+
+    if core_tx:
+        if core_tx.status in ("PAID", "SUCCESS"):
+            if gateway_status in ("FAILED", "CANCELLED", "EXPIRED"):
+                raise HTTPException(status_code=409, detail=f"Illegal payment state transition: {core_tx.status} -> {gateway_status}")
+            return {"status": "already_processed", "idempotent_replay": True, "receipt_no": core_tx.receipt_no}
+
+        if gateway_status == "SUCCESS":
+            if payment_service.verify_payment(provider_trx_id, expected_amount=float(core_tx.amount)):
+                core_tx.provider_transaction_id = provider_trx_id
+                transition_payment_status(core_tx, "PAID")
+                ensure_receipt_metadata(core_tx)
+                activate_membership_from_payment(db, core_tx)
+                webhook_log.is_processed = True
+                db.commit()
+                log_audit_action(
+                    db, request,
+                    action="PAYMENT_COMPLETED",
+                    entity="PAYMENT",
+                    entity_id=str(core_tx.id),
+                    new_value={"provider": provider.value, "trx_id": provider_trx_id, "amount": float(core_tx.amount)},
+                )
+                return {"status": "success", "receipt_no": core_tx.receipt_no}
+            else:
+                transition_payment_status(core_tx, "FAILED")
+                db.commit()
+                return {"status": "verification_failed"}
+        elif gateway_status in ("FAILED", "CANCELLED", "EXPIRED"):
+            transition_payment_status(core_tx, gateway_status)
+            db.commit()
+            return {"status": gateway_status.lower()}
+
+    # Fallback for legacy gateway_payment_transactions table
     transaction = db.scalar(
         select(PaymentTransaction).where(
             PaymentTransaction.provider_transaction_id == provider_trx_id
@@ -144,7 +184,6 @@ async def handle_payment_webhook(
         return {"status": "already_processed"}
 
     if gateway_status == "SUCCESS":
-        # Double check with a synchronous server-to-server verification call
         if payment_service.verify_payment(provider_trx_id, expected_amount=float(transaction.amount)):
             transaction.status = PaymentStatus.PAID
             transaction.completed_at = datetime.utcnow()
@@ -159,14 +198,6 @@ async def handle_payment_webhook(
                 entity_id=str(transaction.id),
                 new_value={"provider": provider.value, "trx_id": provider_trx_id, "amount": transaction.amount}
             )
-
-            try:
-                from app.worker import send_receipt_task
-                if send_receipt_task:
-                    send_receipt_task.delay(str(transaction.id))
-            except Exception:
-                pass
-
             return {"status": "success"}
 
     return {"status": "ignored"}
