@@ -53,10 +53,11 @@ def update_profile(payload: MemberProfileUpdate, request: Request, user: User = 
         setattr(m, field, getattr(payload, field))
     audit(db, user, 'UPDATE_PROFILE', 'MEMBER', m.id, request.client.host if request.client else None)
     db.commit()
-    return {'ok': True}
+    return {'ok': True, 'id': m.id}
 
 
 @router.post('/application', response_model=ApplicationResponse)
+@router.post('/apply', response_model=ApplicationResponse)
 def submit_application(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
     m = get_member(user, db)
     if m.status == 'ACTIVE':

@@ -23,15 +23,36 @@ from app.services.email import EmailService
 
 
 DEFAULT_FEES = {
+    "ANNUAL_STANDARD": 2000,
     "GENERAL": 2000,
     "REGULAR": 2000,
     "LIFE": 10000,
     "RENEWAL": 2000,
     "APPLICATION": 500,
+    "ASSOCIATE": 1500,
+    "STUDENT": 500,
+}
+
+MEMBERSHIP_PLAN_FEES = {
+    "ANNUAL_STANDARD": 2000,
+    "ANNUAL_GENERAL": 2000,
+    "GENERAL": 2000,
+    "REGULAR": 2000,
+    "ANNUAL_RENEWAL": 2000,
+    "RENEWAL": 2000,
+    "APPLICATION": 500,
+    "NEW_APPLICATION": 500,
+    "ASSOCIATE": 1500,
+    "ANNUAL_ASSOCIATE": 1500,
+    "STUDENT": 500,
+    "ANNUAL_STUDENT": 500,
+    "LIFE": 10000,
+    "LIFETIME": 10000,
 }
 
 PURPOSE_LABELS = {
     "MEMBERSHIP": "Annual Membership Fee (বার্ষিক সদস্যপদ ফি)",
+    "MEMBERSHIP_FEE": "Annual Membership Fee (বার্ষিক সদস্যপদ ফি)",
     "RENEWAL": "Membership Renewal Fee (সদস্যপদ নবায়ন ফি)",
     "APPLICATION": "Membership Application Fee (সদস্যপদ আবেদন ফি)",
     "EVENT": "Event Registration Fee (ইভেন্ট নিবন্ধন ফি)",
@@ -67,7 +88,21 @@ def get_fee_schedule(db: Session) -> dict[str, int]:
             except ValueError:
                 pass
     schedule["REGULAR"] = schedule["GENERAL"]
+    schedule["ANNUAL_STANDARD"] = schedule["GENERAL"]
     return schedule
+
+
+def resolve_plan_amount(db: Session, membership_plan_id: str) -> int:
+    """Resolve authoritative server-side BDT fee from membership_plan_id."""
+    code = (membership_plan_id or "").strip().upper()
+    if not code:
+        raise ValueError("membership_plan_id cannot be empty")
+    schedule = get_fee_schedule(db)
+    if code in schedule:
+        return int(schedule[code])
+    if code in MEMBERSHIP_PLAN_FEES:
+        return int(MEMBERSHIP_PLAN_FEES[code])
+    raise ValueError(f"Unsupported membership_plan_id: {membership_plan_id}")
 
 
 def calculate_official_fee(
@@ -75,8 +110,11 @@ def calculate_official_fee(
     purpose: str,
     membership_type: str = "GENERAL",
     event_id: int | None = None,
+    membership_plan_id: str | None = None,
 ) -> int | None:
-    """Return the required server-side fee for a purpose, or None if variable (e.g. DONATION)."""
+    """Return the required server-side fee for a purpose or plan, or None if variable (e.g. DONATION)."""
+    if membership_plan_id:
+        return resolve_plan_amount(db, membership_plan_id)
     p = (purpose or "MEMBERSHIP").strip().upper()
     schedule = get_fee_schedule(db)
     if p == "EVENT" and event_id:
@@ -86,10 +124,11 @@ def calculate_official_fee(
         return schedule["RENEWAL"]
     if p == "APPLICATION":
         return schedule["APPLICATION"]
-    if p == "MEMBERSHIP":
+    if p in {"MEMBERSHIP", "MEMBERSHIP_FEE"}:
         mtype = (membership_type or "GENERAL").strip().upper()
         return schedule.get(mtype, schedule["GENERAL"])
     return None
+
 
 
 def receipt_number_for(payment: PaymentTransaction) -> str:
@@ -139,7 +178,7 @@ def activate_membership_from_payment(
     else:
         member = db.get(Member, payment.member_id) if payment.member_id else None
 
-    if not member or payment.purpose not in {"MEMBERSHIP", "RENEWAL", "APPLICATION"}:
+    if not member or payment.purpose not in {"MEMBERSHIP", "MEMBERSHIP_FEE", "RENEWAL", "APPLICATION"}:
         return member
 
     user = db.get(User, member.user_id) if member.user_id else None
@@ -147,7 +186,8 @@ def activate_membership_from_payment(
         member.membership_id = next_membership_id(db)
 
     existing_renewal = db.scalar(select(MembershipRenewal).where(MembershipRenewal.payment_id == payment.id))
-    if not existing_renewal:
+    is_first_activation = existing_renewal is None
+    if is_first_activation:
         renew_membership(db, member, payment.id, int(payment.amount), payment.currency)
     else:
         member.status = "ACTIVE"
@@ -180,7 +220,7 @@ def activate_membership_from_payment(
     except Exception:
         pass
 
-    if user:
+    if user and is_first_activation:
         db.add(
             Notification(
                 user_id=user.id,
@@ -204,6 +244,7 @@ def activate_membership_from_payment(
             pass
 
     return member
+
 
 
 def build_receipt_payload(db: Session, payment: PaymentTransaction) -> dict:

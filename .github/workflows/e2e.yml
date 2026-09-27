@@ -3,11 +3,25 @@ name: End-to-End
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, develop, render-staging-hardening]
+    branches: [main, develop, phase-2-upgrade]
 
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pgcb_test
+          POSTGRES_PASSWORD: pgcb_test_pass
+          POSTGRES_DB: pgcb_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +38,7 @@ jobs:
         working-directory: services/api
         env:
           APP_ENV: test
-          DATABASE_URL: sqlite:///./e2e.db
+          DATABASE_URL: postgresql+psycopg://pgcb_test:pgcb_test_pass@127.0.0.1:5432/pgcb_test_db
           JWT_SECRET: e2e-test-secret-change-me-32-characters-minimum
           FRONTEND_URL: http://127.0.0.1:3000
           REQUIRE_EMAIL_VERIFICATION: 'false'
@@ -50,13 +64,14 @@ jobs:
         working-directory: apps/web
         run: npx playwright install --with-deps chromium
 
-      - name: Run Next.js
+      - name: Build and Run Next.js
         working-directory: apps/web
         env:
           INTERNAL_API_URL: http://127.0.0.1:8000
           NEXT_PUBLIC_API_BASE_PATH: /backend
         run: |
-          nohup npm run dev >/tmp/pgcb-web.log 2>&1 &
+          npm run build
+          nohup npm run start -- --hostname 127.0.0.1 --port 3000 >/tmp/pgcb-web.log 2>&1 &
           for i in {1..60}; do curl -fsS http://127.0.0.1:3000 >/dev/null && break; sleep 2; done
 
       - name: Run Playwright

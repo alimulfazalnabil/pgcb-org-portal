@@ -75,5 +75,19 @@ class RateLimiter:
 limiter = RateLimiter()
 
 def client_key(request: Request, scope: str) -> str:
-    host = request.client.host if request.client else 'unknown'
+    host = None
+    if settings.trusted_proxy_count > 0:
+        cf_ip = request.headers.get('CF-Connecting-IP')
+        if cf_ip and cf_ip.strip():
+            host = cf_ip.strip()
+        else:
+            xff = request.headers.get('X-Forwarded-For')
+            if xff:
+                parts = [p.strip() for p in xff.split(',') if p.strip()]
+                if parts:
+                    idx = max(0, len(parts) - settings.trusted_proxy_count)
+                    host = parts[idx]
+    if not host:
+        host = request.client.host if request.client else 'unknown'
     return f'{scope}:{host}'
+

@@ -52,8 +52,29 @@ async def receive_webhook(provider: str, request: Request, x_signature: str | No
         return {'ok': True, 'matched': False}
 
     event.payment_id = payment.id
+
+    # Idempotency & State Machine check: if already PAID/SUCCESS, never downgrade to FAILED/CANCELLED
+    if payment.status in ('PAID', 'SUCCESS'):
+        if status in ('FAILED', 'CANCELLED', 'EXPIRED'):
+            event.processing_status = 'REJECTED_ILLEGAL_TRANSITION'
+            event.processed_at = datetime.utcnow()
+            db.commit()
+            raise HTTPException(409, f'Illegal payment state transition: {payment.status} -> {status}')
+        event.processing_status = 'ALREADY_PROCESSED'
+        event.processed_at = datetime.utcnow()
+        db.commit()
+        return {
+            'ok': True,
+            'duplicate': True,
+            'matched': True,
+            'payment_id': payment.id,
+            'status': payment.status,
+            'receipt_no': payment.receipt_no,
+        }
+
     if provider_txn:
         payment.transaction_ref = provider_txn
+        payment.provider_transaction_id = provider_txn
 
     if status == 'PAID':
         # Server-to-server gateway verification & amount check
@@ -74,7 +95,7 @@ async def receive_webhook(provider: str, request: Request, x_signature: str | No
             registration = db.get(EventRegistration, payment.event_registration_id)
             if registration:
                 registration.payment_status = 'PAID'
-        if payment.purpose in {'MEMBERSHIP', 'RENEWAL', 'APPLICATION'}:
+        if payment.purpose in {'MEMBERSHIP', 'MEMBERSHIP_FEE', 'RENEWAL', 'APPLICATION'}:
             activate_membership_from_payment(db, payment)
 
     event.processing_status = 'PROCESSED'
@@ -87,3 +108,4 @@ async def receive_webhook(provider: str, request: Request, x_signature: str | No
         'status': payment.status,
         'receipt_no': payment.receipt_no,
     }
+

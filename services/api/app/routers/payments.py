@@ -21,8 +21,10 @@ from app.services.receipt_service import (
     ensure_receipt_metadata,
     generate_receipt_pdf_bytes,
     get_fee_schedule,
+    resolve_plan_amount,
     verify_receipt_token,
 )
+from app.services.payment_service import transition_payment_status, validate_payment_transition
 
 router = APIRouter(tags=["Payments"])
 
@@ -32,16 +34,30 @@ VALID_MEMBERSHIP_AMOUNTS = {500, 1000, 1500, 2000, 2500, 5000, 10000}
 def _validate_payment_amount(
     db: Session,
     purpose: str,
-    amount: float,
+    amount: float | None,
     member: Member | None,
     event_registration_id: int | None,
     user: User,
-) -> EventRegistration | None:
-    if amount <= 0:
-        raise HTTPException(400, "Payment amount must be greater than zero")
-
+    membership_plan_id: str | None = None,
+) -> tuple[EventRegistration | None, int]:
     registration = None
     norm_purpose = (purpose or "MEMBERSHIP").strip().upper()
+
+    # 1. If membership_plan_id is provided, compute authoritative fee on the server
+    if membership_plan_id:
+        try:
+            plan_amount = resolve_plan_amount(db, membership_plan_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if amount is not None and int(amount) != int(plan_amount):
+            raise HTTPException(
+                400,
+                f"Client amount (৳{amount}) does not match server-calculated fee (৳{plan_amount}) for plan {membership_plan_id}",
+            )
+        amount = float(plan_amount)
+
+    if amount is None or amount <= 0:
+        raise HTTPException(422 if amount is not None and amount <= 0 else 400, "Payment amount must be greater than zero")
 
     if event_registration_id:
         registration = db.scalar(
@@ -57,9 +73,9 @@ def _validate_payment_amount(
             raise HTTPException(409, "No payment is required for this event")
         if int(amount) != int(event.fee_amount):
             raise HTTPException(400, "Payment amount does not match event fee")
-        return registration
+        return registration, int(amount)
 
-    if norm_purpose in {"MEMBERSHIP", "RENEWAL", "APPLICATION"}:
+    if norm_purpose in {"MEMBERSHIP", "MEMBERSHIP_FEE", "RENEWAL", "APPLICATION"} and not membership_plan_id:
         if not member:
             raise HTTPException(404, "Member profile not found")
         expected = calculate_official_fee(db, norm_purpose, getattr(member, "membership_type", "GENERAL"))
@@ -71,7 +87,7 @@ def _validate_payment_amount(
                 400,
                 f"Payment amount (৳{amount}) does not match official PGCB fee schedule",
             )
-    return None
+    return None, int(amount)
 
 
 # ==========================================================
@@ -124,7 +140,7 @@ async def handle_payment_webhook(
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    if transaction.status in (PaymentStatus.PAID, "PAID"):
+    if transaction.status in (PaymentStatus.PAID, "PAID", "SUCCESS"):
         return {"status": "already_processed"}
 
     if gateway_status == "SUCCESS":
@@ -168,6 +184,7 @@ def public_membership_fees(db: Session = Depends(get_db)):
         "fees": schedule,
         "tiers": [
             {"code": "APPLICATION", "title_bn": "আবেদন ও নিবন্ধন ফি", "title_en": "Application Fee", "amount": schedule["APPLICATION"]},
+            {"code": "ANNUAL_STANDARD", "title_bn": "বার্ষিক সাধারণ সদস্যপদ ফি", "title_en": "Annual Standard Membership Fee", "amount": schedule["ANNUAL_STANDARD"]},
             {"code": "GENERAL", "title_bn": "বার্ষিক সাধারণ সদস্যপদ ফি", "title_en": "Annual General Membership Fee", "amount": schedule["GENERAL"]},
             {"code": "RENEWAL", "title_bn": "বার্ষিক নবায়ন ফি", "title_en": "Annual Renewal Fee", "amount": schedule["RENEWAL"]},
             {"code": "LIFE", "title_bn": "আজীবন সদস্যপদ ফি", "title_en": "Life Membership Fee", "amount": schedule["LIFE"]},
@@ -196,15 +213,38 @@ def member_fee_calculation(user: User = Depends(current_user), db: Session = Dep
 
 
 @router.post("/member/payments")
-def create_payment(payload: PaymentCreate, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def create_payment(
+    payload: PaymentCreate,
+    request: Request,
+    x_idempotency_key: str | None = Header(default=None),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    idem_key = (payload.idempotency_key or x_idempotency_key or "").strip() or None
+    if idem_key:
+        existing = db.scalar(select(CorePaymentTransaction).where(CorePaymentTransaction.idempotency_key == idem_key))
+        if existing:
+            return {
+                'id': existing.id,
+                'status': existing.status,
+                'amount': existing.amount,
+                'currency': existing.currency,
+                'provider': existing.provider,
+                'transaction_ref': existing.transaction_ref,
+                'membership_plan_id': existing.membership_plan_id,
+                'idempotent_replay': True,
+                'message': 'Existing idempotent payment returned.'
+            }
+
     member = db.scalar(select(Member).where(Member.user_id == user.id))
-    registration = _validate_payment_amount(
+    registration, validated_amount = _validate_payment_amount(
         db,
         payload.purpose,
         payload.amount,
         member,
         payload.event_registration_id,
         user,
+        membership_plan_id=payload.membership_plan_id,
     )
     if registration:
         registration.payment_status = 'PENDING'
@@ -213,7 +253,9 @@ def create_payment(payload: PaymentCreate, request: Request, user: User = Depend
         user_id=user.id,
         member_id=member.id if member else None,
         event_registration_id=payload.event_registration_id,
-        amount=int(payload.amount),
+        membership_plan_id=payload.membership_plan_id.upper() if payload.membership_plan_id else None,
+        idempotency_key=idem_key,
+        amount=int(validated_amount),
         currency=payload.currency.upper(),
         provider=payload.provider.upper() if payload.provider else 'MANUAL',
         purpose=payload.purpose.upper() if payload.purpose else 'MEMBERSHIP',
@@ -229,7 +271,7 @@ def create_payment(payload: PaymentCreate, request: Request, user: User = Depend
         entity="PAYMENT",
         entity_id=str(item.id),
         user=user,
-        new_value={"amount": item.amount, "currency": item.currency, "provider": str(item.provider)}
+        new_value={"amount": item.amount, "currency": item.currency, "provider": str(item.provider), "plan": item.membership_plan_id}
     )
     db.commit()
     db.refresh(item)
@@ -241,6 +283,7 @@ def create_payment(payload: PaymentCreate, request: Request, user: User = Depend
         'currency': item.currency,
         'provider': item.provider,
         'transaction_ref': item.transaction_ref,
+        'membership_plan_id': item.membership_plan_id,
         'message': 'Payment intent created. Connect a configured gateway or submit transaction reference for verification.'
     }
 
@@ -248,27 +291,54 @@ def create_payment(payload: PaymentCreate, request: Request, user: User = Depend
 @router.post("/member/payments/checkout")
 @router.post("/member/payments/initiate")
 @router.post("/payments/checkout")
-def create_checkout_intent(payload: PaymentCreate, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def create_checkout_intent(
+    payload: PaymentCreate,
+    request: Request,
+    x_idempotency_key: str | None = Header(default=None),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
     try:
         provider = normalize_provider(payload.provider)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    idem_key = (payload.idempotency_key or x_idempotency_key or "").strip() or None
+    if idem_key:
+        existing = db.scalar(select(CorePaymentTransaction).where(CorePaymentTransaction.idempotency_key == idem_key))
+        if existing:
+            return {
+                'id': existing.id,
+                'payment_id': existing.id,
+                'provider': existing.provider,
+                'transaction_id': existing.transaction_ref,
+                'provider_transaction_id': existing.provider_transaction_id or existing.transaction_ref,
+                'checkout_url': f"/portal?payment_id={existing.id}",
+                'status': existing.status,
+                'amount': float(existing.amount),
+                'currency': existing.currency,
+                'membership_plan_id': existing.membership_plan_id,
+                'idempotent_replay': True,
+            }
+
     member = db.scalar(select(Member).where(Member.user_id == user.id))
-    registration = _validate_payment_amount(
+    registration, validated_amount = _validate_payment_amount(
         db,
         payload.purpose,
         payload.amount,
         member,
         payload.event_registration_id,
         user,
+        membership_plan_id=payload.membership_plan_id,
     )
 
     item = CorePaymentTransaction(
         user_id=user.id,
         member_id=member.id if member else None,
         event_registration_id=registration.id if registration else None,
-        amount=int(payload.amount),
+        membership_plan_id=payload.membership_plan_id.upper() if payload.membership_plan_id else None,
+        idempotency_key=idem_key,
+        amount=int(validated_amount),
         currency=payload.currency.upper(),
         provider=provider,
         purpose=payload.purpose.upper(),
@@ -294,7 +364,7 @@ def create_checkout_intent(payload: PaymentCreate, request: Request, user: User 
         entity="PAYMENT",
         entity_id=str(item.id),
         user=user,
-        new_value={"provider": provider, "trx_id": checkout.provider_transaction_id, "amount": float(item.amount)}
+        new_value={"provider": provider, "trx_id": checkout.provider_transaction_id, "amount": float(item.amount), "plan": item.membership_plan_id}
     )
     db.commit()
     db.refresh(item)
@@ -308,7 +378,8 @@ def create_checkout_intent(payload: PaymentCreate, request: Request, user: User 
         'checkout_url': checkout.checkout_url,
         'status': item.status,
         'amount': float(item.amount),
-        'currency': item.currency
+        'currency': item.currency,
+        'membership_plan_id': item.membership_plan_id,
     }
 
 
@@ -332,12 +403,39 @@ def confirm_payment_transaction(
     if not ref_to_verify:
         raise HTTPException(400, "Missing provider transaction reference")
 
+    # Idempotency check: if already PAID/SUCCESS, return existing result without re-processing
+    if payment.status in ("PAID", "SUCCESS"):
+        return {
+            "id": payment.id,
+            "status": payment.status,
+            "receipt_no": payment.receipt_no,
+            "transaction_ref": payment.transaction_ref,
+            "provider_transaction_id": payment.provider_transaction_id,
+            "amount": float(payment.amount),
+            "currency": payment.currency,
+            "idempotent_replay": True,
+        }
+
+    if not validate_payment_transition(payment.status, "PAID"):
+        raise HTTPException(409, f"Illegal payment state transition: {payment.status} -> PAID")
+
+    # Check if another transaction already claimed this provider_transaction_id
+    dup_trx = db.scalar(
+        select(CorePaymentTransaction).where(
+            CorePaymentTransaction.provider_transaction_id_col == ref_to_verify,
+            CorePaymentTransaction.id != payment.id,
+        )
+    )
+    if dup_trx:
+        raise HTTPException(409, "provider_transaction_id already processed for another transaction")
+
     gateway = get_payment_provider(payment.provider or "SSLCOMMERZ")
     if not gateway.verify_payment(ref_to_verify, expected_amount=float(payment.amount)):
         raise HTTPException(400, "Server-to-server gateway verification failed for transaction")
 
     payment.transaction_ref = ref_to_verify
-    payment.status = "PAID"
+    payment.provider_transaction_id = ref_to_verify
+    transition_payment_status(payment, "PAID")
     ensure_receipt_metadata(payment)
     activate_membership_from_payment(db, payment)
     db.commit()
@@ -347,8 +445,119 @@ def confirm_payment_transaction(
         "status": payment.status,
         "receipt_no": payment.receipt_no,
         "transaction_ref": payment.transaction_ref,
+        "provider_transaction_id": payment.provider_transaction_id,
         "amount": float(payment.amount),
         "currency": payment.currency,
+    }
+
+
+@router.post("/payments/callback/{provider}")
+@router.post("/member/payments/callback/{provider}")
+def callback_payment_transaction(
+    provider: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Production Payment Callback / Server Verification Endpoint:
+    Provider -> Transaction -> Gateway -> Callback -> Server verification ->
+    Idempotency -> State Machine -> SUCCESS -> Membership activation -> Receipt.
+    """
+    tx_lookup = payload.get("transaction_id") or payload.get("payment_id") or payload.get("tran_id")
+    if not tx_lookup:
+        raise HTTPException(400, "Missing transaction_id in callback payload")
+
+    payment = None
+    if str(tx_lookup).isdigit():
+        payment = db.get(CorePaymentTransaction, int(tx_lookup))
+    if not payment:
+        payment = db.scalar(select(CorePaymentTransaction).where(CorePaymentTransaction.transaction_ref == str(tx_lookup)))
+    if not payment:
+        raise HTTPException(404, "Payment transaction not found")
+
+    prov_trx_id = (
+        payload.get("provider_transaction_id")
+        or payload.get("trxID")
+        or payload.get("trx_id")
+        or payload.get("val_id")
+        or payload.get("issuer_trx_id")
+        or payment.transaction_ref
+        or ""
+    ).strip()
+    incoming_status = str(payload.get("status") or "SUCCESS").strip().upper()
+    target_status = "PAID" if incoming_status in ("SUCCESS", "PAID", "COMPLETED", "VALID") else incoming_status
+
+    # 1. Cross-transaction provider_transaction_id uniqueness check
+    if prov_trx_id:
+        dup_trx = db.scalar(
+            select(CorePaymentTransaction).where(
+                CorePaymentTransaction.provider_transaction_id_col == prov_trx_id,
+                CorePaymentTransaction.id != payment.id,
+            )
+        )
+        if dup_trx:
+            raise HTTPException(409, "provider_transaction_id already processed for another transaction")
+
+    # 2. Idempotency & State Machine guard for already completed payments
+    if payment.status in ("PAID", "SUCCESS"):
+        if target_status in ("FAILED", "CANCELLED", "EXPIRED"):
+            raise HTTPException(409, f"Illegal payment state transition: {payment.status} -> {target_status}")
+        return {
+            "id": payment.id,
+            "payment_id": payment.id,
+            "transaction_id": payment.transaction_ref,
+            "provider_transaction_id": payment.provider_transaction_id,
+            "status": payment.status,
+            "receipt_no": payment.receipt_no,
+            "amount": float(payment.amount),
+            "currency": payment.currency,
+            "idempotent_replay": True,
+        }
+
+    # 3. Validate state transition
+    if not validate_payment_transition(payment.status, target_status):
+        raise HTTPException(409, f"Illegal payment state transition: {payment.status} -> {target_status}")
+
+    if target_status in ("FAILED", "CANCELLED", "EXPIRED"):
+        transition_payment_status(payment, target_status)
+        db.commit()
+        db.refresh(payment)
+        return {
+            "id": payment.id,
+            "payment_id": payment.id,
+            "transaction_id": payment.transaction_ref,
+            "status": payment.status,
+        }
+
+    # 4. Server-to-server gateway verification & amount check
+    if not prov_trx_id:
+        transition_payment_status(payment, "FAILED")
+        db.commit()
+        raise HTTPException(400, "Missing provider_transaction_id for verification")
+
+    gateway = get_payment_provider(provider or payment.provider or "TEST")
+    if not gateway.verify_payment(prov_trx_id, expected_amount=float(payment.amount)):
+        transition_payment_status(payment, "FAILED")
+        db.commit()
+        raise HTTPException(400, "Server-to-server gateway verification failed for transaction")
+
+    payment.provider_transaction_id = prov_trx_id
+    transition_payment_status(payment, "PAID")
+    ensure_receipt_metadata(payment)
+    activate_membership_from_payment(db, payment)
+    db.commit()
+    db.refresh(payment)
+    return {
+        "id": payment.id,
+        "payment_id": payment.id,
+        "transaction_id": payment.transaction_ref,
+        "provider_transaction_id": payment.provider_transaction_id,
+        "status": payment.status,
+        "receipt_no": payment.receipt_no,
+        "amount": float(payment.amount),
+        "currency": payment.currency,
+        "idempotent_replay": False,
     }
 
 
@@ -383,9 +592,13 @@ def list_payments(user: User = Depends(current_user), db: Session = Depends(get_
 
 
 @router.get("/member/payments/{payment_id}/receipt")
-def get_payment_receipt(payment_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def get_payment_receipt(payment_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     member = db.scalar(select(Member).where(Member.user_id == user.id))
-    payment = db.get(CorePaymentTransaction, payment_id)
+    payment = None
+    if str(payment_id).isdigit():
+        payment = db.get(CorePaymentTransaction, int(payment_id))
+    if not payment:
+        payment = db.scalar(select(CorePaymentTransaction).where(CorePaymentTransaction.transaction_ref == str(payment_id)))
     if not payment:
         raise HTTPException(404, "Payment transaction not found")
     is_owner = (payment.user_id == user.id) or (member and payment.member_id == member.id)
@@ -402,7 +615,7 @@ def get_payment_receipt(payment_id: int, user: User = Depends(current_user), db:
 
 @router.get("/member/payments/{payment_id}/receipt.pdf")
 @router.get("/member/payments/{payment_id}/receipt/pdf")
-def download_payment_receipt_pdf(payment_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def download_payment_receipt_pdf(payment_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     receipt = get_payment_receipt(payment_id, user, db)
     pdf_bytes = generate_receipt_pdf_bytes(receipt)
     filename = f"{receipt['receipt_no']}.pdf"

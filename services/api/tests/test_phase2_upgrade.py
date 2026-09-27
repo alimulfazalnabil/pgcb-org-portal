@@ -355,3 +355,335 @@ def test_phase2_5_institutional_ai_helpdesk():
         assert circ_ask.status_code == 200
         assert circ_ask.json()['matched_topic'] == 'circulars'
         assert len(circ_ask.json()['citations']) >= 1
+
+
+def test_sprint1_payment_security_idempotency_and_state_machine():
+    """
+    Verify Sprint 1 Production Hardening:
+    1. Server-calculated amount for membership_plan_id (reject tampered amount=1 for ANNUAL_STANDARD).
+    2. Idempotency via idempotency_key and provider_transaction_id (no duplicate notifications on replay; 409 on cross-tx reuse).
+    3. Strict transaction state machine (SUCCESS -> FAILED is impossible; missing trxID in bKash/Nagad fails verification).
+    """
+    from app.models.core import PaymentTransaction
+    from app.services.payment_service import BKashProvider, NagadProvider
+
+    # 1. Verify bKash and Nagad never synthesize a fake trxID when trxID is missing
+    dummy_trx = PaymentTransaction(id=999999, transaction_ref='PGCB-TX-TEST-1', amount=2000.0, status='PENDING')
+    bkash_missing = BKashProvider().verify_payment(dummy_trx, {})
+    assert bkash_missing['success'] is False
+    assert bkash_missing['status'] == 'FAILED'
+    assert bkash_missing['provider_transaction_id'] is None
+
+    nagad_missing = NagadProvider().verify_payment(dummy_trx, {'issuerPaymentRefNo': ''})
+    assert nagad_missing['success'] is False
+    assert nagad_missing['status'] == 'FAILED'
+    assert nagad_missing['provider_transaction_id'] is None
+
+    with TestClient(app) as client:
+        headers = _login(client, 'member@example.org')
+
+        # 2. Tampered client amount (amount=1 with membership_plan_id='ANNUAL_STANDARD') MUST be rejected (HTTP 400)
+        tampered_res = client.post(
+            '/api/v1/member/payments/checkout',
+            headers=headers,
+            json={
+                'membership_plan_id': 'ANNUAL_STANDARD',
+                'amount': 1,
+                'currency': 'BDT',
+                'purpose': 'MEMBERSHIP',
+                'provider': 'TEST',
+            },
+        )
+        assert tampered_res.status_code == 400
+        assert 'ANNUAL_STANDARD' in tampered_res.json()['detail']
+
+        # Unknown membership_plan_id MUST be rejected (HTTP 400)
+        invalid_plan_res = client.post(
+            '/api/v1/member/payments/checkout',
+            headers=headers,
+            json={
+                'membership_plan_id': 'FAKE_PLAN_999',
+                'provider': 'TEST',
+            },
+        )
+        assert invalid_plan_res.status_code == 400
+
+        # 3. Valid membership_plan_id ('ANNUAL_STANDARD') calculates ৳2,000 server-side + idempotency_key deduplication
+        from datetime import datetime
+        unique_ts = int(datetime.utcnow().timestamp() * 1000)
+        idem_key = f'idem-sprint1-annual-standard-{unique_ts}-1'
+        checkout_1 = client.post(
+            '/api/v1/member/payments/checkout',
+            headers=headers,
+            json={
+                'membership_plan_id': 'ANNUAL_STANDARD',
+                'currency': 'BDT',
+                'purpose': 'MEMBERSHIP',
+                'provider': 'TEST',
+                'idempotency_key': idem_key,
+            },
+        )
+        assert checkout_1.status_code == 200, checkout_1.text
+        c1_data = checkout_1.json()
+        assert c1_data['amount'] == 2000.0
+        assert c1_data['membership_plan_id'] == 'ANNUAL_STANDARD'
+        tx_id = c1_data['transaction_id']
+        prov_tx_id = c1_data['provider_transaction_id']
+
+        # Re-submitting with the same idempotency_key returns the exact same transaction
+        checkout_2 = client.post(
+            '/api/v1/member/payments/checkout',
+            headers=headers,
+            json={
+                'membership_plan_id': 'ANNUAL_STANDARD',
+                'currency': 'BDT',
+                'purpose': 'MEMBERSHIP',
+                'provider': 'TEST',
+                'idempotency_key': idem_key,
+            },
+        )
+        assert checkout_2.status_code == 200
+        assert checkout_2.json()['transaction_id'] == tx_id
+
+        # 4. Complete payment via callback and verify idempotent replay does not duplicate notifications
+        unread_before = client.get('/api/v1/member/notifications/unread-count', headers=headers).json()['unread_count']
+
+        cb_1 = client.post(
+            '/api/v1/payments/callback/TEST',
+            json={
+                'transaction_id': tx_id,
+                'provider_transaction_id': prov_tx_id,
+                'status': 'SUCCESS',
+                'amount': 2000.0,
+            },
+        )
+        assert cb_1.status_code == 200, cb_1.text
+        assert cb_1.json()['status'] in ('PAID', 'SUCCESS')
+
+        unread_after_first = client.get('/api/v1/member/notifications/unread-count', headers=headers).json()['unread_count']
+        assert unread_after_first == unread_before + 1
+
+        # Replay identical callback -> returns 200 with idempotent_replay=True and does NOT increment notifications
+        cb_replay = client.post(
+            '/api/v1/payments/callback/TEST',
+            json={
+                'transaction_id': tx_id,
+                'provider_transaction_id': prov_tx_id,
+                'status': 'SUCCESS',
+                'amount': 2000.0,
+            },
+        )
+        assert cb_replay.status_code == 200
+        assert cb_replay.json().get('idempotent_replay') is True
+
+        unread_after_replay = client.get('/api/v1/member/notifications/unread-count', headers=headers).json()['unread_count']
+        assert unread_after_replay == unread_after_first
+
+        # 5. State machine guard: SUCCESS -> FAILED transition via callback MUST be rejected with HTTP 409
+        invalid_transition = client.post(
+            '/api/v1/payments/callback/TEST',
+            json={
+                'transaction_id': tx_id,
+                'provider_transaction_id': prov_tx_id,
+                'status': 'FAILED',
+            },
+        )
+        assert invalid_transition.status_code == 409
+
+        # 6. Cross-transaction provider_transaction_id reuse MUST be rejected with HTTP 409
+        other_checkout = client.post(
+            '/api/v1/member/payments/checkout',
+            headers=headers,
+            json={
+                'membership_plan_id': 'ANNUAL_STANDARD',
+                'provider': 'TEST',
+                'idempotency_key': f'idem-sprint1-annual-standard-{unique_ts}-2',
+            },
+        )
+        assert other_checkout.status_code == 200
+        other_tx_id = other_checkout.json()['transaction_id']
+        assert other_tx_id != tx_id
+
+        reuse_prov_tx = client.post(
+            '/api/v1/payments/callback/TEST',
+            json={
+                'transaction_id': other_tx_id,
+                'provider_transaction_id': prov_tx_id,  # Already used by tx_id!
+                'status': 'SUCCESS',
+            },
+        )
+        assert reuse_prov_tx.status_code == 409
+
+
+def test_sprint1_first_production_test_pgd_test_0001():
+    """
+    Step 8 — First Production Test (TEST MEMBER / PGD-TEST-0001):
+    Register -> Login -> Profile -> Document -> Membership application ->
+    Admin approval (PGD-TEST-0001) -> Test payment -> Digital ID ->
+    QR verification -> Certificate -> Email/In-App notification.
+    """
+    with TestClient(app) as client:
+        test_email = 'pgd.test.0001@example.org'
+
+        # 1. Register TEST MEMBER
+        reg_res = client.post(
+            '/api/v1/auth/register',
+            json={
+                'email': test_email,
+                'password': TEST_PW,
+                'name_bn': 'টেস্ট সদস্য প্রকৌশলী',
+                'name_en': 'TEST MEMBER',
+                'phone': '01799000001',
+            },
+        )
+        assert reg_res.status_code in (200, 400, 409)  # 400/409 if re-run in same DB
+
+        # 2. Login as TEST MEMBER
+        member_headers = _login(client, test_email)
+
+        # 3. Profile update
+        prof_patch = client.patch(
+            '/api/v1/member/profile',
+            headers=member_headers,
+            json={
+                'name_bn': 'টেস্ট সদস্য প্রকৌশলী',
+                'name_en': 'TEST MEMBER',
+                'phone': '01799000001',
+                'designation_bn': 'সহকারী প্রকৌশলী',
+                'designation_en': 'Assistant Engineer',
+                'employee_id': 'PGCB-TEST-0001',
+                'diploma_institution': 'ঢাকা পলিটেকনিক ইনস্টিটিউট',
+                'graduation_year': 2016,
+                'nid_number': '1994000000001',
+                'current_address': 'পিজিসিবি প্রধান কার্যালয়, ঢাকা',
+                'permanent_address': 'ঢাকা, বাংলাদেশ',
+            },
+        )
+        assert prof_patch.status_code == 200, prof_patch.text
+        member_id = prof_patch.json()['id']
+
+        # 4. Document upload (valid PDF)
+        doc_res = client.post(
+            '/api/v1/member/documents?document_type=NID',
+            headers=member_headers,
+            files={'file': ('pgd_test_0001_nid.pdf', b'%PDF-1.4\n%PGD-TEST-0001 NID\n%%EOF', 'application/pdf')},
+        )
+        assert doc_res.status_code == 200, doc_res.text
+
+        # 5. Membership application submission
+        apply_res = client.post('/api/v1/member/apply', headers=member_headers)
+        assert apply_res.status_code in (200, 409), apply_res.text
+
+        # 6. Admin approval with dedicated ID PGD-TEST-0001
+        admin_headers = _login(client, 'admin@example.org')
+        approve_res = client.post(
+            f'/api/v1/admin/members/{member_id}/review',
+            params={'action': 'APPROVE', 'membership_id': 'PGD-TEST-0001'},
+            headers=admin_headers,
+        )
+        assert approve_res.status_code == 200, approve_res.text
+        assert approve_res.json()['membership_id'] == 'PGD-TEST-0001'
+        assert approve_res.json()['status'] == 'ACTIVE'
+
+        # Switch back to TEST MEMBER session for steps 7-9
+        member_headers = _login(client, test_email)
+
+        # 7. Test payment (ANNUAL_STANDARD -> ৳2,000 -> callback -> receipt)
+        pay_init = client.post(
+            '/api/v1/member/payments/checkout',
+            headers=member_headers,
+            json={
+                'membership_plan_id': 'ANNUAL_STANDARD',
+                'provider': 'TEST',
+                'idempotency_key': 'pgd-test-0001-annual-payment',
+            },
+        )
+        assert pay_init.status_code == 200, pay_init.text
+        pay_data = pay_init.json()
+        assert pay_data['amount'] == 2000.0
+
+        pay_cb = client.post(
+            '/api/v1/payments/callback/TEST',
+            json={
+                'transaction_id': pay_data['transaction_id'],
+                'provider_transaction_id': pay_data['provider_transaction_id'],
+                'status': 'SUCCESS',
+                'amount': 2000.0,
+            },
+        )
+        assert pay_cb.status_code == 200, pay_cb.text
+        assert pay_cb.json()['status'] in ('PAID', 'SUCCESS')
+
+        receipt_pdf = client.get(
+            f"/api/v1/member/payments/{pay_data['transaction_id']}/receipt.pdf",
+            headers=member_headers,
+        )
+        assert receipt_pdf.status_code == 200
+        assert receipt_pdf.content.startswith(b'%PDF')
+
+        # 8. Digital ID Card (Front, Back, and 2-page PDF)
+        card_front = client.get('/api/v1/member/card?side=front', headers=member_headers)
+        assert card_front.status_code == 200
+        assert card_front.headers['content-type'] == 'image/png'
+
+        card_pdf = client.get('/api/v1/member/card.pdf', headers=member_headers)
+        assert card_pdf.status_code == 200
+        assert card_pdf.content.startswith(b'%PDF')
+
+        # 9. QR / Public Membership Verification for PGD-TEST-0001
+        verify_res = client.get('/api/v1/public/verify/PGD-TEST-0001')
+        assert verify_res.status_code == 200, verify_res.text
+        v_data = verify_res.json()
+        assert v_data['verified'] is True
+        assert v_data['membership_id'] == 'PGD-TEST-0001'
+        assert v_data['name_en'] == 'TEST MEMBER'
+
+        # 10. Certificate issuance & verification
+        admin_headers = _login(client, 'admin@example.org')
+        from datetime import datetime, timedelta
+        new_evt = client.post(
+            '/api/v1/admin/events',
+            headers=admin_headers,
+            json={
+                'title_bn': 'পিজিডি টেস্ট কারিগরি কর্মশালা',
+                'title_en': 'PGD-TEST-0001 Verification Workshop',
+                'event_date': (datetime.utcnow() + timedelta(days=3)).isoformat(),
+                'location_bn': 'ঢাকা',
+                'registration_enabled': True,
+                'is_published': True,
+            },
+        )
+        assert new_evt.status_code == 200, new_evt.text
+        evt_id = new_evt.json()['id']
+
+        member_headers = _login(client, test_email)
+        evt_reg = client.post(
+            f'/api/v1/events/{evt_id}/registrations',
+            headers=member_headers,
+            json={'name': 'TEST MEMBER', 'email': test_email, 'phone': '01799000001'},
+        )
+        assert evt_reg.status_code == 200, evt_reg.text
+        reg_id = evt_reg.json()['id']
+
+        admin_headers = _login(client, 'admin@example.org')
+        checkin = client.post(f'/api/v1/admin/event-registrations/{reg_id}/check-in', headers=admin_headers)
+        assert checkin.status_code == 200
+
+        cert_issue = client.post(f'/api/v1/certificates/event-registrations/{reg_id}', headers=admin_headers)
+        assert cert_issue.status_code == 200, cert_issue.text
+        cert_token = cert_issue.json()['verification_token']
+
+        cert_verify = client.get(f'/api/v1/certificates/verify/{cert_token}')
+        assert cert_verify.status_code == 200
+        assert cert_verify.json()['verified'] is True
+
+        # 11. Notification verification (approval + payment receipt notifications recorded)
+        member_headers = _login(client, test_email)
+        notifs = client.get('/api/v1/member/notifications', headers=member_headers)
+        assert notifs.status_code == 200
+        notif_items = notifs.json()
+        assert len(notif_items) >= 2
+
+
+
+

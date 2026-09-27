@@ -45,7 +45,7 @@ class Member(Base):
     employee_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     diploma_institution: Mapped[str | None] = mapped_column(String(250), nullable=True)
     graduation_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    nid_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    nid_number: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     date_of_birth: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     current_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     permanent_address: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -242,10 +242,13 @@ class PaymentTransaction(Base):
     member_id: Mapped[int | None] = mapped_column(ForeignKey('members.id', ondelete='SET NULL'), nullable=True, index=True)
     event_registration_id: Mapped[int | None] = mapped_column(ForeignKey('event_registrations.id', ondelete='SET NULL'), nullable=True, index=True)
     purpose: Mapped[str] = mapped_column(String(50), index=True)
+    membership_plan_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     amount: Mapped[int] = mapped_column(Integer)
     currency: Mapped[str] = mapped_column(String(10), default='BDT')
     provider: Mapped[str] = mapped_column(String(40), default='MANUAL')
-    transaction_ref: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    transaction_ref: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
+    provider_transaction_id_col: Mapped[str | None] = mapped_column('provider_transaction_id', String(160), unique=True, nullable=True, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(180), unique=True, nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(30), default='PENDING', index=True)
     provider_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
@@ -269,9 +272,16 @@ class PaymentTransaction(Base):
 
     @property
     def provider_transaction_id(self) -> str | None:
+        if self.provider_transaction_id_col:
+            return self.provider_transaction_id_col
         if self.provider_payload and isinstance(self.provider_payload, dict):
             return self.provider_payload.get('trxID') or self.provider_payload.get('issuer_trx_id') or self.provider_payload.get('challan_no')
         return None
+
+    @provider_transaction_id.setter
+    def provider_transaction_id(self, val: str | None):
+        self.provider_transaction_id_col = val
+
 
     @property
     def completed_at(self) -> datetime | None:

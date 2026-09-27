@@ -4,6 +4,8 @@ from alembic import context
 from app.db.session import Base
 from app.core.config import settings
 from app import models  # noqa: F401
+from app.core.audit import AuditLog  # noqa: F401
+from app.models import payments as gateway_payment_models  # noqa: F401
 
 config = context.config
 

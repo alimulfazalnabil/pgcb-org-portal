@@ -1,0 +1,19 @@
+# ==============================================================================
+# PGCB Organization Portal — HostSeba Cron Schedule (deployment/hostseba/cron/crontab.txt)
+# Replace CPANEL_USER with your HostSeba username.
+# ==============================================================================
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# 1. Process pending email/SMS notification retries (every 5 minutes)
+*/5 * * * * /home/CPANEL_USER/pgcb-org-portal/deployment/hostseba/cron/run_cron_jobs.sh notifications >> /home/CPANEL_USER/logs/cron_notifications.log 2>&1
+
+# 2. Daily membership expiry check & renewal reminders (01:15 AM BDT)
+15 1 * * * /home/CPANEL_USER/pgcb-org-portal/deployment/hostseba/cron/run_cron_jobs.sh expiry >> /home/CPANEL_USER/logs/cron_expiry.log 2>&1
+
+# 3. Daily encrypted database + document backup & restore verification (02:00 AM BDT)
+0 2 * * * /home/CPANEL_USER/pgcb-org-portal/deployment/hostseba/backup/backup_db_and_uploads.sh >> /home/CPANEL_USER/logs/cron_backup.log 2>&1
+
+# 4. Daily event attendance reminders (08:00 AM BDT)
+0 8 * * * /home/CPANEL_USER/pgcb-org-portal/deployment/hostseba/cron/run_cron_jobs.sh reminders >> /home/CPANEL_USER/logs/cron_reminders.log 2>&1

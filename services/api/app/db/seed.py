@@ -180,9 +180,9 @@ def seed_synthetic_members(db: Session, count: int = 2000) -> int:
     return created
 
 
-def main(synthetic_count: int = 0) -> None:
+def main(synthetic_count: int = 0, production_only: bool = False) -> None:
     env_mode = settings.app_env.lower()
-    is_prod_like = settings.is_production_like
+    is_prod_like = settings.is_production_like or production_only
 
     if not is_prod_like:
         Base.metadata.create_all(bind=engine)
@@ -491,5 +491,11 @@ def main(synthetic_count: int = 0) -> None:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Seed database for test/development or bootstrap explicit admin.')
     parser.add_argument('--synthetic-members', type=int, default=0, help='Number of synthetic members to generate (dev/test only)')
+    parser.add_argument(
+        '--production',
+        action='store_true',
+        help='Seed ONLY required system data (9 Grid Circles and optional ADMIN_EMAIL/ADMIN_PASSWORD); never create fake members.',
+    )
     args = parser.parse_args()
-    main(synthetic_count=args.synthetic_members)
+    main(synthetic_count=args.synthetic_members, production_only=args.production)
+

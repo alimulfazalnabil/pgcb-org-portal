@@ -1,0 +1,64 @@
+# ==============================================================================
+# PGCB Organization Portal — HostSeba Production Environment Template (v1.1)
+# Copy to services/api/.env on HostSeba. NEVER commit real secrets to Git.
+# ==============================================================================
+
+APP_ENV=production
+
+# 1. PostgreSQL Database (HostSeba Local PostgreSQL)
+DATABASE_URL=postgresql+psycopg://PGCB_DB_USER:CHANGE_ME_STRONG_DB_PASSWORD@127.0.0.1:5432/PGCB_DB_NAME
+DB_SSLMODE=prefer
+DB_POOL_SIZE=5
+DB_MAX_OVERFLOW=10
+DB_POOL_RECYCLE_SECONDS=1800
+
+# 2. Cryptographic Secrets (Generate with: openssl rand -hex 32)
+JWT_SECRET=CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32_MINIMUM_32_CHARS
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_MINUTES=10080
+AUTH_COOKIE_SECURE=true
+AUTH_COOKIE_SAMESITE=lax
+
+# 3. Domain, Proxy & Rate Limiting (Cloudflare -> HostSeba Nginx/Apache -> App)
+FRONTEND_URL=https://pgcb.org.bd
+ALLOWED_ORIGINS=https://pgcb.org.bd,https://www.pgcb.org.bd
+INTERNAL_API_URL=http://127.0.0.1:8000
+NEXT_PUBLIC_API_URL=/backend
+TRUSTED_PROXY_COUNT=1
+RATE_LIMIT_ENABLED=true
+REDIS_RATE_LIMIT_ENABLED=false
+LOGIN_RATE_LIMIT_PER_MINUTE=10
+VERIFY_RATE_LIMIT_PER_MINUTE=60
+EVENT_REGISTER_RATE_LIMIT_PER_MINUTE=20
+
+# 4. Persistent Local Filesystem Storage (HostSeba Disk)
+STORAGE_BACKEND=local
+UPLOAD_DIR=/home/CPANEL_USER/pgcb_data/uploads
+BACKUP_DIR=/home/CPANEL_USER/pgcb_data/backups
+MAX_UPLOAD_MB=10
+
+# 5. SMTP Email Configuration
+REQUIRE_EMAIL_VERIFICATION=true
+SMTP_HOST=mail.pgcb.org.bd
+SMTP_PORT=587
+SMTP_USER=noreply@pgcb.org.bd
+SMTP_PASS=CHANGE_ME_SMTP_PASSWORD
+SMTP_FROM=noreply@pgcb.org.bd
+SMTP_USE_TLS=true
+
+# 6. Payment Gateways (Keep in sandbox/test mode until live merchant credentials are verified)
+PAYMENT_WEBHOOK_SECRET=CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32
+BKASH_APP_KEY=
+BKASH_APP_SECRET=
+BKASH_USERNAME=
+BKASH_PASSWORD=
+BKASH_BASE_URL=https://tokenized.sandbox.bka.sh/v1.2.0-beta
+
+NAGAD_MERCHANT_ID=
+NAGAD_PUBLIC_KEY=
+NAGAD_PRIVATE_KEY=
+NAGAD_BASE_URL=http://sandbox.mynagad.com:10080/remote-payment-gateway-1.0
+
+SSLCOMMERZ_STORE_ID=
+SSLCOMMERZ_STORE_PASSWD=
+SSLCOMMERZ_BASE_URL=https://sandbox.sslcommerz.com

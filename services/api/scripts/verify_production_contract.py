@@ -74,13 +74,14 @@ def check_contract(mode: str) -> bool:
         else:
             print(f"[+] DATABASE_URL       : {driver}://... {mask(db_url)}")
 
-    # 3. Redis URL Validation
+    # 3. Redis URL Validation (Optional on HostSeba single-node deployment)
+    redis_enabled = os.getenv("REDIS_RATE_LIMIT_ENABLED", "false").lower() in ("true", "1", "yes")
     if not redis_url:
-        if is_prod_like:
-            warnings.append("REDIS_URL is missing; Celery and distributed rate-limiting will be degraded.")
-            print(f"[!] REDIS_URL          : [NOT SET]")
+        if is_prod_like and redis_enabled:
+            warnings.append("REDIS_URL is missing while REDIS_RATE_LIMIT_ENABLED=true; falling back to in-memory rate limiter.")
+            print("[!] REDIS_URL          : [NOT SET - USING IN-MEMORY FALLBACK]")
         else:
-            print(f"[*] REDIS_URL          : [DEFAULTING TO LOCAL]")
+            print("[+] REDIS              : [DISABLED - USING IN-MEMORY RATE LIMITER & SYSTEM CRON]")
     else:
         scheme = redis_url.split("://")[0] if "://" in redis_url else "unknown"
         if scheme in ("redis", "rediss"):
@@ -89,23 +90,22 @@ def check_contract(mode: str) -> bool:
             warnings.append(f"Unrecognized Redis scheme '{scheme}'")
             print(f"[!] REDIS_URL          : {scheme}://... {mask(redis_url)}")
 
-    # 4. Storage Backend Validation (Render Persistent Disk)
+    # 4. Storage Backend Validation (HostSeba Local Filesystem or Persistent Disk)
     print(f"[*] STORAGE_BACKEND    : {storage_backend}")
     if is_prod_like:
-        if storage_backend != "persistent_disk":
+        if storage_backend not in ("local", "filesystem", "persistent_disk"):
             failures.append(
-                f"STORAGE_BACKEND is '{storage_backend}'. Staging/Production strictly requires 'persistent_disk' "
-                f"with Render Persistent Disk (/var/data) to ensure file durability across container restarts."
+                f"STORAGE_BACKEND is '{storage_backend}'. Staging/Production requires 'local', 'filesystem', or 'persistent_disk' "
+                f"to ensure file durability."
             )
-            print(f"[-] STORAGE_BACKEND    : '{storage_backend}' [MUST BE 'persistent_disk' IN STAGING/PRODUCTION]")
+            print(f"[-] STORAGE_BACKEND    : '{storage_backend}' [INVALID FOR STAGING/PRODUCTION]")
         else:
-            print(f"[+] STORAGE_BACKEND    : 'persistent_disk' (Render Persistent Disk)")
+            print(f"[+] STORAGE_BACKEND    : '{storage_backend}' (Persistent Filesystem)")
             print(f"[+] STORAGE_ROOT       : '{storage_root}'")
-            if not storage_root or storage_root == "./storage":
-                warnings.append("STORAGE_ROOT is set to local default; in Render this should be '/var/data/uploads'.")
     else:
         print(f"[+] STORAGE_BACKEND    : '{storage_backend}' (permitted in {app_env})")
         print(f"[*] STORAGE_ROOT       : '{storage_root}'")
+
 
     # 5. Security Credentials Validation
     if not jwt_secret:

@@ -358,7 +358,14 @@ def member_detail(member_id: int, _: User = Depends(require_permission('member.r
 
 
 @router.post('/members/{member_id}/review')
-def review_member(member_id: int, action: str, request: Request, admin: User = Depends(require_permission('member.review')), db: Session = Depends(get_db)):
+def review_member(
+    member_id: int,
+    action: str,
+    request: Request,
+    membership_id: str | None = None,
+    admin: User = Depends(require_permission('member.review')),
+    db: Session = Depends(get_db),
+):
     if action not in {'APPROVE', 'REJECT', 'REVIEW', 'SUSPEND', 'REACTIVATE'}:
         raise HTTPException(400, 'Invalid member action')
     m = db.scalar(select(Member).options(selectinload(Member.user), selectinload(Member.circle)).where(Member.id == member_id))
@@ -374,7 +381,9 @@ def review_member(member_id: int, action: str, request: Request, admin: User = D
         m.status, note = 'ACTIVE', 'Membership reactivated.'
     else:
         m.status = 'ACTIVE'
-        if not m.membership_id:
+        if membership_id and membership_id.strip():
+            m.membership_id = membership_id.strip()
+        elif not m.membership_id:
             m.membership_id = next_membership_id(db)
         m.issue_date, m.validity_date = membership_dates()
         note = f'Membership approved with ID {m.membership_id}.'

@@ -133,6 +133,7 @@ def _verify_signature(membership_id: str, signature: str) -> bool:
 
 
 @router.get('/verify/{membership_id}', response_model=VerificationResponse)
+@router.get('/verify-member/{membership_id}', response_model=VerificationResponse)
 def verify(membership_id: str, db: Session = Depends(get_db)):
     stmt = select(Member).options(selectinload(Member.user), selectinload(Member.circle)).where(Member.membership_id == membership_id)
     m = db.scalar(stmt)

@@ -1,14 +1,31 @@
-name: PGCB Portal CI/CD
+name: PGCB Portal CI
 
 on:
   push:
-    branches: [ main, render-staging-hardening ]
+    branches: [ main, phase-2-upgrade ]
   pull_request:
-    branches: [ main, render-staging-hardening ]
+    branches: [ main, phase-2-upgrade ]
 
 jobs:
   validate-and-test:
+    name: Validate, Test & Build (Ready for HostSeba Deployment)
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pgcb_test
+          POSTGRES_PASSWORD: pgcb_test_pass
+          POSTGRES_DB: pgcb_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -27,43 +44,69 @@ jobs:
           cache: 'pip'
           cache-dependency-path: 'services/api/requirements.txt'
 
-      - name: Install Backend Dependencies
+      - name: 1. Install Frontend Dependencies & TypeScript Check
+        working-directory: ./apps/web
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+
+      - name: 2. Install Backend Dependencies
         working-directory: ./services/api
         run: pip install -r requirements.txt pytest
 
-      - name: Run Database Migrations
-        working-directory: ./services/api
-        env:
-          APP_ENV: test
-          JWT_SECRET: "test-secret-32-characters-minimum-for-ci"
-          DATABASE_URL: "sqlite:///./migration_check.db"
-        run: alembic upgrade head
-
-      - name: Run Backend Tests
+      - name: 3. Backend Unit Tests (SQLite)
         working-directory: ./services/api
         env:
           APP_ENV: test
           JWT_SECRET: "test-secret-32-characters-minimum-for-ci"
           DATABASE_URL: "sqlite:///./test.db"
-        run: pytest
+        run: |
+          alembic upgrade head
+          pytest -q
 
-      - name: Install Frontend Dependencies
-        working-directory: ./apps/web
-        run: npm ci
-
-      - name: Lint Frontend
-        working-directory: ./apps/web
-        run: npm run lint
-
-      - name: Typecheck Frontend
-        working-directory: ./apps/web
-        run: npm run typecheck
-
-      - name: Start Background API for Build & E2E
+      - name: 4. Backend Integration Tests (PostgreSQL 16 Service Container)
         working-directory: ./services/api
         env:
           APP_ENV: test
-          DATABASE_URL: sqlite:///./e2e.db
+          JWT_SECRET: "test-secret-32-characters-minimum-for-ci"
+          DATABASE_URL: "postgresql+psycopg://pgcb_test:pgcb_test_pass@127.0.0.1:5432/pgcb_test_db"
+        run: |
+          alembic upgrade head
+          pytest -q
+
+      - name: 5. Security & Production Contract Verification
+        working-directory: ./services/api
+        env:
+          APP_ENV: production
+          DATABASE_URL: "postgresql+psycopg://pgcb_test:pgcb_test_pass@127.0.0.1:5432/pgcb_test_db"
+          DB_SSLMODE: "prefer"
+          JWT_SECRET: "prod-contract-secret-at-least-32-characters-long-for-ci-verification"
+          FRONTEND_URL: "https://pgcb.org.bd"
+          ALLOWED_ORIGINS: "https://pgcb.org.bd,https://www.pgcb.org.bd"
+          STORAGE_BACKEND: "local"
+          UPLOAD_DIR: "/tmp/pgcb-prod-uploads"
+          BACKUP_DIR: "/tmp/pgcb-prod-backups"
+          REDIS_RATE_LIMIT_ENABLED: "false"
+        run: |
+          mkdir -p /tmp/pgcb-prod-uploads /tmp/pgcb-prod-backups
+          python scripts/verify_production_contract.py --mode production
+
+      - name: 6. Backup & Restore Integrity Verification
+        working-directory: ./services/api
+        env:
+          APP_ENV: test
+          JWT_SECRET: "test-secret-32-characters-minimum-for-ci"
+          DATABASE_URL: "sqlite:///./test.db"
+          UPLOAD_DIR: "./uploads"
+          BACKUP_DIR: "./backups"
+        run: python scripts/backup_pgcb.py --verify-restore
+
+      - name: 7. Start PostgreSQL-Backed API for Build & E2E
+        working-directory: ./services/api
+        env:
+          APP_ENV: test
+          DATABASE_URL: "postgresql+psycopg://pgcb_test:pgcb_test_pass@127.0.0.1:5432/pgcb_test_db"
           JWT_SECRET: "e2e-test-secret-change-me-32-characters-minimum"
           FRONTEND_URL: "http://127.0.0.1:3000"
           ALLOWED_ORIGINS: "http://127.0.0.1:3000,http://localhost:3000"
@@ -75,44 +118,36 @@ jobs:
           nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/pgcb-api.log 2>&1 &
           for i in {1..30}; do curl -fsS http://127.0.0.1:8000/health && break; sleep 2; done || (cat /tmp/pgcb-api.log && exit 1)
 
-      - name: Build Frontend
+      - name: 8. Build Frontend Production Bundle
         working-directory: ./apps/web
         env:
           INTERNAL_API_URL: "http://127.0.0.1:8000"
           NEXT_PUBLIC_API_URL: "/backend"
         run: npm run build
 
-      - name: Install Playwright Browsers
-        working-directory: ./apps/web
-        run: npx playwright install --with-deps chromium
-
-      - name: Run Playwright E2E Tests
+      - name: 9. Install Playwright Browsers & Run E2E Tests
         working-directory: ./apps/web
         env:
           CI: "true"
           INTERNAL_API_URL: "http://127.0.0.1:8000"
           NEXT_PUBLIC_API_URL: "/backend"
-        run: npx playwright test
+          PLAYWRIGHT_SKIP_WEBSERVER: "1"
+          BASE_URL: "http://127.0.0.1:3000"
+        run: |
+          npx playwright install --with-deps chromium
+          nohup npm run start -- --hostname 127.0.0.1 --port 3000 >/tmp/pgcb-web.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:3000 >/dev/null && break; sleep 2; done || (cat /tmp/pgcb-web.log && exit 1)
+          npx playwright test
 
-  deploy-to-render:
-    needs: validate-and-test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-
-    env:
-      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-
-    steps:
-      - name: Trigger Render Deployment
-        if: env.RENDER_DEPLOY_HOOK_URL != ''
-        uses: fjogeleit/http-request-action@v1
-        with:
-          url: ${{ env.RENDER_DEPLOY_HOOK_URL }}
-          method: 'POST'
-          customHeaders: '{"Accept": "application/json"}'
-
-      - name: Skip Render deployment when deploy hook is not configured
-        if: env.RENDER_DEPLOY_HOOK_URL == ''
-        run: echo "RENDER_DEPLOY_HOOK_URL is not configured; skipping Render deployment."
-
-
+      - name: 10. Ready for Deployment Summary
+        run: |
+          echo "=========================================================="
+          echo "READY FOR DEPLOYMENT (HostSeba Production Hardened v1.0)"
+          echo "=========================================================="
+          echo "- TypeScript check: PASSED"
+          echo "- Backend Unit Tests (SQLite): PASSED"
+          echo "- Backend Integration Tests (PostgreSQL 16): PASSED"
+          echo "- Security & Production Contract: PASSED"
+          echo "- Backup & Restore Integrity: PASSED"
+          echo "- Next.js Production Build: PASSED"
+          echo "- Playwright E2E Suite: PASSED"

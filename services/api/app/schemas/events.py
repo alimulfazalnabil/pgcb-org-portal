@@ -28,7 +28,9 @@ class RegistrationStatusUpdate(BaseModel):
     status: str
 
 class PaymentCreate(BaseModel):
-    amount: int = Field(gt=0)
+    amount: int | None = Field(default=None)
+    membership_plan_id: str | None = Field(default=None, max_length=80)
+    idempotency_key: str | None = Field(default=None, max_length=180)
     currency: str = Field(default='BDT', min_length=3, max_length=10)
     purpose: str = Field(default='MEMBERSHIP', max_length=50)
     provider: str = Field(default='MANUAL', max_length=40)
@@ -38,3 +40,4 @@ class PaymentCreate(BaseModel):
 class PaymentStatusUpdate(BaseModel):
     status: str = Field(min_length=3, max_length=30)
     transaction_ref: str | None = Field(default=None, max_length=120)
+

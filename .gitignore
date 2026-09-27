@@ -2,7 +2,11 @@ node_modules/
 .next/
 .env
 .env.local
+.env.development
+.env.test
+.env.production
 !.env.example
+!.env.*.example
 .venv/
 __pycache__/
 .pytest_cache/
