@@ -10,7 +10,7 @@ from app.core.rbac import require_permission
 from app.models.core import Document, User
 from app.schemas.content import DocumentCreate, DocumentResponse, DocumentUpdate
 from app.services import audit
-from app.utils.storage import delete_file, get_file_bytes, save_bytes
+from app.utils.storage import delete_file, get_file_bytes, save_bytes, validate_upload_bytes
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -49,6 +49,8 @@ def download_document(document_id: int, db: Session = Depends(get_db)):
 
     try:
         content = get_file_bytes(doc.file_path)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document storage path")
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -79,21 +81,22 @@ async def upload_document_file(
     user: User = Depends(require_permission("document.write")),
 ):
     """Upload document file to persistent storage, returning file metadata."""
-    content = await file.read()
-    if len(content) > 25 * 1024 * 1024:  # 25 MB limit for docs
-        raise HTTPException(status_code=400, detail="File exceeds maximum 25 MB limit")
+    max_bytes = 25 * 1024 * 1024
+    content = await file.read(max_bytes + 1)
+    clean_name, unique_name, resolved_ct = validate_upload_bytes(
+        file.filename or "doc.pdf",
+        file.content_type,
+        content,
+        max_bytes,
+        allow_office=True,
+    )
 
-    ext = (file.filename or "doc.pdf").split(".")[-1].lower()
-    allowed_exts = {"pdf", "docx", "doc", "xlsx", "xls", "pptx", "png", "jpg", "jpeg"}
-    if ext not in allowed_exts:
-        raise HTTPException(status_code=400, detail=f"File extension .{ext} is not allowed")
-
-    saved_path = save_bytes(content, "documents", file.filename or f"doc_{int(datetime.utcnow().timestamp())}.{ext}")
+    saved_path = save_bytes(content, "documents", unique_name)
     return {
         "file_path": saved_path,
         "file_size": len(content),
-        "content_type": file.content_type or "application/pdf",
-        "original_filename": file.filename,
+        "content_type": resolved_ct,
+        "original_filename": clean_name,
     }
 
 

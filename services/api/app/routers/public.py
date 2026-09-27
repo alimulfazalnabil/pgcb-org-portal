@@ -159,15 +159,19 @@ def verify_token(token: str, db: Session = Depends(get_db)):
 
 @router.get('/assets/{filename:path}')
 def public_asset(filename: str):
-    candidate = (BASE_STORAGE / 'public' / Path(filename).name).resolve()
-    base = (BASE_STORAGE / 'public').resolve()
-    try:
-        candidate.relative_to(base)
-    except ValueError:
-        raise HTTPException(404, 'Asset not found')
-    if not candidate.exists() or not candidate.is_file():
-        raise HTTPException(404, 'Asset not found')
-    return FileResponse(candidate)
+    if not filename or '\x00' in filename or '..' in filename or '/' in filename or '\\' in filename:
+        raise HTTPException(400, 'Invalid asset path')
+    clean = Path(filename).name
+    for base_dir in (Path(settings.resolved_upload_dir) / 'public', BASE_STORAGE / 'public'):
+        base = base_dir.resolve()
+        candidate = (base / clean).resolve()
+        try:
+            candidate.relative_to(base)
+        except ValueError:
+            continue
+        if candidate.exists() and candidate.is_file():
+            return FileResponse(candidate)
+    raise HTTPException(404, 'Asset not found')
 
 @router.get('/circulars/{circular_id}')
 def circular_detail(circular_id: int, db: Session = Depends(get_db)):

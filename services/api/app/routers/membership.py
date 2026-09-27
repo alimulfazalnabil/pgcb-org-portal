@@ -11,7 +11,7 @@ from app.models import Member, MemberDocument, Notification, User
 from app.schemas.membership import ApplicationResponse, MemberDocumentResponse, MemberProfileUpdate
 from app.services import ALLOWED_CONTENT_TYPES, ALLOWED_DOC_TYPES, audit, membership_dates, next_membership_id, notify
 from app.services import BASE_STORAGE
-from app.utils.storage import get_file_bytes, is_local_path, save_bytes
+from app.utils.storage import get_file_bytes, is_local_path, save_bytes, validate_upload_bytes
 
 router = APIRouter(prefix='/member', tags=['membership'])
 
@@ -85,18 +85,19 @@ def upload_document(request: Request, document_type: str, file: UploadFile = Fil
     member = get_member(user, db)
     max_bytes = settings.max_upload_mb * 1024 * 1024
     content = file.file.read(max_bytes + 1)
-    if len(content) > max_bytes:
-        raise HTTPException(413, f'Maximum file size is {settings.max_upload_mb} MB')
-
-    safe_name = (file.filename or 'upload.bin').replace('/', '_').replace('\\', '_').replace(' ', '_')
-    unique_name = f'{datetime.utcnow().strftime("%Y%m%d%H%M%S%f")}_{safe_name}'
+    clean_name, unique_name, resolved_ct = validate_upload_bytes(
+        file.filename,
+        file.content_type,
+        content,
+        max_bytes,
+    )
     try:
         stored = save_bytes(content, f'members/{member.id}', unique_name)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     doc = MemberDocument(
-        member_id=member.id, document_type=document_type, filename=safe_name,
-        storage_path=stored, content_type=file.content_type, review_status='PENDING'
+        member_id=member.id, document_type=document_type, filename=clean_name,
+        storage_path=stored, content_type=resolved_ct, review_status='PENDING'
     )
     db.add(doc)
     if document_type == 'PHOTO':
@@ -127,6 +128,8 @@ def download_document(document_id: int, user: User = Depends(current_user), db: 
         )
     except FileNotFoundError:
         raise HTTPException(404, 'Document not found')
+    except ValueError:
+        raise HTTPException(400, 'Invalid document path')
     except Exception as exc:
         raise HTTPException(502, f'Failed to retrieve document: {exc}')
 

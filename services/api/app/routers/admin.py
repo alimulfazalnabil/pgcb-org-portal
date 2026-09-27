@@ -47,7 +47,7 @@ from app.services import MAX_UPLOAD_BYTES, audit, membership_dates, next_members
 from app.integrations.notifications import DeliveryResult, create_in_app, deliver_email, deliver_sms, record_delivery
 from app.domain.notifications import queue_delivery
 from app.services import BASE_STORAGE
-from app.utils.storage import is_local_path, save_bytes, _safe_name, get_file_bytes
+from app.utils.storage import is_local_path, save_bytes, _safe_name, get_file_bytes, validate_upload_bytes
 
 router = APIRouter(prefix='/admin', tags=['admin'])
 ADMIN_ROLES = ('SUPER_ADMIN', 'CONTENT_EDITOR', 'MEMBERSHIP_OFFICER', 'CIRCLE_ADMIN', 'FINANCE_OFFICER', 'AUDITOR')
@@ -412,9 +412,10 @@ def download_document(document_id: int, _: User = Depends(require_permission('do
         )
     except FileNotFoundError:
         raise HTTPException(404, 'Document not found')
+    except ValueError:
+        raise HTTPException(400, 'Invalid document path')
     except Exception as exc:
         raise HTTPException(502, f'Failed to retrieve document: {exc}')
-
 
 
 @router.post('/uploads/public')
@@ -434,7 +435,13 @@ def upload_public_asset(request: Request, file: UploadFile = File(...), admin: U
         if len(buffer) > MAX_UPLOAD_BYTES:
             raise HTTPException(413, 'Maximum public asset size is 10 MB')
     content = bytes(buffer)
-    filename = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}_{_safe_name(file.filename or 'asset.bin')}"
+    _, filename, _ = validate_upload_bytes(
+        file.filename or 'asset.bin',
+        file.content_type,
+        content,
+        MAX_UPLOAD_BYTES,
+        allow_video=True,
+    )
     try:
         stored = save_bytes(content, 'public', filename)
     except RuntimeError as exc:

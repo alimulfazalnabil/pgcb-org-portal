@@ -28,6 +28,9 @@ class DiskStorageBackend(StorageBackend):
 
     def _resolve_candidate(self, storage_path: Path | str) -> Path:
         """Resolve a candidate path and verify it is strictly within root_dir."""
+        raw_str = str(storage_path)
+        if '\x00' in raw_str or '..' in Path(raw_str.replace('\\', '/')).parts:
+            raise ValueError(f'Security: Path traversal attempt detected: {storage_path}')
         p = Path(storage_path)
         if p.is_absolute():
             candidate = p.resolve()
