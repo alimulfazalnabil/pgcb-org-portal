@@ -3,7 +3,7 @@ name: End-to-End
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, render-staging-hardening]
 
 jobs:
   e2e:
@@ -14,7 +14,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.11'
 
       - name: Install API dependencies
         working-directory: services/api
@@ -30,6 +30,7 @@ jobs:
           REQUIRE_EMAIL_VERIFICATION: 'false'
           RATE_LIMIT_ENABLED: 'false'
         run: |
+          alembic upgrade head
           python -m app.db.seed
           nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/pgcb-api.log 2>&1 &
           for i in {1..30}; do curl -fsS http://127.0.0.1:8000/ready && break; sleep 2; done
@@ -37,13 +38,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
 
       - name: Install web dependencies
         working-directory: apps/web
-        run: npm install
+        run: npm ci
 
       - name: Install Playwright browser
         working-directory: apps/web

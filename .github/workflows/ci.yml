@@ -2,9 +2,9 @@ name: PGCB Portal CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, render-staging-hardening ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, render-staging-hardening ]
 
 jobs:
   validate-and-test:
@@ -31,13 +31,13 @@ jobs:
         working-directory: ./services/api
         run: pip install -r requirements.txt pytest
 
-      - name: Install Frontend Dependencies
-        working-directory: ./apps/web
-        run: npm ci
-
-      - name: Lint & Typecheck Frontend
-        working-directory: ./apps/web
-        run: npm run lint
+      - name: Run Database Migrations
+        working-directory: ./services/api
+        env:
+          APP_ENV: test
+          JWT_SECRET: "test-secret-32-characters-minimum-for-ci"
+          DATABASE_URL: "sqlite:///./migration_check.db"
+        run: alembic upgrade head
 
       - name: Run Backend Tests
         working-directory: ./services/api
@@ -47,25 +47,40 @@ jobs:
           DATABASE_URL: "sqlite:///./test.db"
         run: pytest
 
-      - name: Build Frontend
+      - name: Install Frontend Dependencies
         working-directory: ./apps/web
-        run: npm run build
-        env:
-          NEXT_PUBLIC_API_URL: "http://localhost:8000/api/v1"
+        run: npm ci
 
-      - name: Start Background API for E2E
+      - name: Lint Frontend
+        working-directory: ./apps/web
+        run: npm run lint
+
+      - name: Typecheck Frontend
+        working-directory: ./apps/web
+        run: npm run typecheck
+
+      - name: Start Background API for Build & E2E
         working-directory: ./services/api
         env:
           APP_ENV: test
           DATABASE_URL: sqlite:///./e2e.db
           JWT_SECRET: "e2e-test-secret-change-me-32-characters-minimum"
           FRONTEND_URL: "http://127.0.0.1:3000"
+          ALLOWED_ORIGINS: "http://127.0.0.1:3000,http://localhost:3000"
           REQUIRE_EMAIL_VERIFICATION: "false"
           RATE_LIMIT_ENABLED: "false"
         run: |
+          alembic upgrade head
           python -m app.db.seed
           nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/pgcb-api.log 2>&1 &
           for i in {1..30}; do curl -fsS http://127.0.0.1:8000/health && break; sleep 2; done || (cat /tmp/pgcb-api.log && exit 1)
+
+      - name: Build Frontend
+        working-directory: ./apps/web
+        env:
+          INTERNAL_API_URL: "http://127.0.0.1:8000"
+          NEXT_PUBLIC_API_URL: "/backend"
+        run: npm run build
 
       - name: Install Playwright Browsers
         working-directory: ./apps/web
@@ -76,7 +91,7 @@ jobs:
         env:
           CI: "true"
           INTERNAL_API_URL: "http://127.0.0.1:8000"
-          NEXT_PUBLIC_API_URL: "http://localhost:8000/api/v1"
+          NEXT_PUBLIC_API_URL: "/backend"
         run: npx playwright test
 
   deploy-to-render:
@@ -99,4 +114,5 @@ jobs:
       - name: Skip Render deployment when deploy hook is not configured
         if: env.RENDER_DEPLOY_HOOK_URL == ''
         run: echo "RENDER_DEPLOY_HOOK_URL is not configured; skipping Render deployment."
+
 
