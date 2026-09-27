@@ -6,6 +6,20 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _normalize_origin_url(raw: str) -> str:
+    val = (raw or '').strip().rstrip('/')
+    if not val:
+        return val
+    if val.startswith(('http://', 'https://')):
+        return val
+    if val.startswith(('localhost', '127.0.0.1')):
+        return f'http://{val}'
+    if '.' in val:
+        return f'https://{val}'
+    # Bare Render service hostname from `fromService: property: host`
+    return f'https://{val}.onrender.com'
+
+
 class Settings(BaseSettings):
     app_env: str = 'development'
     database_url: str = 'sqlite:///./pgcb_portal.db'
@@ -40,6 +54,10 @@ class Settings(BaseSettings):
     log_level: str = 'INFO'
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 
+    @property
+    def is_production_like(self) -> bool:
+        return self.app_env.lower() in ('production', 'staging')
+
     @model_validator(mode='after')
     def validate_production(self) -> 'Settings':
         if self.db_host and self.db_user and self.db_password:
@@ -59,24 +77,31 @@ class Settings(BaseSettings):
             self.redis_url = (
                 f'{self.redis_scheme}://:{quote_plus(self.redis_password)}@{self.redis_host}:{self.redis_port}/0'
             )
-        if self.app_env.lower() == 'production':
+
+        if self.frontend_url:
+            self.frontend_url = _normalize_origin_url(self.frontend_url)
+
+        if self.allowed_origins:
+            normalized_list = [
+                _normalize_origin_url(origin)
+                for origin in self.allowed_origins.split(',')
+                if origin.strip()
+            ]
+            self.allowed_origins = ','.join(normalized_list)
+
+        if self.app_env.lower() in ('production', 'staging'):
             if self.jwt_secret.startswith('dev-only-secret') or len(self.jwt_secret) < 32:
                 raise ValueError(
-                    'JWT_SECRET must be configured with at least 32 characters in production. '
+                    'JWT_SECRET must be configured with at least 32 characters in staging/production. '
                     'Configure JWT_SECRET in your Render Environment or Blueprint shared-secrets.'
                 )
             if self.storage_backend != 'persistent_disk':
                 raise ValueError(
-                    "Production storage configuration invalid: STORAGE_BACKEND must be set to 'persistent_disk' "
-                    "for Render Persistent Disk storage in production."
+                    "Staging/Production storage configuration invalid: STORAGE_BACKEND must be set to 'persistent_disk' "
+                    "for Render Persistent Disk storage."
                 )
             if not self.storage_root or self.storage_root == './storage':
                 self.storage_root = '/var/data/uploads'
-            if self.frontend_url == 'http://localhost:3000':
-                self.frontend_url = 'https://pgcb-portal-web.onrender.com'
-            if self.require_email_verification is False:
-                # Explicitly allowed, but keep production configuration visible in docs/runbooks.
-                pass
 
         return self
 

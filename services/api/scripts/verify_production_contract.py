@@ -35,10 +35,11 @@ def check_contract(mode: str) -> bool:
 
     # Load environment variables
     app_env = os.getenv("APP_ENV", mode).lower()
+    is_prod_like = app_env in ("production", "staging")
     db_url = os.getenv("DATABASE_URL", "")
     redis_url = os.getenv("REDIS_URL", "")
-    storage_backend = os.getenv("STORAGE_BACKEND", "persistent_disk" if app_env == "production" else "local").lower()
-    storage_root = os.getenv("STORAGE_ROOT", "/var/data/uploads" if app_env == "production" else "./storage")
+    storage_backend = os.getenv("STORAGE_BACKEND", "persistent_disk" if is_prod_like else "local").lower()
+    storage_root = os.getenv("STORAGE_ROOT", "/var/data/uploads" if is_prod_like else "./storage")
     jwt_secret = os.getenv("JWT_SECRET", "")
     mfa_key = os.getenv("MFA_ENCRYPTION_KEY", "")
     frontend_url = os.getenv("FRONTEND_URL", "")
@@ -51,8 +52,8 @@ def check_contract(mode: str) -> bool:
 
     # 2. Database URL Validation
     if not db_url:
-        if app_env == "production":
-            failures.append("DATABASE_URL is missing. Production requires a managed PostgreSQL connection string.")
+        if is_prod_like:
+            failures.append("DATABASE_URL is missing. Staging/Production requires a managed PostgreSQL connection string.")
         else:
             warnings.append("DATABASE_URL is empty; will default to sqlite:///./pgcb_portal.db in dev/test.")
         print(f"[-] DATABASE_URL       : [MISSING]")
@@ -67,15 +68,15 @@ def check_contract(mode: str) -> bool:
             normalized_url = db_url.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
 
         driver = normalized_url.split(":")[0]
-        if app_env == "production" and not driver.startswith("postgresql+psycopg"):
-            failures.append(f"DATABASE_URL driver is '{driver}'. Production requires 'postgresql+psycopg://'.")
+        if is_prod_like and not driver.startswith("postgresql+psycopg"):
+            failures.append(f"DATABASE_URL driver is '{driver}'. Staging/Production requires 'postgresql+psycopg://'.")
             print(f"[!] DATABASE_URL       : {driver}://... [INVALID DRIVER FOR PSYCOPG 3]")
         else:
             print(f"[+] DATABASE_URL       : {driver}://... {mask(db_url)}")
 
     # 3. Redis URL Validation
     if not redis_url:
-        if app_env == "production":
+        if is_prod_like:
             warnings.append("REDIS_URL is missing; Celery and distributed rate-limiting will be degraded.")
             print(f"[!] REDIS_URL          : [NOT SET]")
         else:
@@ -90,49 +91,49 @@ def check_contract(mode: str) -> bool:
 
     # 4. Storage Backend Validation (Render Persistent Disk)
     print(f"[*] STORAGE_BACKEND    : {storage_backend}")
-    if app_env == "production":
+    if is_prod_like:
         if storage_backend != "persistent_disk":
             failures.append(
-                f"STORAGE_BACKEND is '{storage_backend}'. Production strictly requires 'persistent_disk' "
+                f"STORAGE_BACKEND is '{storage_backend}'. Staging/Production strictly requires 'persistent_disk' "
                 f"with Render Persistent Disk (/var/data) to ensure file durability across container restarts."
             )
-            print(f"[-] STORAGE_BACKEND    : '{storage_backend}' [MUST BE 'persistent_disk' IN PRODUCTION]")
+            print(f"[-] STORAGE_BACKEND    : '{storage_backend}' [MUST BE 'persistent_disk' IN STAGING/PRODUCTION]")
         else:
             print(f"[+] STORAGE_BACKEND    : 'persistent_disk' (Render Persistent Disk)")
             print(f"[+] STORAGE_ROOT       : '{storage_root}'")
             if not storage_root or storage_root == "./storage":
-                warnings.append("STORAGE_ROOT is set to local default; in Render production this should be '/var/data/uploads'.")
+                warnings.append("STORAGE_ROOT is set to local default; in Render this should be '/var/data/uploads'.")
     else:
         print(f"[+] STORAGE_BACKEND    : '{storage_backend}' (permitted in {app_env})")
         print(f"[*] STORAGE_ROOT       : '{storage_root}'")
 
     # 5. Security Credentials Validation
     if not jwt_secret:
-        if app_env == "production":
-            failures.append("JWT_SECRET is missing. Production requires a secret with at least 32 characters.")
+        if is_prod_like:
+            failures.append("JWT_SECRET is missing. Staging/Production requires a secret with at least 32 characters.")
             print("[-] JWT_SECRET         : [MISSING]")
         else:
             warnings.append("JWT_SECRET is empty; will use insecure default in dev/test.")
             print("[-] JWT_SECRET         : [USING DEV DEFAULT]")
-    elif len(jwt_secret) < 32 and app_env == "production":
+    elif len(jwt_secret) < 32 and is_prod_like:
         failures.append(f"JWT_SECRET is too short ({len(jwt_secret)} chars). Minimum length is 32.")
         print(f"[-] JWT_SECRET         : {mask(jwt_secret)} [TOO SHORT (<32)]")
-    elif jwt_secret.startswith("dev-only-secret") and app_env == "production":
+    elif jwt_secret.startswith("dev-only-secret") and is_prod_like:
         failures.append("JWT_SECRET is set to the default placeholder. Provide a secure random secret.")
         print("[-] JWT_SECRET         : [INSECURE DEFAULT VALUE]")
     else:
         print(f"[+] JWT_SECRET         : {mask(jwt_secret)}")
 
-    if not mfa_key and app_env == "production":
+    if not mfa_key and is_prod_like:
         warnings.append("MFA_ENCRYPTION_KEY is not set. MFA totp secrets will not be encrypted at rest.")
         print("[-] MFA_ENCRYPTION_KEY : [NOT SET (WARNING)]")
     else:
         print(f"[+] MFA_ENCRYPTION_KEY : {mask(mfa_key)}")
 
     # 6. Frontend URL (CORS / Redirects)
-    if not frontend_url and app_env == "production":
-        warnings.append("FRONTEND_URL is not set. CORS will fallback to https://pgcb-portal-web.onrender.com.")
-        print("[-] FRONTEND_URL       : [FALLBACK TO https://pgcb-portal-web.onrender.com]")
+    if not frontend_url and is_prod_like:
+        warnings.append("FRONTEND_URL is not set. Configure FRONTEND_URL via Render service reference.")
+        print("[-] FRONTEND_URL       : [NOT SET]")
     else:
         print(f"[+] FRONTEND_URL       : {frontend_url or 'http://localhost:3000'}")
 
@@ -162,7 +163,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate PGCB Portal deployment contract")
     parser.add_argument(
         "--mode",
-        choices=["production", "development", "test"],
+        choices=["production", "staging", "development", "test"],
         default=os.getenv("APP_ENV", "production").lower(),
         help="Target environment mode to validate (default: from APP_ENV or production)",
     )

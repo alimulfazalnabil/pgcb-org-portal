@@ -36,7 +36,10 @@ export default function RegisterPage() {
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
-      const rawApi = process.env.NEXT_PUBLIC_API_URL || '/backend';
+      const rawApi =
+        typeof window !== 'undefined'
+          ? '/backend'
+          : process.env.NEXT_PUBLIC_API_URL || '/backend';
       const cleanApi = rawApi.replace(/\/$/, '');
       const apiBase = cleanApi.endsWith('/api/v1') ? cleanApi : `${cleanApi}/api/v1`;
 

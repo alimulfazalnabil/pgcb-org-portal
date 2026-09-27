@@ -117,9 +117,9 @@ class EmailService:
           </table>
         </div>
         <p>আপনি এখন আপনার ডিজিটাল মেম্বারশিপ কার্ড, সার্কুলার, প্রকাশনা ও কল্যাণমূলক সুবিধাসমূহ দেখতে পারেন।</p>
-        <a href="{os.getenv('FRONTEND_URL', 'https://pgcb-org-portal.onrender.com')}/portal" class="btn">মেম্বার পোর্টালে লগইন করুন</a>
+        <a href="{settings.frontend_url}/portal" class="btn">মেম্বার পোর্টালে লগইন করুন</a>
         """
-        body_text = f"প্রিয় {name},\nপিজিসিবি পোর্টালে স্বাগতম। আপনার সদস্য নম্বর: {membership_id}। লগইন করুন: {os.getenv('FRONTEND_URL', 'https://pgcb-org-portal.onrender.com')}/portal"
+        body_text = f"প্রিয় {name},\nপিজিসিবি পোর্টালে স্বাগতম। আপনার সদস্য নম্বর: {membership_id}। লগইন করুন: {settings.frontend_url}/portal"
         return cls.send_raw_email(to_email, subject, body_text, _wrap_html_template(subject, content_html))
 
     @classmethod
@@ -162,9 +162,9 @@ class EmailService:
           </table>
         </div>
         <p>আপনি নিচের লিংক ব্যবহার করে যেকোনো সময় আপনার আবেদনের অগ্রগতি ট্র্যাক করতে পারেন:</p>
-        <a href="{os.getenv('FRONTEND_URL', 'https://pgcb-org-portal.onrender.com')}/membership/track?app_no={application_no}" class="btn">আবেদন স্ট্যাটাস দেখুন</a>
+        <a href="{settings.frontend_url}/membership/track?app_no={application_no}" class="btn">আবেদন স্ট্যাটাস দেখুন</a>
         """
-        body_text = f"প্রিয় {display_name},\nআপনার আবেদন জমা হয়েছে। ট্র্যাকিং নম্বর: {application_no}। স্ট্যাটাস চেক করুন: {os.getenv('FRONTEND_URL', '')}/membership/track?app_no={application_no}"
+        body_text = f"প্রিয় {display_name},\nআপনার আবেদন জমা হয়েছে। ট্র্যাকিং নম্বর: {application_no}। স্ট্যাটাস চেক করুন: {settings.frontend_url}/membership/track?app_no={application_no}"
         return cls.send_raw_email(to_email, subject, body_text, _wrap_html_template(subject, content_html))
 
     @classmethod
@@ -174,7 +174,7 @@ class EmailService:
     @classmethod
     def send_application_approved(cls, to_email: str, name: str = '', membership_id: str = '', portal_url: str | None = None, applicant_name: str | None = None) -> EmailResult:
         display_name = applicant_name or name or 'প্রকৌশলী'
-        target_url = portal_url or f"{os.getenv('FRONTEND_URL', 'https://pgcb-org-portal.onrender.com')}/portal"
+        target_url = portal_url or f"{settings.frontend_url}/portal"
         subject = f"অভিনন্দন! আপনার সদস্যপদ অনুমোদিত হয়েছে | Membership Approved ({membership_id})"
         content_html = f"""
         <h2>অভিনন্দন {display_name}!</h2>

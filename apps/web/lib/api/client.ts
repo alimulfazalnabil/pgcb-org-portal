@@ -3,16 +3,29 @@
  * Enforces unified /backend reverse-proxying in browser to protect credentials and sessions.
  */
 
+function resolveServerApiUrl(): string {
+  const internalUrl = (process.env.INTERNAL_API_URL || '').trim();
+  const publicUrl = (process.env.NEXT_PUBLIC_API_URL || '').trim();
+  const candidate =
+    internalUrl ||
+    (publicUrl && !publicUrl.startsWith('/') ? publicUrl : '') ||
+    'http://127.0.0.1:8000';
+
+  let normalized = candidate.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
+  if (!/^https?:\/\//i.test(normalized)) {
+    if (normalized.includes(':') || normalized.startsWith('127.0.0.1') || normalized.startsWith('localhost')) {
+      normalized = `http://${normalized}`;
+    } else if (normalized.includes('.')) {
+      normalized = `https://${normalized}`;
+    } else {
+      normalized = `http://${normalized}:10000`;
+    }
+  }
+  return normalized;
+}
+
 export const API_BASE_URL =
-  typeof window !== 'undefined'
-    ? '/backend'
-    : (
-        process.env.INTERNAL_API_URL ||
-        process.env.NEXT_PUBLIC_API_URL ||
-        (process.env.NODE_ENV === 'production'
-          ? 'https://pgcb-portal-api.onrender.com'
-          : 'http://127.0.0.1:8000')
-      ).replace(/\/+$/, '');
+  typeof window !== 'undefined' ? '/backend' : resolveServerApiUrl();
 
 export class ApiError extends Error {
   status: number;

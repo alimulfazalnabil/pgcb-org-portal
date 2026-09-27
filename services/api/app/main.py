@@ -96,9 +96,9 @@ app.add_middleware(
     allow_headers=['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID'],
 )
 
-# In test and local sqlite environments, automatically provision tables for test suites;
-# Production environments use Alembic preDeployCommand (alembic upgrade head).
-if settings.app_env.lower() in ('development', 'test') and settings.database_url.startswith('sqlite'):
+# Only in isolated test runs with sqlite, provision tables automatically;
+# Staging and production strictly use Alembic migrations (alembic upgrade head).
+if settings.app_env.lower() == 'test' and settings.database_url.startswith('sqlite'):
     try:
         Base.metadata.create_all(bind=engine, checkfirst=True)
     except Exception as exc:
@@ -149,9 +149,9 @@ def live():
 def metrics(request: Request):
     if not settings.metrics_enabled:
         return Response(status_code=404)
-    if settings.app_env.lower() == 'production' and settings.metrics_token:
-        auth = request.headers.get('Authorization', '')
-        if auth != f'Bearer {settings.metrics_token}':
+    if settings.is_production_like and settings.metrics_token:
+        auth_hdr = request.headers.get('Authorization', '')
+        if auth_hdr != f'Bearer {settings.metrics_token}':
             return Response(status_code=401)
     from app.core.metrics import render_metrics
     body, media_type = render_metrics()
