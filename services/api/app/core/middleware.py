@@ -12,6 +12,7 @@ from app.core.metrics import REQUEST_COUNT, REQUEST_LATENCY
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get('X-Request-ID') or uuid.uuid4().hex
+        request.state.request_id = request_id
         started = time.perf_counter()
         try:
             response = await call_next(request)

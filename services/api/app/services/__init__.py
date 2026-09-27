@@ -4,8 +4,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.models import AuditLog, Member, Notification, User
 from app.core.config import settings
-from app.services.email import EmailService
-
 try:
     BASE_STORAGE = Path(settings.storage_root).resolve()
     BASE_STORAGE.mkdir(parents=True, exist_ok=True)
@@ -42,6 +40,12 @@ def membership_dates():
     now = datetime.utcnow()
     return now, now + timedelta(days=365)
 
+from app.services.email import EmailService
+from app.services.membership_service import MembershipService
+from app.services.event_service import EventService
+from app.services.payment_service import PaymentService
+from app.services.certificate_service import CertificateService
+
 __all__ = [
     'audit',
     'notify',
@@ -52,4 +56,8 @@ __all__ = [
     'ALLOWED_CONTENT_TYPES',
     'BASE_STORAGE',
     'EmailService',
+    'MembershipService',
+    'EventService',
+    'PaymentService',
+    'CertificateService',
 ]

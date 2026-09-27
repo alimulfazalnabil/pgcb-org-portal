@@ -1,0 +1,20 @@
+# PGCB Organization Portal — Feature Completeness Matrix
+
+| Section | Feature / Requirement | Status | Implementation Reference | Verification Method |
+| :--- | :--- | :--- | :--- | :--- |
+| **1–5** | Audit, Architecture Preservation & Gap Analysis | **COMPLETE** | `docs/PROJECT_AUDIT.md`, `docs/ARCHITECTURE.md` | Codebase inspection & automated test suite |
+| **6 & 11** | Public Website Pages (22+ Routes, CMS-Driven) | **COMPLETE** | `apps/web/app/**` (`/`, `/about`, `/committee`, `/membership`, `/membership/benefits`, `/membership/apply`, `/membership/track`, `/events`, `/circulars`, `/journal`, `/gallery`, `/media`, `/contact`, `/search`, `/verify`, `/certificates/verify`, `/member/verify/[membership_id]`, `/privacy`, `/terms`, `/accessibility`) | Next.js production build & route check |
+| **7–10** | Design System, Responsive Layout, Accessibility & Dark Mode | **COMPLETE** | `apps/web/app/globals.css`, `components/Navbar.tsx`, `components/Footer.tsx` | Semantic HTML, ARIA labels, responsive Tailwind grid |
+| **12–14** | Membership Application, Tracking & Lifecycle (`PENDING` $\rightarrow$ `UNDER_REVIEW` $\rightarrow$ `ACTIVE` / `REJECTED` / `SUSPENDED`) | **COMPLETE** | `services/api/app/services/membership_service.py`, `app/routers/member.py`, `app/routers/admin.py` | `tests/test_workflows_e2e.py` |
+| **15–16** | Member Self-Service Portal & Digital ID Card with QR | **COMPLETE** | `apps/web/app/portal/page.tsx`, `services/api/app/utils/qr_card.py` | `tests/test_portal.py` |
+| **17–18** | Events Management, Capacity Tracking, Waitlist & QR Attendance Check-In | **COMPLETE** | `services/api/app/services/event_service.py`, `apps/web/app/admin/events/page.tsx`, `apps/web/app/admin/attendance/page.tsx` | `tests/test_workflows_e2e.py` |
+| **19–20** | Certificate Generation, QR Token Verification, PDF Download & Revocation | **COMPLETE** | `services/api/app/services/certificate_service.py`, `services/api/app/routers/certificates.py`, `apps/web/app/certificates/verify/page.tsx` | `tests/test_workflows_e2e.py` |
+| **21–22** | Circulars, Notices, Documents, Journal & Media Gallery CMS | **COMPLETE** | `services/api/app/routers/notices.py`, `documents.py`, `public.py`, `admin.py` | `tests/test_notices_documents.py` |
+| **23–25** | Multi-Page Admin Panel (21 Subroutes) & Real Database Analytics | **COMPLETE** | `apps/web/app/admin/**`, `components/admin/AdminSidebar.tsx` | Next.js TypeScript & production build |
+| **26–28** | Granular 7-Role RBAC Enforcement & Permission Matrix | **COMPLETE** | `services/api/app/core/rbac.py`, `apps/web/app/admin/roles/page.tsx` | `tests/test_rbac_matrix.py` |
+| **29–31** | Authentication, JWT Session Cookies, CSRF Protection, Rate Limiting & Admin MFA (TOTP) | **COMPLETE** | `services/api/app/routers/auth.py`, `app/core/security.py`, `app/core/mfa.py`, `app/core/middleware.py` | `tests/test_portal.py`, `tests/test_rbac_matrix.py` |
+| **32–34** | Financial Ledger, Payment Reconciliation & Membership Renewal | **COMPLETE** | `services/api/app/services/payment_service.py`, `apps/web/app/admin/payments/page.tsx` | `tests/test_workflows_e2e.py` |
+| **35–37** | Provider-Neutral File Storage (`local` / `persistent_disk`, Zero Azure Dependencies) | **COMPLETE** | `services/api/app/utils/storage.py`, `services/api/requirements.txt` | `tests/test_storage_and_workflow.py` |
+| **38–41** | Structured Error Handling (`request_id`), Zero Auto-Seed on Startup & CLI Admin Bootstrap | **COMPLETE** | `services/api/app/main.py`, `services/api/app/scripts/create_admin.py` | `tests/test_portal.py` |
+| **42–49** | Complete Documentation Suite (`docs/*.md` & `README.md`) | **COMPLETE** | `docs/PROJECT_AUDIT.md`, `COMPLETENESS_MATRIX.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`, `SECURITY.md`, `TESTING.md`, `RBAC.md`, `DATABASE.md`, `README.md` | Documentation verification |
+| **50–52** | Quality Gate (Build, Typecheck, Lint, Unit/Integration/E2E Tests, Migrations) | **COMPLETE** | `services/api/tests/`, `apps/web/` | Automated CI/local verification commands |

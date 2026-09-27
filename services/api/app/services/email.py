@@ -149,10 +149,11 @@ class EmailService:
         return cls.send_raw_email(to_email, subject, body_text, _wrap_html_template(subject, content_html))
 
     @classmethod
-    def send_application_submitted(cls, to_email: str, name: str, application_no: str) -> EmailResult:
+    def send_application_submitted(cls, to_email: str, name: str = '', application_no: str = '', applicant_name: str | None = None) -> EmailResult:
+        display_name = applicant_name or name or 'প্রকৌশলী'
         subject = f"সদস্যপদের আবেদন গ্রহণ | Application Received #{application_no}"
         content_html = f"""
-        <h2>প্রিয় {name},</h2>
+        <h2>প্রিয় {display_name},</h2>
         <p>পিজিসিবি মেম্বারশিপের জন্য আপনার অনলাইন আবেদনটি সফলভাবে সিস্টেমে জমা হয়েছে।</p>
         <div class="details-box">
           <table>
@@ -163,14 +164,20 @@ class EmailService:
         <p>আপনি নিচের লিংক ব্যবহার করে যেকোনো সময় আপনার আবেদনের অগ্রগতি ট্র্যাক করতে পারেন:</p>
         <a href="{os.getenv('FRONTEND_URL', 'https://pgcb-org-portal.onrender.com')}/membership/track?app_no={application_no}" class="btn">আবেদন স্ট্যাটাস দেখুন</a>
         """
-        body_text = f"প্রিয় {name},\nআপনার আবেদন জমা হয়েছে। ট্র্যাকিং নম্বর: {application_no}। স্ট্যাটাস চেক করুন: {os.getenv('FRONTEND_URL', '')}/membership/track?app_no={application_no}"
+        body_text = f"প্রিয় {display_name},\nআপনার আবেদন জমা হয়েছে। ট্র্যাকিং নম্বর: {application_no}। স্ট্যাটাস চেক করুন: {os.getenv('FRONTEND_URL', '')}/membership/track?app_no={application_no}"
         return cls.send_raw_email(to_email, subject, body_text, _wrap_html_template(subject, content_html))
 
     @classmethod
-    def send_application_approved(cls, to_email: str, name: str, membership_id: str, portal_url: str) -> EmailResult:
+    def send_application_received(cls, to_email: str, applicant_name: str = '', application_no: str = '') -> EmailResult:
+        return cls.send_application_submitted(to_email=to_email, name=applicant_name, application_no=application_no)
+
+    @classmethod
+    def send_application_approved(cls, to_email: str, name: str = '', membership_id: str = '', portal_url: str | None = None, applicant_name: str | None = None) -> EmailResult:
+        display_name = applicant_name or name or 'প্রকৌশলী'
+        target_url = portal_url or f"{os.getenv('FRONTEND_URL', 'https://pgcb-org-portal.onrender.com')}/portal"
         subject = f"অভিনন্দন! আপনার সদস্যপদ অনুমোদিত হয়েছে | Membership Approved ({membership_id})"
         content_html = f"""
-        <h2>অভিনন্দন {name}!</h2>
+        <h2>অভিনন্দন {display_name}!</h2>
         <p>কর্তৃপক্ষ কর্তৃক আপনার সদস্যপদ আবেদনটি অনুমোদিত হয়েছে। আপনাকে আনুষ্ঠানিকভাবে পিজিসিবি সদস্য হিসেবে অন্তর্ভুক্তি করা হলো।</p>
         <div class="details-box">
           <table>
@@ -179,16 +186,17 @@ class EmailService:
           </table>
         </div>
         <p>আপনার প্রোফাইলে লগইন করে ডিজিটাল সদস্য কার্ড ও সার্টিফিকেট ডাউনলোড করুন:</p>
-        <a href="{portal_url}" class="btn">সদস্য ড্যাশবোর্ডে প্রবেশ করুন</a>
+        <a href="{target_url}" class="btn">সদস্য ড্যাশবোর্ডে প্রবেশ করুন</a>
         """
-        body_text = f"অভিনন্দন {name}! আপনার সদস্যপদ অনুমোদিত হয়েছে। সদস্য আইডি: {membership_id}। পোর্টাল: {portal_url}"
+        body_text = f"অভিনন্দন {display_name}! আপনার সদস্যপদ অনুমোদিত হয়েছে। সদস্য আইডি: {membership_id}। পোর্টাল: {target_url}"
         return cls.send_raw_email(to_email, subject, body_text, _wrap_html_template(subject, content_html))
 
     @classmethod
-    def send_application_rejected(cls, to_email: str, name: str, reason: str) -> EmailResult:
+    def send_application_rejected(cls, to_email: str, name: str = '', reason: str = '', applicant_name: str | None = None) -> EmailResult:
+        display_name = applicant_name or name or 'প্রকৌশলী'
         subject = "সদস্যপদ আবেদন সংক্রান্ত তথ্য | Membership Application Update"
         content_html = f"""
-        <h2>প্রিয় {name},</h2>
+        <h2>প্রিয় {display_name},</h2>
         <p>আপনার সদস্যপদ আবেদনটি পর্যালোচনার পর এই মুহূর্তে গ্রহণ করা সম্ভব হয়নি।</p>
         <div class="details-box">
           <table>
@@ -197,7 +205,7 @@ class EmailService:
         </div>
         <p>প্রয়োজনীয় কাগজপত্র বা তথ্য সংশোধন করে আপনি পুনরায় আবেদন করতে পারেন। প্রয়োজনে হেল্পডেস্কে যোগাযোগ করুন।</p>
         """
-        body_text = f"প্রিয় {name},\nআপনার আবেদন পর্যালোচনা শেষে স্থগিত/বাতিল করা হয়েছে। কারণ: {reason}।"
+        body_text = f"প্রিয় {display_name},\nআপনার আবেদন পর্যালোচনা শেষে স্থগিত/বাতিল করা হয়েছে। কারণ: {reason}।"
         return cls.send_raw_email(to_email, subject, body_text, _wrap_html_template(subject, content_html))
 
     @classmethod
@@ -216,6 +224,40 @@ class EmailService:
         <p>আপনার প্রোফাইল থেকে অর্থপ্রদানের অফিসিয়াল রসিদ প্রিন্ট করতে পারেন।</p>
         """
         body_text = f"ধন্যবাদ {name},\nপেমেন্ট প্রাপ্তি নিশ্চিত করা হলো। TrxID: {trx_id}, পরিমাণ: ৳ {amount:,.2f}, বিবরণ: {purpose}।"
+        return cls.send_raw_email(to_email, subject, body_text, _wrap_html_template(subject, content_html))
+
+    @classmethod
+    def send_payment_receipt(cls, to_email: str, payer_name: str, amount: Any, transaction_id: str, purpose: str) -> EmailResult:
+        subject = f"পেমেন্ট প্রাপ্তি রসিদ | Payment Receipt #{transaction_id}"
+        body_text = f"ধন্যবাদ {payer_name},\nপেমেন্ট প্রাপ্তি নিশ্চিত করা হলো। TrxID: {transaction_id}, পরিমাণ: {amount}, বিবরণ: {purpose}।"
+        content_html = f"""
+        <h2>ধন্যবাদ {payer_name},</h2>
+        <p>আপনার পেমেন্ট সফলভাবে গ্রহণ করা হয়েছে।</p>
+        <div class="details-box">
+          <table>
+            <tr><td class="label">লেনদেন আইডি (TrxID):</td><td class="value">{transaction_id}</td></tr>
+            <tr><td class="label">বিবরণ / উদ্দেশ্য:</td><td class="value">{purpose}</td></tr>
+            <tr><td class="label">জমাকৃত পরিমাণ:</td><td class="value">{amount}</td></tr>
+          </table>
+        </div>
+        """
+        return cls.send_raw_email(to_email, subject, body_text, _wrap_html_template(subject, content_html))
+
+    @classmethod
+    def send_certificate_issued(cls, to_email: str, recipient_name: str, certificate_type: str, certificate_number: str, verification_url: str) -> EmailResult:
+        subject = f"নতুন সনদপত্র ইস্যু করা হয়েছে | Certificate Issued ({certificate_number})"
+        body_text = f"প্রিয় {recipient_name},\nআপনার {certificate_type} সনদপত্র ({certificate_number}) ইস্যু করা হয়েছে। যাচাইকরণ লিংক: {verification_url}"
+        content_html = f"""
+        <h2>প্রিয় {recipient_name},</h2>
+        <p>আপনার প্রাতিষ্ঠানিক সনদপত্র সফলভাবে ইস্যু করা হয়েছে।</p>
+        <div class="details-box">
+          <table>
+            <tr><td class="label">সনদপত্র নম্বর:</td><td class="value">{certificate_number}</td></tr>
+            <tr><td class="label">ধরন:</td><td class="value">{certificate_type}</td></tr>
+          </table>
+        </div>
+        <a href="{verification_url}" class="btn">সনদ যাচাই করুন</a>
+        """
         return cls.send_raw_email(to_email, subject, body_text, _wrap_html_template(subject, content_html))
 
     @classmethod
@@ -247,6 +289,10 @@ class EmailService:
         return cls.send_raw_email(to_email, subject, body_text, _wrap_html_template(subject, content_html))
 
     @classmethod
+    def send_event_confirmation(cls, to_email: str, participant_name: str, event_title: str, ticket_code: str, event_date: str, location: str) -> EmailResult:
+        return cls.send_event_registered(to_email=to_email, name=participant_name, event_title=f"{event_title} ({ticket_code})", event_date=event_date, venue=location)
+
+    @classmethod
     def send_security_alert(cls, to_email: str, name: str, action_desc: str, time_str: str, ip_addr: str) -> EmailResult:
         subject = "নিরাপত্তা সতর্কতা | Security Alert: Account Activity"
         content_html = f"""
@@ -263,3 +309,4 @@ class EmailService:
         """
         body_text = f"নিরাপত্তা সতর্কতা: প্রিয় {name},\nআপনার অ্যাকাউন্টে {action_desc} সম্পন্ন হয়েছে। সময়: {time_str}, IP: {ip_addr}।"
         return cls.send_raw_email(to_email, subject, body_text, _wrap_html_template(subject, content_html))
+

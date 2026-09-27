@@ -1,184 +1,75 @@
-# PGCB Organization Portal — v1.0 Release Candidate
+# PGCB Organization Portal (পাওয়ার গ্রিড ডিপ্লোমা প্রকৌশলী সমিতি)
 
-A Bangla-first institutional website, member portal and administrative CMS inspired by the supplied reference screenshots. This release candidate consolidates the public site, membership lifecycle, verification, content workflows, event operations, payment ledger, notifications, security controls and Azure deployment foundation into one deployable platform.
+Official Institutional Web Portal, Member Self-Service Platform, Cryptographic Verification System, and Secretariat Administration Console for the **Power Grid Diploma Engineers Association (PGCB)** affiliated with IDEB.
 
-## Release scope
+- **Live Production Portal**: [https://pgcb-org-portal.onrender.com](https://pgcb-org-portal.onrender.com)
+- **Repository**: [https://github.com/alimulfazalnabil/pgcb-org-portal](https://github.com/alimulfazalnabil/pgcb-org-portal)
 
-### Public website
-- Responsive screenshot-inspired institutional design
-- Bangla-first UI with English-ready content fields
-- Executive committee and Grid Circle pages
-- Circulars / notices / official documents
-- Technical journal and publications
-- Events and media gallery
-- Public membership verification and QR verification
-- Public event registration and ticket verification
-- Site-wide search across published circulars, journals, events and media
-- Dynamic public site statistics API
-- Secretariat contact form
-- Privacy, terms and accessibility pages
+---
 
-### Member portal
-- Registration and login
-- Email verification / resend verification
-- Password reset
-- Profile management
-- Membership application workflow
-- Secure member document upload/download
-- Digital membership card (PNG/PDF) with signed QR verification
-- Event registration and ticket access
-- Payment history
-- Notifications
-- Session listing, revocation and logout-all
+## 1. Key Capabilities
 
-### Admin / CMS / operations
-- KPI and operational reports
-- Permission-aware RBAC
-- Member search, review, approval, rejection, suspension and reactivation
-- Member document review
-- Circular, Circle, Committee, Journal, Event and Media CRUD foundations
-- Controlled editorial workflow and scheduling
-- Event attendance/check-in desk
-- Payment status/reconciliation foundation
-- Notification delivery queue and logs
-- Staff/user management
-- Site settings
-- Administrator TOTP MFA
-- Security audit log
-- CSV exports
+1. **Public Institutional Website (`apps/web/app/`)**:
+   - Bilingual (Bangla-first + English) institutional design system with full dark/light mode support.
+   - Dynamic pages for About (`/about`), Executive Committee & Grid Circles (`/committee`, `/committee/message`), Membership Overview & Benefits (`/membership`, `/membership/benefits`), Online Application & Tracking (`/membership/apply`, `/membership/track`), Events & Registration (`/events`, `/events/[id]`), Circulars (`/circulars`), Notices (`/notices`), Documents (`/documents`), Technical Journal (`/journal`), Media Gallery (`/gallery`, `/media`), Unified Search (`/search`), and Contact (`/contact`).
+2. **Cryptographic Credential & Certificate Verification**:
+   - Digital Member ID Card verification via Member ID or HMAC-SHA256 signed QR token (`/verify`, `/member/verify/[membership_id]`).
+   - Digital Certificate verification & PDF download (`/certificates/verify`).
+3. **Member Self-Service Portal (`/portal`)**:
+   - Authenticated member dashboard with digital ID card, QR verification badge, document uploads, event registrations, and in-app notifications.
+4. **Multi-Page Secretariat Administration Console (`/admin/*`)**:
+   - 21 specialized subroutes protected by a 7-role RBAC permission matrix (`SUPER_ADMIN`, `CONTENT_EDITOR`, `MEMBERSHIP_OFFICER`, `CIRCLE_ADMIN`, `FINANCE_OFFICER`, `AUDITOR`, `MEMBER`), TOTP MFA, immutable audit logging, and CSV batch import/export.
 
-### Production readiness
-- Azure-ready Terraform topology
-- PostgreSQL Flexible Server
-- Redis
-- Blob Storage + managed identity
-- Key Vault
-- Container Registry + Container Apps
-- Front Door + WAF
-- Log Analytics + Application Insights
-- GitHub OIDC deployment workflow
-- Backup verification / restore drill scripts
-- Playwright smoke tests
-- Liveness / readiness endpoints
-- Protected metrics endpoint
+---
 
-## Stack
+## 2. Architecture & Documentation
 
-- Frontend: Next.js 15, React 19, TypeScript, CSS/Tailwind-compatible component styles
-- Backend: FastAPI, SQLAlchemy, Pydantic
-- Database: PostgreSQL (SQLite supported for local development)
-- Cache/rate limiting: Redis
-- Storage: local development or Azure Blob Storage
-- Auth/security: JWT + HttpOnly cookies, revocable sessions, TOTP MFA, signed verification tokens
-- Infrastructure: Docker, GitHub Actions, Terraform, Azure
+Detailed engineering documentation is available in the [`docs/`](./docs) directory:
+- [Project Audit & Gap Analysis](./docs/PROJECT_AUDIT.md)
+- [Feature Completeness Matrix](./docs/COMPLETENESS_MATRIX.md)
+- [System Architecture](./docs/ARCHITECTURE.md)
+- [Database Schema & Migrations](./docs/DATABASE.md)
+- [Role-Based Access Control (RBAC)](./docs/RBAC.md)
+- [Security Architecture](./docs/SECURITY.md)
+- [Testing & Verification Guide](./docs/TESTING.md)
+- [Deployment & Operations Guide](./docs/DEPLOYMENT.md)
 
-## Local development
+---
 
-### Backend
+## 3. Quick Start (Local Development)
 
+### Backend API (`services/api`)
 ```bash
 cd services/api
 python -m venv .venv
-# Windows: .venv\\Scripts\\activate
-# Linux/macOS: source .venv/bin/activate
+# Windows: .\.venv\Scripts\activate | Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
-cp ../../.env.example .env
-python -m app.db.seed
+alembic upgrade head
+
+# Create an initial SUPER_ADMIN user
+python -m app.scripts.create_admin --email admin@pgcb.org.bd --password "StrongPassword#2026"
+
+# Start FastAPI server on port 8000
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Frontend
-
+### Frontend Web (`apps/web`)
 ```bash
 cd apps/web
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open `http://localhost:3000` in your browser.
 
-API docs: http://localhost:8000/docs
+---
 
-### Docker Compose
-
-```bash
-docker compose up --build
-```
-
-### Database migrations
+## 4. Quality & Test Verification
 
 ```bash
-cd services/api
-PYTHONPATH=. alembic upgrade head
+# Backend Test Suite (61 tests)
+cd services/api && python -m pytest -v
+
+# Frontend Typecheck, Lint & Production Build
+cd apps/web && npm run typecheck && npm run lint && npm run build
 ```
-
-## Demo accounts
-
-- Super Admin: `admin@example.org` / `ChangeMe123!`
-- Content Editor: `content@example.org` / `ChangeMe123!`
-- Member: `member@example.org` / `ChangeMe123!`
-- Demo membership ID: `PGD-2026-1001`
-
-Demo credentials are development-only.
-
-## Frontend routes
-
-```text
-/
-/search
-/committee
-/circles
-/circles/[circle]
-/circulars
-/circulars/[id]
-/journal
-/journal/[id]
-/events
-/events/[id]
-/events/[id]/register
-/events/ticket/[token]
-/media
-/contact
-/verify
-/certificates/verify
-/register
-/login
-/forgot-password
-/reset-password
-/verify-email
-/resend-verification
-/portal
-/portal/security
-/admin
-/privacy
-/terms
-/accessibility
-```
-
-## Operational release checks
-
-Before production:
-
-1. Set production `JWT_SECRET`, `MFA_ENCRYPTION_KEY` and provider credentials through Azure Key Vault.
-2. Configure the production domain and Front Door certificate.
-3. Run `terraform plan` and review network, backup, WAF and cost settings.
-4. Execute a PostgreSQL restore drill and retain the evidence.
-5. Run backend tests, frontend typecheck/build and Playwright E2E in CI.
-6. Replace demo branding/content and credentials with approved organizational data.
-
-## Verification performed for v1.0 RC
-
-```text
-Python compilation: PASS
-Fresh Alembic migration: PASS
-Backend automated tests: PASS (including new public search/stats/readiness tests)
-Frontend source syntax checks: PASS
-Docker Compose YAML: PASS
-GitHub workflow YAML: PASS
-```
-
-A clean Next.js dependency installation/build and Terraform plan cannot be truthfully claimed from this environment because the required npm/Terraform tooling or registry access is not available here. CI remains configured to perform those production checks.
-
-## Security note
-
-The repository contains demo credentials and local development storage only. Before deployment, replace all demo secrets, verify the allowed CORS origin, configure a production CSP after validating the Next.js asset model, enable email verification as appropriate, and configure the selected Bangladesh payment/SMS providers.

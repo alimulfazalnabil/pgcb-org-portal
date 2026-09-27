@@ -36,20 +36,6 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning(f"Storage root initialization warning: {exc}")
 
-    # Ensure initial database seed exists if database is newly initialized
-    try:
-        from app.db.seed import main as seed_db
-        from app.models import User
-        from sqlalchemy import func, select
-        with SessionLocal() as db:
-            user_count = db.scalar(select(func.count(User.id)))
-            if not user_count:
-                logger.info("[STARTUP] Empty database detected. Running initial seed...")
-                seed_db()
-                logger.info("[STARTUP] Initial database seed completed.")
-    except Exception as exc:
-        logger.warning(f"[STARTUP] Initial database seed check warning: {exc}")
-
     yield
     logger.info("[SHUTDOWN] PGCB Portal API shutting down")
 
@@ -61,22 +47,50 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    request_id = getattr(request.state, 'request_id', request.headers.get('X-Request-ID') or 'unknown')
+    code_map = {
+        400: 'BAD_REQUEST',
+        401: 'UNAUTHORIZED',
+        403: 'FORBIDDEN',
+        404: 'NOT_FOUND',
+        409: 'CONFLICT',
+        422: 'VALIDATION_ERROR',
+        429: 'RATE_LIMITED',
+        500: 'INTERNAL_SERVER_ERROR',
+    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            'detail': exc.detail,
+            'error': {
+                'code': code_map.get(exc.status_code, f'HTTP_{exc.status_code}'),
+                'message': str(exc.detail),
+                'request_id': request_id,
+            },
+        },
+        headers=getattr(exc, 'headers', None),
+    )
+
+
 app.add_middleware(SecurityMiddleware)
 
-cors_origins = [
-    settings.frontend_url.rstrip('/'),
-    'https://pgcb-portal-web.onrender.com',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-]
+# Explicit CORS origins: Never use wildcard regex in production
+cors_origins = [settings.frontend_url.rstrip('/')]
 if settings.allowed_origins:
     cors_origins.extend([o.strip().rstrip('/') for o in settings.allowed_origins.split(',') if o.strip()])
+if settings.app_env.lower() in ('development', 'dev', 'test', 'testing', 'local'):
+    cors_origins.extend(['http://localhost:3000', 'http://127.0.0.1:3000'])
 cors_origins = list(dict.fromkeys(cors_origins))
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_origin_regex=r'https://.*\.onrender\.com',
     allow_credentials=True,
     allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allow_headers=['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID'],

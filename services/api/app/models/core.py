@@ -251,6 +251,32 @@ class PaymentTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    @property
+    def transaction_id(self) -> str | None:
+        return self.transaction_ref
+
+    @transaction_id.setter
+    def transaction_id(self, val: str | None):
+        self.transaction_ref = val
+
+    @property
+    def payment_method(self) -> str:
+        return self.provider
+
+    @payment_method.setter
+    def payment_method(self, val: str):
+        self.provider = val
+
+    @property
+    def provider_transaction_id(self) -> str | None:
+        if self.provider_payload and isinstance(self.provider_payload, dict):
+            return self.provider_payload.get('trxID') or self.provider_payload.get('issuer_trx_id') or self.provider_payload.get('challan_no')
+        return None
+
+    @property
+    def completed_at(self) -> datetime | None:
+        return self.updated_at if self.status in ('SUCCESS', 'COMPLETED') else None
+
 class NotificationDelivery(Base):
     __tablename__ = 'notification_deliveries'
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -316,6 +342,30 @@ class Certificate(Base):
     storage_path: Mapped[str] = mapped_column(String(1000))
     pdf_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    @property
+    def certificate_number(self) -> str:
+        return self.certificate_no
+
+    @certificate_number.setter
+    def certificate_number(self, val: str):
+        self.certificate_no = val
+
+    @property
+    def token(self) -> str:
+        return getattr(self, '_raw_token', self.certificate_no)
+
+    @token.setter
+    def token(self, val: str):
+        self._raw_token = val
+
+    @property
+    def status(self) -> str:
+        return getattr(self, '_transient_status', 'ISSUED')
+
+    @status.setter
+    def status(self, val: str):
+        self._transient_status = val
 
 class ContentWorkflow(Base):
     __tablename__ = 'content_workflows'

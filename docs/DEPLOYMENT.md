@@ -1,172 +1,60 @@
-# Deployment Guide — v0.8
+# PGCB Organization Portal — Deployment & Operations Guide
 
-## Local development
+## 1. Render Production Topology
 
-### Docker Compose
+The repository includes an infrastructure-as-code blueprint in `render.yaml` that provisions:
+1. **`pgcb-org-api` (Python Web Service)**:
+   - Root directory: `services/api`
+   - Build command: `pip install -r requirements.txt`
+   - Pre-deploy command: `alembic upgrade head`
+   - Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - Health check path: `/api/v1/health/ready`
+   - Persistent Disk: Mounted at `/var/data/pgcb-storage` (`STORAGE_BACKEND=persistent_disk`, `STORAGE_ROOT=/var/data/pgcb-storage`)
+2. **`pgcb-org-portal` (Node.js Web Service)**:
+   - Root directory: `apps/web`
+   - Build command: `npm ci && npm run build`
+   - Start command: `npm run start -- --hostname 0.0.0.0 --port $PORT`
+3. **`pgcb-org-db` (Render Managed PostgreSQL)**:
+   - Automatically injects `DATABASE_URL` into `pgcb-org-api`.
 
-```bash
-docker compose up --build
-```
+---
 
-Services:
+## 2. Required Environment Variables
 
-- Web: `http://localhost:3000`
-- API: `http://localhost:8000`
-- API docs: `http://localhost:8000/docs`
-- API health: `http://localhost:8000/health`
-- API readiness: `http://localhost:8000/ready`
-- PostgreSQL: `localhost:5432`
-- Redis: `localhost:6379`
-- Worker: background process defined in Compose
+### Backend (`services/api`)
+| Variable | Description | Production Example |
+| :--- | :--- | :--- |
+| `ENVIRONMENT` | Runtime environment (`development`, `test`, `production`) | `production` |
+| `DATABASE_URL` | SQLAlchemy database connection URL | `postgresql+psycopg2://user:pass@host:5432/pgcb` |
+| `SECRET_KEY` | Cryptographic secret (minimum 32 characters) for JWT & HMAC signing | `<64-char-random-hex>` |
+| `CORS_ORIGINS` | Comma-separated list of allowed frontend origins | `https://pgcb-org-portal.onrender.com` |
+| `FRONTEND_URL` | Canonical public URL of the Next.js frontend | `https://pgcb-org-portal.onrender.com` |
+| `STORAGE_BACKEND` | Storage driver (`local` or `persistent_disk`) | `persistent_disk` |
+| `STORAGE_ROOT` | Absolute path to persistent storage directory | `/var/data/pgcb-storage` |
+| `COOKIE_SECURE` | Enforce HTTPS-only auth cookies | `true` |
 
-### Alembic
+### Frontend (`apps/web`)
+| Variable | Description | Production Example |
+| :--- | :--- | :--- |
+| `BACKEND_INTERNAL_URL` | Backend base URL used by Next.js `/backend/*` rewrites | `https://pgcb-org-api.onrender.com` |
+| `NEXT_PUBLIC_SITE_URL` | Public canonical URL of the portal | `https://pgcb-org-portal.onrender.com` |
 
-```bash
-cd services/api
-PYTHONPATH=. alembic upgrade head
-```
+---
 
-### Seed development content
+## 3. Initial Admin Bootstrap (Zero Auto-Seed in Production)
 
-```bash
-cd services/api
-python -m app.db.seed
-```
+Automatic database seeding on application startup is **disabled** to guarantee production data integrity.
 
-Do not use seed credentials in production.
-
-## Azure production architecture
-
-```text
-Internet
-   |
-Azure Front Door + WAF + HTTPS redirect
-   |
-Web Container App (public ingress)
-   |
-   +--> API Container App (internal ingress)
-   |        |
-   |        +--> PostgreSQL Flexible Server (private access)
-   |        +--> Redis (private endpoint + TLS)
-   |        +--> Blob Storage (private endpoint + managed identity)
-   |        +--> Key Vault-backed secrets
-   |
-   +--> Log Analytics / Application Insights
-
-Worker Container App (no public ingress)
-   |
-   +--> PostgreSQL / Redis / Blob / notification providers
-```
-
-## Terraform
-
-Terraform is under `infrastructure/terraform` and uses the AzureRM remote backend.
-
-Bootstrap the state storage once:
+To bootstrap the initial `SUPER_ADMIN` account in production or staging, run the dedicated CLI script from `services/api`:
 
 ```bash
-SUBSCRIPTION_ID=<subscription-id> ./scripts/azure/bootstrap-tf-state.sh
+python -m app.scripts.create_admin \
+  --email admin@pgcb.org.bd \
+  --password "YourStrongPassword#2026" \
+  --name "কেন্দ্রীয় প্রধান প্রশাসক"
 ```
 
-Then initialize Terraform using the AzureRM backend environment variables used by `.github/workflows/terraform-apply.yml`.
-
-Production secrets are passed as `TF_VAR_*` values in the protected GitHub `production` environment. The deployed application uses Key Vault secret references rather than putting passwords into application images.
-
-## Workload identity
-
-The Container Apps use dedicated user-assigned managed identities:
-
-```text
-ACR           → AcrPull
-Key Vault     → Key Vault Secrets User
-Blob Storage  → Storage Blob Data Contributor
-```
-
-The ACR admin account is disabled. The Storage Account has anonymous access disabled and a private endpoint; its public network endpoint remains enabled so Terraform can provision the private blob container using the provider’s Shared Key management path. Application traffic is intended to resolve and use the private endpoint via the VNet/private DNS path.
-
-## Production application settings
-
-The API can construct its database and Redis connection URLs from discrete environment values:
-
-```text
-DB_HOST
-DB_PORT
-DB_NAME
-DB_USER
-DB_PASSWORD      # Key Vault-backed secret
-
-REDIS_HOST
-REDIS_PORT
-REDIS_PASSWORD   # Key Vault-backed secret
-REDIS_SCHEME=rediss
-```
-
-Recommended production settings:
-
-```text
-APP_ENV=production
-FRONTEND_URL=https://<front-door-or-custom-domain>
-REQUIRE_EMAIL_VERIFICATION=true
-STORAGE_BACKEND=azure
-AZURE_STORAGE_ACCOUNT_URL=https://<account>.blob.core.windows.net
-AZURE_STORAGE_USE_MANAGED_IDENTITY=true
-METRICS_ENABLED=true
-```
-
-## Deployment workflow
-
-`deploy-production.yml` builds immutable images in ACR and updates the Web/API/Worker Container Apps.
-
-```text
-Git tag / manual dispatch
-        |
-        v
-Azure OIDC login
-        |
-        +--> ACR build: API/Worker
-        +--> ACR build: Web
-        |
-        v
-Container Apps update
-        |
-        v
-Smoke test public web origin
-```
-
-The Terraform workflow is deliberately separate from the application release workflow so infrastructure changes can be reviewed independently.
-
-## Domain configuration
-
-The starter currently uses the Front Door-managed endpoint. Before public launch, configure the organization domain on Azure Front Door and update the API `FRONTEND_URL`/CORS allowlist to the final HTTPS origin. Add the organization's DNS CNAME/TXT records using the values shown in the Azure portal.
-
-## Monitoring
-
-- Container Apps environment sends operational logs to Log Analytics.
-- Azure Monitor action group sends production alerts to the configured operations email.
-- The API provides a protected Prometheus-style `/metrics` endpoint for internal scraping.
-- Front Door + WAF forms the internet-facing edge boundary.
-- Application Insights is provisioned for request-level instrumentation as the application telemetry layer is expanded.
-
-## Backups and recovery
-
+For local development demo data, you may explicitly invoke the seed module:
 ```bash
-AZURE_RESOURCE_GROUP=rg-pgcb-portal \
-POSTGRES_SERVER=psql-pgcb-portal \
-./scripts/backup/verify-postgres-backup.sh
+python -c "from app.db.session import SessionLocal; from app.seed import seed_data; db = SessionLocal(); seed_data(db); db.close()"
 ```
-
-Run the point-in-time restore drill with a dedicated temporary server using `scripts/backup/restore-drill.sh`. The drill server should be removed after validation.
-
-## Payment gateway deployment
-
-Provider-specific calls remain behind `app/integrations/payments.py`.
-
-Before production payments:
-
-1. Implement the selected provider's official API/SDK calls in the adapter.
-2. Map exact callback fields into the existing webhook parser.
-3. Store provider credentials in Key Vault.
-4. Register the public webhook endpoint at the provider.
-5. Test success, failure, cancellation, refund and duplicate webhook events in staging.
-
-No live payment credentials are included in this repository.

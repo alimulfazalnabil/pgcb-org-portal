@@ -153,7 +153,7 @@ def export_payments_csv(_: User = Depends(require_permission('finance.read')), d
 
 
 @router.get('/stats')
-def stats(_: User = Depends(require_permission('content.read')), db: Session = Depends(get_db)):
+def stats(_: User = Depends(require_permission('admin.stats')), db: Session = Depends(get_db)):
     return {
         'members': db.scalar(select(func.count(Member.id))) or 0,
         'active_members': db.scalar(select(func.count(Member.id)).where(Member.status == 'ACTIVE')) or 0,
@@ -176,9 +176,30 @@ def stats(_: User = Depends(require_permission('content.read')), db: Session = D
 
 
 @router.get('/permissions')
-def permissions(user: User = Depends(require_permission('content.read'))):
+def permissions(user: User = Depends(require_permission('admin.stats'))):
+    from app.core.rbac import ROLE_PERMISSIONS, ROLE_ALIASES
+    canonical = ROLE_ALIASES.get(user.role, user.role)
+    return {
+        'role': user.role,
+        'canonical_role': canonical,
+        'permissions': sorted(ROLE_PERMISSIONS.get(canonical, set())),
+        'matrix': {r: sorted(perms) for r, perms in ROLE_PERMISSIONS.items()},
+    }
+
+
+@router.get('/roles')
+def admin_roles(_: User = Depends(require_permission('admin.stats')), db: Session = Depends(get_db)):
     from app.core.rbac import ROLE_PERMISSIONS
-    return {'role': user.role, 'permissions': sorted(ROLE_PERMISSIONS.get(user.role, set()))}
+    counts = dict(db.execute(select(User.role, func.count(User.id)).group_by(User.role)).all())
+    return [
+        {
+            'role': role_name,
+            'permissions': sorted(perms),
+            'user_count': counts.get(role_name, 0),
+        }
+        for role_name, perms in ROLE_PERMISSIONS.items()
+    ]
+
 
 def _month_starts(now: datetime, count: int = 6) -> list[datetime]:
     # Return the first day of each of the last `count` months, oldest first.
@@ -771,11 +792,6 @@ def notification_deliveries(limit: int = 100, _: User = Depends(require_permissi
     rows = db.scalars(select(NotificationDelivery).order_by(NotificationDelivery.created_at.desc()).limit(max(1, min(limit, 500)))).all()
     return [{'id': d.id, 'notification_id': d.notification_id, 'channel': d.channel, 'recipient': d.recipient, 'status': d.status, 'provider': d.provider, 'error_message': d.error_message, 'sent_at': d.sent_at, 'created_at': d.created_at} for d in rows]
 
-# ---- Certificates ----
-@router.get('/certificates')
-def certificates(limit: int = 100, _: User = Depends(require_permission('certificate.write')), db: Session = Depends(get_db)):
-    rows = db.scalars(select(Certificate).order_by(Certificate.created_at.desc()).limit(max(1, min(limit, 500)))).all()
-    return [{'id': c.id, 'certificate_no': c.certificate_no, 'recipient_name': c.recipient_name, 'title_bn': c.title_bn, 'issue_date': c.issue_date, 'event_registration_id': c.event_registration_id, 'member_id': c.member_id} for c in rows]
 
 # ---- Site settings + audit ----
 @router.get('/settings')
@@ -796,6 +812,7 @@ def upsert_setting(payload: SiteSettingUpdate, request: Request, admin: User = D
     return {'id': item.id, 'key': item.key, 'value': item.value, 'category': item.category}
 
 
+@router.get('/audit')
 @router.get('/audit-logs')
 def audit_logs(limit: int = 100, _: User = Depends(require_permission('audit.read')), db: Session = Depends(get_db)):
     rows = db.scalars(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(min(max(limit, 1), 300))).all()
@@ -948,4 +965,128 @@ async def commit_members_csv(
         'skipped_count': skipped,
         'message': f'সফলভাবে {imported} জন সদস্য অন্তর্ভুক্ত করা হয়েছে।'
     }
+
+
+# ---- Admin Certificate Management & Exports ----
+@router.get('/certificates')
+def list_admin_certificates(
+    limit: int = 100,
+    _: User = Depends(require_permission('certificate.write')),
+    db: Session = Depends(get_db),
+):
+    from app.services.certificate_service import _revoked_certs
+    rows = db.scalars(select(Certificate).order_by(Certificate.created_at.desc()).limit(min(max(limit, 1), 500))).all()
+    return [
+        {
+            'id': c.id,
+            'certificate_no': c.certificate_no,
+            'certificate_number': c.certificate_no,
+            'token': c.certificate_no,
+            'recipient_name': c.recipient_name,
+            'recipient_name_bn': c.recipient_name,
+            'title_bn': c.title_bn,
+            'certificate_type': c.title_bn,
+            'issue_date': c.issue_date.strftime('%Y-%m-%d') if hasattr(c.issue_date, 'strftime') and c.issue_date else str(c.issue_date or ''),
+            'event_registration_id': c.event_registration_id,
+            'member_id': c.member_id,
+            'status': 'REVOKED' if c.id in _revoked_certs else 'ISSUED',
+            'pdf_path': c.pdf_path,
+            'created_at': c.created_at,
+        }
+        for c in rows
+    ]
+
+
+@router.post('/certificates')
+def issue_admin_certificate(
+    payload: dict,
+    request: Request,
+    admin: User = Depends(require_permission('certificate.write')),
+    db: Session = Depends(get_db),
+):
+    from app.services import CertificateService
+
+    recipient_user_id = payload.get('recipient_user_id') or admin.id
+    cert_type = payload.get('certificate_type', 'MEMBERSHIP')
+    recipient_name = payload.get('recipient_name')
+    cert = CertificateService.issue_certificate(
+        db=db,
+        admin_user=admin,
+        recipient_user_id=int(recipient_user_id),
+        certificate_type=cert_type,
+        recipient_name=recipient_name,
+        ip=_actor_ip(request),
+    )
+    return {
+        'id': cert.id,
+        'certificate_no': cert.certificate_no,
+        'certificate_number': cert.certificate_no,
+        'token': getattr(cert, 'token', cert.certificate_no),
+        'recipient_name': cert.recipient_name,
+        'title_bn': cert.title_bn,
+        'status': 'ISSUED',
+    }
+
+
+@router.post('/certificates/{certificate_id}/revoke')
+def revoke_admin_certificate(
+    certificate_id: int,
+    payload: dict,
+    request: Request,
+    admin: User = Depends(require_permission('certificate.write')),
+    db: Session = Depends(get_db),
+):
+    from app.services import CertificateService
+
+    reason = (payload.get('reason') or 'Administrative revocation').strip()
+    cert = CertificateService.revoke_certificate(
+        db=db,
+        admin_user=admin,
+        cert_id_or_token=certificate_id,
+        reason=reason,
+        ip=_actor_ip(request),
+    )
+    return {'ok': True, 'id': cert.id, 'status': 'REVOKED', 'reason': reason}
+
+
+@router.get('/exports/certificates.csv')
+def export_certificates_csv(_: User = Depends(require_permission('certificate.write')), db: Session = Depends(get_db)):
+    rows = db.scalars(select(Certificate).order_by(Certificate.id.desc())).all()
+    headers = ['id', 'certificate_no', 'recipient_name', 'title_bn', 'issue_date', 'created_at']
+    cells = ([c.id, c.certificate_no, c.recipient_name, c.title_bn, c.issue_date, c.created_at] for c in rows)
+    return _csv_response('pgcb-certificates.csv', headers, cells)
+
+
+@router.get('/exports/audit.csv')
+def export_audit_csv(_: User = Depends(require_permission('audit.read')), db: Session = Depends(get_db)):
+    rows = db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(1000)).all()
+    headers = ['id', 'user_id', 'action', 'entity', 'entity_id', 'ip_address', 'created_at']
+    cells = ([a.id, a.user_id or '', a.action, a.entity, a.entity_id or '', a.ip_address or '', a.created_at] for a in rows)
+    return _csv_response('pgcb-audit-logs.csv', headers, cells)
+
+
+@router.get('/exports/applications.csv')
+def export_applications_csv(_: User = Depends(require_permission('member.read')), db: Session = Depends(get_db)):
+    rows = db.scalars(
+        select(Member)
+        .options(selectinload(Member.user), selectinload(Member.circle))
+        .where(Member.status.in_(['PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'REJECTED']))
+        .order_by(Member.id.desc())
+    ).all()
+    headers = ['id', 'application_no', 'name_bn', 'email', 'phone', 'designation_bn', 'circle', 'status', 'created_at']
+    cells = (
+        [
+            m.id,
+            m.application_no or '',
+            m.user.name_bn if m.user else '',
+            m.user.email if m.user else '',
+            m.user.phone if m.user else '',
+            m.designation_bn or '',
+            m.circle.name_bn if m.circle else '',
+            m.status,
+            m.created_at,
+        ]
+        for m in rows
+    )
+    return _csv_response('pgcb-applications.csv', headers, cells)
 
