@@ -162,7 +162,10 @@ def public_asset(filename: str):
     if not filename or '\x00' in filename or '..' in filename or '/' in filename or '\\' in filename:
         raise HTTPException(400, 'Invalid asset path')
     clean = Path(filename).name
-    for base_dir in (Path(settings.resolved_upload_dir) / 'public', BASE_STORAGE / 'public'):
+    roots = [BASE_STORAGE / 'public']
+    if getattr(settings, 'upload_dir', None):
+        roots.insert(0, Path(settings.upload_dir) / 'public')
+    for base_dir in roots:
         base = base_dir.resolve()
         candidate = (base / clean).resolve()
         try:

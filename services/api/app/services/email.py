@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 from typing import Any, Dict
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
