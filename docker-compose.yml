@@ -12,74 +12,37 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-  redis:
-    image: redis:7-alpine
-    ports: ["6379:6379"]
-    volumes: [redis_data:/data]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+
   api:
     build: {context: ./services/api}
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pgcb}:${POSTGRES_PASSWORD:-pgcb_dev_password}@postgres:5432/${POSTGRES_DB:-pgcb_portal}
-      JWT_SECRET: ${JWT_SECRET:-replace-this-in-real-environments}
+      DB_SSLMODE: ${DB_SSLMODE:-prefer}
+      JWT_SECRET: ${JWT_SECRET:-replace-this-in-real-environments-minimum-32-chars}
       APP_ENV: ${APP_ENV:-development}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      REDIS_URL: redis://redis:6379/0
+      REDIS_RATE_LIMIT_ENABLED: "false"
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
-      STORAGE_ROOT: ${STORAGE_ROOT:-./storage}
+      STORAGE_ROOT: ${STORAGE_ROOT:-/data/uploads}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
+      BACKUP_DIR: ${BACKUP_DIR:-/data/backups}
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
       BKASH_WEBHOOK_SECRET: ${BKASH_WEBHOOK_SECRET:-}
       NAGAD_WEBHOOK_SECRET: ${NAGAD_WEBHOOK_SECRET:-}
       SSLCOMMERZ_WEBHOOK_SECRET: ${SSLCOMMERZ_WEBHOOK_SECRET:-}
-      BKASH_CHECKOUT_URL: ${BKASH_CHECKOUT_URL:-}
-      NAGAD_CHECKOUT_URL: ${NAGAD_CHECKOUT_URL:-}
-      SSLCOMMERZ_CHECKOUT_URL: ${SSLCOMMERZ_CHECKOUT_URL:-}
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
+    volumes:
+      - uploads_data:/data/uploads
+      - backups_data:/data/backups
     depends_on:
       postgres: {condition: service_healthy}
-      redis: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 10
     ports: ["8000:8000"]
-  worker:
-    build: {context: ./services/api}
-    command: ["python", "-m", "app.worker"]
-    environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pgcb}:${POSTGRES_PASSWORD:-pgcb_dev_password}@postgres:5432/${POSTGRES_DB:-pgcb_portal}
-      JWT_SECRET: ${JWT_SECRET:-replace-this-in-real-environments}
-      APP_ENV: ${APP_ENV:-development}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      REDIS_URL: redis://redis:6379/0
-      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
-      STORAGE_ROOT: ${STORAGE_ROOT:-./storage}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USERNAME: ${SMTP_USERNAME:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM: ${SMTP_FROM:-}
-      SMS_PROVIDER_URL: ${SMS_PROVIDER_URL:-}
-      SMS_PROVIDER_NAME: ${SMS_PROVIDER_NAME:-}
-      WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-30}
-      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
-      BKASH_WEBHOOK_SECRET: ${BKASH_WEBHOOK_SECRET:-}
-      NAGAD_WEBHOOK_SECRET: ${NAGAD_WEBHOOK_SECRET:-}
-      SSLCOMMERZ_WEBHOOK_SECRET: ${SSLCOMMERZ_WEBHOOK_SECRET:-}
-      BKASH_CHECKOUT_URL: ${BKASH_CHECKOUT_URL:-}
-      NAGAD_CHECKOUT_URL: ${NAGAD_CHECKOUT_URL:-}
-      SSLCOMMERZ_CHECKOUT_URL: ${SSLCOMMERZ_CHECKOUT_URL:-}
-      METRICS_ENABLED: ${METRICS_ENABLED:-true}
-      METRICS_TOKEN: ${METRICS_TOKEN:-}
-    depends_on:
-      postgres: {condition: service_healthy}
-      redis: {condition: service_healthy}
 
   web:
     build: {context: ./apps/web}
@@ -93,6 +56,8 @@ services:
       timeout: 5s
       retries: 10
     ports: ["3000:3000"]
+
 volumes:
   postgres_data: {}
-  redis_data: {}
+  uploads_data: {}
+  backups_data: {}

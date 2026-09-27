@@ -3,7 +3,7 @@ name: End-to-End
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, develop, phase-2-upgrade]
+    branches: [main, develop, develop/hostseba-production, phase-2-upgrade]
 
 jobs:
   e2e:
