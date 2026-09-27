@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
@@ -31,7 +31,7 @@ def _issue_cookie(response: Response, db: Session, user: User) -> None:
         settings.cookie_name,
         token,
         httponly=True,
-        secure=settings.app_env == 'production',
+        secure=settings.is_production_like,
         samesite='lax',
         max_age=settings.jwt_expire_minutes * 60,
         path='/',
@@ -56,11 +56,11 @@ def register(p: RegisterRequest, request: Request, db: Session = Depends(get_db)
     db.add(EmailVerificationToken(user_id=u.id, token_hash=hash_reset_token(raw), expires_at=reset_expiry(settings.email_verification_hours)))
     db.commit()
     db.refresh(u)
-    # Email delivery is optional in development; the token is only exposed outside production.
+    # Email delivery is optional in development; the token is only exposed outside staging/production.
     from app.integrations.notifications import deliver_email
     verification_link = f"{settings.frontend_url}/verify-email?token={raw}"
     deliver_email(u.email, 'Email verification', f'আপনার অ্যাকাউন্ট যাচাই করতে লিংকে যান: {verification_link}')
-    return RegisterResponse(id=u.id, email=u.email, name_bn=u.name_bn, name_en=u.name_en, role=u.role, verification_required=True, verification_token=(raw if settings.app_env != 'production' else None))
+    return RegisterResponse(id=u.id, email=u.email, name_bn=u.name_bn, name_en=u.name_en, role=u.role, verification_required=True, verification_token=(raw if not settings.is_production_like else None))
 
 
 @router.post('/login')
@@ -113,7 +113,7 @@ def resend_verification(p: PasswordResetRequest, request: Request, db: Session =
     from app.integrations.notifications import deliver_email
     verification_link = f"{settings.frontend_url}/verify-email?token={raw}"
     deliver_email(user.email, 'Email verification', f'আপনার অ্যাকাউন্ট যাচাই করতে লিংকে যান: {verification_link}')
-    if settings.app_env != 'production':
+    if not settings.is_production_like:
         payload['verification_token'] = raw
     return payload
 
@@ -132,7 +132,11 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 @router.post('/logout-all')
 def logout_all(response: Response, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    db.execute(delete(UserSession).where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None)))
+    db.execute(
+        update(UserSession)
+        .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
+        .values(revoked_at=datetime.utcnow())
+    )
     db.commit()
     if response:
         response.delete_cookie(settings.cookie_name, path='/')
@@ -174,7 +178,7 @@ def request_password_reset(p: PasswordResetRequest, request: Request, db: Sessio
     db.add(record)
     db.commit()
     payload = {'ok': True, 'message': 'If the account exists, a reset link will be issued.'}
-    if settings.app_env != 'production':
+    if not settings.is_production_like:
         payload['reset_token'] = raw
     return payload
 
@@ -189,7 +193,11 @@ def confirm_password_reset(p: PasswordResetConfirm, db: Session = Depends(get_db
         raise HTTPException(400, 'Invalid reset request')
     user.password_hash = hash_password(p.password)
     record.used_at = datetime.utcnow()
-    db.execute(delete(UserSession).where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None)))
+    db.execute(
+        update(UserSession)
+        .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
+        .values(revoked_at=datetime.utcnow())
+    )
     db.commit()
     return {'ok': True}
 
