@@ -927,7 +927,8 @@ async def commit_members_csv(
             skipped += 1
             continue
 
-        temp_password = hash_password('Pgcb@2026!')
+        import secrets
+        temp_password = hash_password(secrets.token_urlsafe(18))
         user = User(
             email=email,
             password_hash=temp_password,
