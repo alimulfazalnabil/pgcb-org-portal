@@ -308,9 +308,10 @@ def main(synthetic_count: int = 0) -> None:
                     title_bn='পাওয়ার গ্রিড ডিপ্লোমা প্রকৌশলী সমিতির গঠনতন্ত্র (সংশোধিত ২০২৬)',
                     title_en='Association Constitution (Amended 2026)',
                     description_bn='সমিতির মূল গঠনতন্ত্র ও সাংগঠনিক বিধিমালা।',
-                    category='CONSTITUTION',
-                    file_url='/backend/api/v1/public/assets/constitution-2026.pdf',
-                    visibility='PUBLIC',
+                    category='POLICIES',
+                    file_path='public/constitution-2026.pdf',
+                    file_size=1024,
+                    content_type='application/pdf',
                     is_published=True,
                 ),
             ])

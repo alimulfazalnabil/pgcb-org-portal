@@ -286,23 +286,47 @@ def reports_overview(_: User = Depends(require_permission('content.read')), db: 
 
 
 @router.get('/members')
-def members(status: str | None = None, q: str | None = None, limit: int = 50, offset: int = 0, _: User = Depends(require_permission('member.read')), db: Session = Depends(get_db)):
+def members(
+    response: Response,
+    status: str | None = None,
+    circle_id: int | None = None,
+    q: str | None = None,
+    page: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _: User = Depends(require_permission('member.read')),
+    db: Session = Depends(get_db),
+):
     limit = max(1, min(limit, 100))
-    stmt = select(Member).options(selectinload(Member.user), selectinload(Member.circle)).order_by(Member.created_at.desc()).limit(limit).offset(max(offset, 0))
+    effective_offset = (max(page, 1) - 1) * limit if page is not None else max(offset, 0)
+
+    stmt = select(Member).options(selectinload(Member.user), selectinload(Member.circle))
+    count_stmt = select(func.count(Member.id))
+
     if status:
         stmt = stmt.where(Member.status == status)
+        count_stmt = count_stmt.where(Member.status == status)
+    if circle_id is not None:
+        stmt = stmt.where(Member.circle_id == circle_id)
+        count_stmt = count_stmt.where(Member.circle_id == circle_id)
     if q:
         like = f'%{q}%'
-        stmt = stmt.join(User, Member.user_id == User.id).where(
-            (User.name_bn.like(like)) | (User.name_en.like(like)) | (User.email.like(like)) | 
+        search_pred = (
+            (User.name_bn.like(like)) | (User.name_en.like(like)) | (User.email.like(like)) |
             (User.phone.like(like)) | (Member.membership_id.like(like)) | (Member.employee_id.like(like))
         )
-    rows = db.scalars(stmt).all()
+        stmt = stmt.join(User, Member.user_id == User.id).where(search_pred)
+        count_stmt = count_stmt.join(User, Member.user_id == User.id).where(search_pred)
+
+    total = db.scalar(count_stmt) or 0
+    response.headers['X-Total-Count'] = str(total)
+    rows = db.scalars(stmt.order_by(Member.created_at.desc()).limit(limit).offset(effective_offset)).all()
     return [
         {
             'id': m.id, 'membership_id': m.membership_id, 'name_bn': m.user.name_bn, 'name_en': m.user.name_en,
             'email': m.user.email, 'phone': m.user.phone, 'employee_id': m.employee_id,
             'designation_bn': m.designation_bn, 'designation_en': m.designation_en,
+            'circle_id': m.circle_id,
             'circle_bn': m.circle.name_bn if m.circle else None, 'status': m.status,
             'created_at': m.created_at, 'validity_date': m.validity_date,
         }
@@ -584,8 +608,29 @@ def update_message(message_id: int, payload: MessageStatusUpdate, request: Reque
 
 # ---- Users ----
 @router.get('/users')
-def admin_users(_: User = Depends(require_permission('user.read')), db: Session = Depends(get_db)):
-    rows = db.scalars(select(User).order_by(User.created_at.desc())).all()
+def admin_users(
+    response: Response,
+    q: str | None = None,
+    role: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    _: User = Depends(require_permission('user.read')),
+    db: Session = Depends(get_db),
+):
+    limit = max(1, min(limit, 100))
+    stmt = select(User)
+    count_stmt = select(func.count(User.id))
+    if role:
+        stmt = stmt.where(User.role == role)
+        count_stmt = count_stmt.where(User.role == role)
+    if q:
+        like = f'%{q}%'
+        pred = (User.name_bn.like(like)) | (User.name_en.like(like)) | (User.email.like(like)) | (User.phone.like(like))
+        stmt = stmt.where(pred)
+        count_stmt = count_stmt.where(pred)
+    total = db.scalar(count_stmt) or 0
+    response.headers['X-Total-Count'] = str(total)
+    rows = db.scalars(stmt.order_by(User.created_at.desc()).limit(limit).offset(max(offset, 0))).all()
     return [
         {'id': u.id, 'email': u.email, 'name_bn': u.name_bn, 'phone': u.phone,
          'role': u.role, 'is_active': u.is_active, 'created_at': u.created_at}
@@ -833,18 +878,24 @@ async def preview_members_csv(
     except UnicodeDecodeError:
         text_data = content.decode('latin-1')
 
-    reader = csv.DictReader(StringIO(text_data))
+    raw_rows = list(csv.DictReader(StringIO(text_data)))
     rows = []
     seen_emails: set[str] = set()
     valid_count = 0
     error_count = 0
 
-    # Cache existing circles and users for fast validation
-    existing_circles = {c.name_bn.strip(): c.id for c in db.scalars(select(Circle)).all()}
-    existing_circles.update({c.name_en.strip(): c.id for c in db.scalars(select(Circle)).all() if c.name_en})
-    existing_users = set(db.scalars(select(User.email)).all())
+    # Cache existing circles and candidate user emails for fast validation without loading all users
+    circles = db.scalars(select(Circle)).all()
+    existing_circles = {c.name_bn.strip(): c.id for c in circles}
+    existing_circles.update({c.name_en.strip(): c.id for c in circles if c.name_en})
+    candidate_emails = {(r.get('email') or '').strip().lower() for r in raw_rows if (r.get('email') or '').strip()}
+    existing_users = (
+        set(db.scalars(select(User.email).where(User.email.in_(candidate_emails))).all())
+        if candidate_emails
+        else set()
+    )
 
-    for idx, row in enumerate(reader, start=2):
+    for idx, row in enumerate(raw_rows, start=2):
         errors: list[str] = []
         name_bn = (row.get('name_bn') or row.get('full_name_bn') or row.get('name') or '').strip()
         name_en = (row.get('name_en') or row.get('full_name_en') or '').strip() or None

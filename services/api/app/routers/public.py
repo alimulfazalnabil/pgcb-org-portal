@@ -49,34 +49,48 @@ def public_members(
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """Public member directory with privacy protection (PII excluded)."""
+    """Public member directory with privacy protection (PII excluded) and consistent filtered pagination."""
     offset = (page - 1) * limit
-    stmt = (
-        select(Member)
-        .options(selectinload(Member.user), selectinload(Member.circle))
-        .where(Member.status == 'ACTIVE')
-        .order_by(Member.membership_id.asc())
-    )
-    if circle_id:
-        stmt = stmt.where(Member.circle_id == circle_id)
-    if q:
+    filters = [Member.status == 'ACTIVE']
+    if circle_id is not None:
+        filters.append(Member.circle_id == circle_id)
+    if q and q.strip():
         term = f'%{q.strip()}%'
-        stmt = stmt.where(
+        filters.append(
             or_(
+                User.name_bn.like(term),
+                User.name_en.like(term),
                 Member.membership_id.like(term),
                 Member.designation_bn.like(term),
                 Member.designation_en.like(term),
                 Member.employee_id.like(term),
             )
         )
-    
-    total = db.scalar(select(func.count(Member.id)).where(Member.status == 'ACTIVE')) or 0
-    members = db.scalars(stmt.offset(offset).limit(limit)).all()
-    
+
+    count_stmt = (
+        select(func.count(Member.id))
+        .select_from(Member)
+        .join(User, Member.user_id == User.id)
+        .where(*filters)
+    )
+    total = db.scalar(count_stmt) or 0
+
+    data_stmt = (
+        select(Member)
+        .join(User, Member.user_id == User.id)
+        .options(selectinload(Member.user), selectinload(Member.circle))
+        .where(*filters)
+        .order_by(Member.membership_id.asc())
+        .offset(offset)
+        .limit(limit)
+    )
+    members = db.scalars(data_stmt).all()
+
     return {
         'total': total,
         'page': page,
         'limit': limit,
+        'pages': (total + limit - 1) // limit if limit > 0 else 0,
         'items': [
             {
                 'membership_id': m.membership_id,
