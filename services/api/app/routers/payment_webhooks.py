@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 from app.core.rate_limit import client_key, limiter
 from app.core.config import settings
 from app.db.session import get_db
-from app.integrations.payments import parse_webhook, payment_status_from_provider, verify_hmac_signature
-from app.models import EventRegistration, PaymentTransaction, PaymentWebhookEvent, Member, User, Notification, MembershipRenewal
-from app.domain.membership import renew_membership
+from app.integrations.payments import get_payment_provider, parse_webhook, payment_status_from_provider, verify_hmac_signature
+from app.models import EventRegistration, PaymentTransaction, PaymentWebhookEvent
+from app.services.receipt_service import activate_membership_from_payment, ensure_receipt_metadata
 
 router = APIRouter(prefix='/payments/webhooks', tags=['payment-webhooks'])
 
@@ -52,26 +52,38 @@ async def receive_webhook(provider: str, request: Request, x_signature: str | No
         return {'ok': True, 'matched': False}
 
     event.payment_id = payment.id
-    if status:
-        payment.status = status
     if provider_txn:
         payment.transaction_ref = provider_txn
 
     if status == 'PAID':
+        # Server-to-server gateway verification & amount check
+        try:
+            gw = get_payment_provider(provider)
+            trx_to_verify = provider_txn or payment.transaction_ref or ''
+            if not gw.verify_payment(trx_to_verify, expected_amount=float(payment.amount)):
+                status = 'FAILED'
+        except ValueError:
+            pass
+
+    if status:
+        payment.status = status
+
+    if status == 'PAID':
+        ensure_receipt_metadata(payment)
         if payment.event_registration_id:
             registration = db.get(EventRegistration, payment.event_registration_id)
             if registration:
                 registration.payment_status = 'PAID'
-        if payment.member_id and payment.purpose == 'MEMBERSHIP':
-            member = db.get(Member, payment.member_id)
-            user = db.get(User, member.user_id) if member else None
-            if member:
-                existing_renewal = db.scalar(select(MembershipRenewal).where(MembershipRenewal.payment_id == payment.id))
-                if not existing_renewal:
-                    renew_membership(db, member, payment.id, payment.amount, payment.currency)
-                    if user:
-                        db.add(Notification(user_id=user.id, title_bn='সদস্যতা নবায়ন সফল', body_bn='আপনার সদস্যতা সফলভাবে নবায়ন করা হয়েছে।', notification_type='MEMBERSHIP'))
+        if payment.purpose in {'MEMBERSHIP', 'RENEWAL', 'APPLICATION'}:
+            activate_membership_from_payment(db, payment)
+
     event.processing_status = 'PROCESSED'
     event.processed_at = datetime.utcnow()
     db.commit()
-    return {'ok': True, 'matched': True, 'payment_id': payment.id, 'status': payment.status}
+    return {
+        'ok': True,
+        'matched': True,
+        'payment_id': payment.id,
+        'status': payment.status,
+        'receipt_no': payment.receipt_no,
+    }

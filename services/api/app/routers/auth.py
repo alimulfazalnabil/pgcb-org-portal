@@ -5,7 +5,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
-from app.core.mfa import decrypt_secret, verify_totp
+from app.core.mfa import consume_backup_code, decrypt_secret, verify_totp
 from app.core.rate_limit import client_key, limiter
 from app.core.security import create_token, hash_password, hash_session_token, verify_password
 from app.core.tokens import hash_reset_token, random_token, reset_expiry
@@ -66,9 +66,12 @@ def register(p: RegisterRequest, request: Request, db: Session = Depends(get_db)
 @router.post('/login')
 def login(p: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     _rate_limit(request, 'login', 20, 600)
+    ip_addr = request.client.host if request.client else None
     email = p.email.lower().strip()
     u = db.scalar(select(User).where(User.email == email))
     if not u or not verify_password(p.password, u.password_hash):
+        audit(db, u, 'LOGIN_FAILED', 'USER', u.id if u else email, ip=ip_addr)
+        db.commit()
         raise HTTPException(401, 'Invalid credentials')
     if not u.is_active:
         raise HTTPException(403, 'Account is disabled')
@@ -76,11 +79,19 @@ def login(p: LoginRequest, request: Request, response: Response, db: Session = D
         raise HTTPException(403, 'Email verification required')
     if u.mfa_enabled:
         secret = decrypt_secret(u.mfa_secret_enc) or u.mfa_secret
-        if not p.mfa_code:
+        code_val = p.mfa_code or p.otp_code
+        if not code_val:
             return {'ok': False, 'mfa_required': True, 'message': 'MFA verification required'}
-        if not secret or not verify_totp(secret, p.mfa_code):
+        totp_ok = bool(secret and verify_totp(secret, code_val))
+        backup_ok = False if totp_ok else consume_backup_code(db, u.id, code_val)
+        if not totp_ok and not backup_ok:
+            audit(db, u, 'MFA_FAILED', 'USER', u.id, ip=ip_addr)
+            db.commit()
             raise HTTPException(401, 'Invalid MFA code')
+        if backup_ok:
+            audit(db, u, 'MFA_BACKUP_CODE_USED', 'USER', u.id, ip=ip_addr)
     _issue_cookie(response, db, u)
+    audit(db, u, 'LOGIN_SUCCESS', 'USER', u.id, ip=ip_addr)
     db.commit()
     return {'ok': True, 'role': u.role}
 
@@ -150,6 +161,7 @@ def sessions(user: User = Depends(current_user), db: Session = Depends(get_db)):
 
 
 @router.post('/sessions/{session_id}/revoke')
+@router.delete('/sessions/{session_id}')
 def revoke_session(session_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     session = db.scalar(select(UserSession).where(UserSession.id == session_id, UserSession.user_id == user.id))
     if not session:

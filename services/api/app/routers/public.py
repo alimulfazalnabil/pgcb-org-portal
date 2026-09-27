@@ -201,7 +201,77 @@ def journal_detail(journal_id: int, db: Session = Depends(get_db)):
 @router.get('/circles')
 def circles(db: Session = Depends(get_db)):
     rows = db.scalars(select(Circle).where(Circle.active == True).order_by(Circle.name_bn)).all()
-    return [{'id': x.id, 'name_bn': x.name_bn, 'name_en': x.name_en, 'description_bn': x.description_bn} for x in rows]
+    member_counts = dict(
+        db.execute(
+            select(Member.circle_id, func.count(Member.id))
+            .where(Member.status == 'ACTIVE')
+            .group_by(Member.circle_id)
+        ).all()
+    )
+    return [
+        {
+            'id': x.id,
+            'name_bn': x.name_bn,
+            'name_en': x.name_en,
+            'slug': (x.name_en or f'circle-{x.id}').lower().replace(' ', '-'),
+            'description_bn': x.description_bn,
+            'active_members': member_counts.get(x.id, 0),
+        }
+        for x in rows
+    ]
+
+
+@router.get('/circles/{circle_id}')
+def circle_detail(circle_id: int, db: Session = Depends(get_db)):
+    circle = db.get(Circle, circle_id)
+    if not circle or not circle.active:
+        raise HTTPException(404, 'Circle not found')
+
+    active_count = db.scalar(select(func.count(Member.id)).where(Member.circle_id == circle.id, Member.status == 'ACTIVE')) or 0
+    pending_count = db.scalar(select(func.count(Member.id)).where(Member.circle_id == circle.id, Member.status.in_(['PENDING', 'SUBMITTED', 'UNDER_REVIEW']))) or 0
+    committee_rows = db.scalars(select(CommitteeMember).where(CommitteeMember.circle_id == circle.id, CommitteeMember.active == True).order_by(CommitteeMember.display_order)).all()
+    circle_admin = db.scalar(
+        select(User)
+        .join(Member, Member.user_id == User.id)
+        .where(Member.circle_id == circle.id, User.role == 'CIRCLE_ADMIN', User.is_active == True)
+    )
+    recent_notices = db.scalars(select(Notice).where(Notice.is_published == True).order_by(Notice.published_at.desc()).limit(5)).all()
+    recent_events = db.scalars(select(Event).where(Event.is_published == True).order_by(Event.event_date.desc()).limit(5)).all()
+
+    return {
+        'id': circle.id,
+        'name_bn': circle.name_bn,
+        'name_en': circle.name_en,
+        'description_bn': circle.description_bn,
+        'circle_administrator': {
+            'name_bn': circle_admin.name_bn,
+            'name_en': circle_admin.name_en,
+            'email': circle_admin.email,
+        } if circle_admin else None,
+        'statistics': {
+            'active_members': active_count,
+            'pending_members': pending_count,
+            'committee_size': len(committee_rows),
+        },
+        'contact': {
+            'office_bn': f'পিজিসিবি {circle.name_bn} আঞ্চলিক কার্যালয়',
+            'email': f"{(circle.name_en or 'circle').lower().split()[0]}@pgcb.org.bd",
+            'phone': '+880-2-9553663',
+        },
+        'committee': [
+            {
+                'id': c.id,
+                'name_bn': c.name_bn,
+                'name_en': c.name_en,
+                'designation_bn': c.designation_bn,
+                'designation_en': c.designation_en,
+                'photo_url': c.photo_url,
+            }
+            for c in committee_rows
+        ],
+        'notices': [{'id': n.id, 'title_bn': n.title_bn, 'published_at': n.published_at} for n in recent_notices],
+        'events': [{'id': e.id, 'title_bn': e.title_bn, 'event_date': e.event_date, 'location_bn': e.location_bn} for e in recent_events],
+    }
 
 
 @router.get('/circles/{circle_id}/committee')
@@ -257,91 +327,199 @@ def media(media_type: str | None = None, limit: int = 100, offset: int = 0, db: 
     return [{'id': x.id, 'media_type': x.media_type, 'title_bn': x.title_bn, 'description_bn': x.description_bn, 'url': x.url, 'thumbnail_url': x.thumbnail_url, 'event_id': x.event_id} for x in rows]
 
 
+def _normalize_bangla(text_val: str | None) -> str:
+    import unicodedata
+    if not text_val:
+        return ''
+    s = unicodedata.normalize('NFC', text_val.strip().lower())
+    s = s.replace('\u09af\u09bc', '\u09df').replace('\u09a1\u09bc', '\u09dc').replace('\u09a2\u09bc', '\u09dd')
+    return s
+
+
+def _compute_relevance(query_norm: str, tokens: list[str], title: str | None, summary: str | None) -> float:
+    from difflib import SequenceMatcher
+    t_norm = _normalize_bangla(title)
+    s_norm = _normalize_bangla(summary)
+    score = 0.0
+    if query_norm and query_norm == t_norm:
+        score += 100.0
+    elif query_norm and t_norm.startswith(query_norm):
+        score += 80.0
+    elif query_norm and query_norm in t_norm:
+        score += 65.0
+    elif query_norm and query_norm in s_norm:
+        score += 40.0
+
+    for tok in tokens:
+        if len(tok) < 2:
+            continue
+        if tok in t_norm:
+            score += 25.0
+        elif tok in s_norm:
+            score += 12.0
+        else:
+            # Typo tolerance check against title words
+            for word in t_norm.split():
+                if len(word) >= 3 and SequenceMatcher(None, tok, word).ratio() >= 0.76:
+                    score += 15.0
+                    break
+    return round(score, 2)
+
+
+@router.get('/search/suggestions')
+def search_suggestions(q: str = Query(..., min_length=1, max_length=100), db: Session = Depends(get_db)):
+    norm = _normalize_bangla(q)
+    like = f'%{norm}%'
+    suggestions: list[str] = []
+    for title in db.scalars(select(Notice.title_bn).where(Notice.is_published == True, Notice.title_bn.like(like)).limit(4)).all():
+        if title and title not in suggestions:
+            suggestions.append(title)
+    for title in db.scalars(select(Circular.title_bn).where(Circular.is_published == True, Circular.title_bn.like(like)).limit(4)).all():
+        if title and title not in suggestions:
+            suggestions.append(title)
+    for title in db.scalars(select(Event.title_bn).where(Event.is_published == True, Event.title_bn.like(like)).limit(3)).all():
+        if title and title not in suggestions:
+            suggestions.append(title)
+    for cname in db.scalars(select(Circle.name_bn).where(Circle.active == True, or_(Circle.name_bn.like(like), Circle.name_en.like(like))).limit(3)).all():
+        if cname and cname not in suggestions:
+            suggestions.append(cname)
+    return {'query': q.strip(), 'suggestions': suggestions[:10]}
 
 
 @router.get('/search')
-def site_search(q: str = Query(..., min_length=2, max_length=100), limit: int = Query(30, ge=1, le=60), db: Session = Depends(get_db)):
-    """Search publicly published content: notices, circulars, journals, documents, events, media."""
-    term = f'%{q.strip()}%'
-    per_type = max(4, min(15, limit // 5 or 4))
+def site_search(
+    q: str = Query(..., min_length=2, max_length=100),
+    type: str | None = Query(default=None, description='Filter by entity type: MEMBER, CIRCULAR, NOTICE, EVENT, DOCUMENT, JOURNAL, COMMITTEE, CIRCLE, CERTIFICATE'),
+    category: str | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    limit: int = Query(30, ge=1, le=60),
+    db: Session = Depends(get_db),
+):
+    """Unified search across 9 institutional content domains with Bangla normalization, typo tolerance, filters, and relevance ranking."""
+    from app.models import Certificate
+
+    query_norm = _normalize_bangla(q)
+    tokens = [t for t in query_norm.split() if len(t) >= 2] or [query_norm]
+    primary_term = f'%{tokens[0]}%'
+    type_filter = type.strip().upper() if type else None
+    per_type = max(5, min(20, limit // 3 or 6))
     results: list[dict] = []
 
-    # Notices
-    notice_rows = db.scalars(
-        select(Notice)
-        .where(
-            Notice.is_published == True,
-            or_(Notice.title_bn.like(term), Notice.title_en.like(term), Notice.content_bn.like(term)),
-        )
-        .order_by(Notice.is_pinned.desc(), Notice.published_at.desc())
-        .limit(per_type)
-    ).all()
-    for x in notice_rows:
-        results.append({'type': 'NOTICE', 'id': x.id, 'title_bn': x.title_bn, 'summary_bn': x.content_bn[:150] if x.content_bn else '', 'date': x.published_at, 'href': f'/notices/{x.id}'})
+    def _type_wanted(t: str) -> bool:
+        return not type_filter or type_filter == t
 
-    # Documents
-    doc_rows = db.scalars(
-        select(Document)
-        .where(
-            Document.is_published == True,
-            or_(Document.title_bn.like(term), Document.title_en.like(term), Document.description_bn.like(term)),
-        )
-        .order_by(Document.created_at.desc())
-        .limit(per_type)
-    ).all()
-    for x in doc_rows:
-        results.append({'type': 'DOCUMENT', 'id': x.id, 'title_bn': x.title_bn, 'summary_bn': x.description_bn or '', 'date': x.created_at, 'href': f'/documents'})
+    def _token_or(*cols):
+        preds = []
+        for tok in tokens[:4]:
+            like = f'%{tok}%'
+            for col in cols:
+                preds.append(col.like(like))
+        return or_(*preds) if preds else True
 
-    circular_rows = db.scalars(
-        select(Circular)
-        .where(
-            Circular.is_published == True,
-            or_(Circular.title_bn.like(term), Circular.title_en.like(term), Circular.summary_bn.like(term), Circular.reference_no.like(term)),
-        )
-        .order_by(Circular.priority.desc(), Circular.published_at.desc())
-        .limit(per_type)
-    ).all()
-    for x in circular_rows:
-        results.append({'type': 'CIRCULAR', 'id': x.id, 'title_bn': x.title_bn, 'summary_bn': x.summary_bn, 'date': x.published_at, 'href': f'/circulars/{x.id}'})
+    # 1. Notices
+    if _type_wanted('NOTICE'):
+        stmt = select(Notice).where(Notice.is_published == True, _token_or(Notice.title_bn, Notice.title_en, Notice.content_bn))
+        if category:
+            stmt = stmt.where(Notice.category == category.upper())
+        for x in db.scalars(stmt.order_by(Notice.is_pinned.desc(), Notice.published_at.desc()).limit(per_type)).all():
+            results.append({'type': 'NOTICE', 'id': x.id, 'category': x.category, 'title_bn': x.title_bn, 'summary_bn': x.content_bn[:150] if x.content_bn else '', 'date': x.published_at, 'href': f'/notices/{x.id}'})
 
-    journal_rows = db.scalars(
-        select(Journal)
-        .where(
-            Journal.is_published == True,
-            or_(Journal.title_bn.like(term), Journal.title_en.like(term), Journal.author.like(term), Journal.abstract_bn.like(term)),
-        )
-        .order_by(Journal.publication_date.desc())
-        .limit(per_type)
-    ).all()
-    for x in journal_rows:
-        results.append({'type': 'JOURNAL', 'id': x.id, 'title_bn': x.title_bn, 'summary_bn': x.abstract_bn, 'date': x.publication_date, 'href': f'/journal/{x.id}'})
+    # 2. Documents
+    if _type_wanted('DOCUMENT'):
+        stmt = select(Document).where(Document.is_published == True, _token_or(Document.title_bn, Document.title_en, Document.description_bn))
+        if category:
+            stmt = stmt.where(Document.category == category.upper())
+        for x in db.scalars(stmt.order_by(Document.created_at.desc()).limit(per_type)).all():
+            results.append({'type': 'DOCUMENT', 'id': x.id, 'category': x.category, 'title_bn': x.title_bn, 'summary_bn': x.description_bn or '', 'date': x.created_at, 'href': '/documents'})
 
-    event_rows = db.scalars(
-        select(Event)
-        .where(
-            Event.is_published == True,
-            or_(Event.title_bn.like(term), Event.title_en.like(term), Event.description_bn.like(term), Event.location_bn.like(term)),
-        )
-        .order_by(Event.event_date.desc())
-        .limit(per_type)
-    ).all()
-    for x in event_rows:
-        results.append({'type': 'EVENT', 'id': x.id, 'title_bn': x.title_bn, 'summary_bn': x.description_bn, 'date': x.event_date, 'href': f'/events/{x.id}'})
+    # 3. Circulars
+    if _type_wanted('CIRCULAR'):
+        stmt = select(Circular).where(Circular.is_published == True, _token_or(Circular.title_bn, Circular.title_en, Circular.summary_bn, Circular.reference_no))
+        if category:
+            stmt = stmt.where(Circular.category == category.upper())
+        for x in db.scalars(stmt.order_by(Circular.priority.desc(), Circular.published_at.desc()).limit(per_type)).all():
+            results.append({'type': 'CIRCULAR', 'id': x.id, 'category': x.category, 'title_bn': x.title_bn, 'summary_bn': x.summary_bn, 'date': x.published_at, 'href': f'/circulars/{x.id}'})
 
-    media_rows = db.scalars(
-        select(MediaAsset)
-        .where(
-            MediaAsset.published == True,
-            or_(MediaAsset.title_bn.like(term), MediaAsset.description_bn.like(term)),
-        )
-        .order_by(MediaAsset.created_at.desc())
-        .limit(per_type)
-    ).all()
-    for x in media_rows:
-        results.append({'type': 'MEDIA', 'id': x.id, 'title_bn': x.title_bn, 'summary_bn': x.description_bn, 'date': x.created_at, 'href': '/media'})
+    # 4. Journals
+    if _type_wanted('JOURNAL'):
+        stmt = select(Journal).where(Journal.is_published == True, _token_or(Journal.title_bn, Journal.title_en, Journal.author, Journal.abstract_bn))
+        if category:
+            stmt = stmt.where(Journal.category == category.upper())
+        for x in db.scalars(stmt.order_by(Journal.publication_date.desc()).limit(per_type)).all():
+            results.append({'type': 'JOURNAL', 'id': x.id, 'category': x.category, 'title_bn': x.title_bn, 'summary_bn': x.abstract_bn, 'date': x.publication_date, 'href': f'/journal/{x.id}'})
 
-    results.sort(key=lambda item: item.get('date') or datetime.min, reverse=True)
-    return {'query': q.strip(), 'count': min(len(results), limit), 'results': results[:limit]}
+    # 5. Events
+    if _type_wanted('EVENT'):
+        stmt = select(Event).where(Event.is_published == True, _token_or(Event.title_bn, Event.title_en, Event.description_bn, Event.location_bn))
+        for x in db.scalars(stmt.order_by(Event.event_date.desc()).limit(per_type)).all():
+            results.append({'type': 'EVENT', 'id': x.id, 'category': 'EVENT', 'title_bn': x.title_bn, 'summary_bn': x.description_bn, 'date': x.event_date, 'href': f'/events/{x.id}'})
+
+    # 6. Members (Active public directory)
+    if _type_wanted('MEMBER'):
+        stmt = (
+            select(Member)
+            .join(User, Member.user_id == User.id)
+            .options(selectinload(Member.user), selectinload(Member.circle))
+            .where(Member.status == 'ACTIVE', _token_or(User.name_bn, User.name_en, Member.membership_id, Member.designation_bn, Member.designation_en))
+            .limit(per_type)
+        )
+        for m in db.scalars(stmt).all():
+            results.append({
+                'type': 'MEMBER',
+                'id': m.id,
+                'category': m.membership_type,
+                'title_bn': f"{m.user.name_bn if m.user else '—'} ({m.membership_id or ''})",
+                'summary_bn': f"{m.designation_bn or ''} • {m.circle.name_bn if m.circle else ''}".strip(' •'),
+                'date': m.issue_date or m.created_at,
+                'href': f"/members?q={m.membership_id or ''}",
+            })
+
+    # 7. Committee
+    if _type_wanted('COMMITTEE'):
+        stmt = select(CommitteeMember).where(CommitteeMember.active == True, _token_or(CommitteeMember.name_bn, CommitteeMember.name_en, CommitteeMember.designation_bn, CommitteeMember.designation_en)).limit(per_type)
+        for c in db.scalars(stmt).all():
+            results.append({'type': 'COMMITTEE', 'id': c.id, 'category': 'COMMITTEE', 'title_bn': c.name_bn, 'summary_bn': c.designation_bn, 'date': c.created_at, 'href': '/committee'})
+
+    # 8. Grid Circles
+    if _type_wanted('CIRCLE'):
+        stmt = select(Circle).where(Circle.active == True, _token_or(Circle.name_bn, Circle.name_en, Circle.description_bn)).limit(per_type)
+        for cir in db.scalars(stmt).all():
+            results.append({'type': 'CIRCLE', 'id': cir.id, 'category': 'CIRCLE', 'title_bn': f"{cir.name_bn} ({cir.name_en})", 'summary_bn': cir.description_bn or '', 'date': cir.created_at, 'href': '/circles'})
+
+    # 9. Certificates
+    if _type_wanted('CERTIFICATE'):
+        stmt = select(Certificate).where(_token_or(Certificate.certificate_no, Certificate.recipient_name, Certificate.title_bn)).limit(per_type)
+        for cert in db.scalars(stmt).all():
+            results.append({'type': 'CERTIFICATE', 'id': cert.id, 'category': 'CERTIFICATE', 'title_bn': f"{cert.certificate_no} — {cert.recipient_name}", 'summary_bn': cert.title_bn, 'date': cert.issue_date, 'href': '/certificates/verify'})
+
+    # Media fallback
+    if _type_wanted('MEDIA'):
+        for x in db.scalars(select(MediaAsset).where(MediaAsset.published == True, _token_or(MediaAsset.title_bn, MediaAsset.description_bn)).order_by(MediaAsset.created_at.desc()).limit(per_type)).all():
+            results.append({'type': 'MEDIA', 'id': x.id, 'category': x.media_type, 'title_bn': x.title_bn, 'summary_bn': x.description_bn, 'date': x.created_at, 'href': '/media'})
+
+    # Date filtering + Relevance Ranking
+    filtered: list[dict] = []
+    for item in results:
+        dt = item.get('date')
+        if date_from and dt and dt < date_from:
+            continue
+        if date_to and dt and dt > date_to:
+            continue
+        item['relevance_score'] = _compute_relevance(query_norm, tokens, item.get('title_bn'), item.get('summary_bn'))
+        filtered.append(item)
+
+    filtered.sort(key=lambda item: (item.get('relevance_score', 0.0), item.get('date') or datetime.min), reverse=True)
+    sliced = filtered[:limit]
+    return {
+        'query': q.strip(),
+        'normalized_query': query_norm,
+        'filters': {'type': type_filter, 'category': category},
+        'count': len(sliced),
+        'total': len(filtered),
+        'results': sliced,
+        'items': sliced,
+    }
 
 
 @router.get('/stats')

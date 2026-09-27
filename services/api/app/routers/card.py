@@ -221,8 +221,65 @@ def build_card(member: Member, user: User | None = None) -> Path:
     return png_path
 
 
+def build_card_back(member: Member) -> Path:
+    """Build the official Back Side of the Digital Membership Card (QR verification, issue year, return policy)."""
+    folder = BASE_STORAGE / 'cards'
+    folder.mkdir(parents=True, exist_ok=True)
+    safe_id = "".join(c for c in (member.membership_id or 'unknown') if c.isalnum() or c in ('-', '_'))
+    png_path = folder / f'{safe_id}_back.png'
+
+    width, height = 1050, 640
+    img = Image.new('RGB', (width, height), '#0B132B')
+    draw = ImageDraw.Draw(img)
+
+    font_en_title = _get_font(22, bold=True)
+    font_en_sub = _get_font(16, bold=True)
+    font_en_body = _get_font(15, bold=False)
+    font_en_sm = _get_font(13, bold=False)
+    font_bn_body = _get_font(16, bold=False, bengali=True)
+
+    draw.rounded_rectangle((10, 10, width - 10, height - 10), radius=22, outline='#1E293B', width=2, fill='#0B132B')
+    draw.rectangle((12, 42, width - 12, 106), fill='#070D1E')
+    draw.text((45, 62), 'PGCB DIGITAL MEMBERSHIP CARD • SERVER-SIDE VERIFICATION', font=font_en_title, fill='#F59E0B')
+
+    # Large QR Box on Left
+    qr_box = (60, 145, 380, 465)
+    draw.rounded_rectangle(qr_box, radius=18, fill='#FFFFFF', outline='#F59E0B', width=3)
+
+    # QR contains ONLY the server-side verification URL with signed membership token (no sensitive PII)
+    token = verification_token(member.membership_id or 'PGD-2026-0000')
+    verify_base = settings.frontend_url.rstrip('/')
+    qr_url = f"{verify_base}/verify?token={token}"
+    qr = qrcode.QRCode(box_size=7, border=2)
+    qr.add_data(qr_url)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="#0B132B", back_color="#FFFFFF").convert('RGB').resize((280, 280))
+    img.paste(qr_img, (80, 165))
+
+    # Right side verification & policy details
+    issued_year = (member.issue_date or datetime.utcnow()).year
+    draw.text((430, 155), 'VERIFY AT OFFICIAL PORTAL:', font=font_en_sub, fill='#38BDF8')
+    draw.text((430, 185), f"{verify_base}/verify/{member.membership_id}", font=font_en_title, fill='#FFFFFF')
+
+    draw.text((430, 240), f'ISSUED: {issued_year}', font=font_en_sub, fill='#FDE68A')
+    draw.text((430, 270), f'MEMBERSHIP ID: {member.membership_id}', font=font_en_sub, fill='#34D399')
+
+    draw.text((430, 325), 'PRIVACY & SECURITY NOTICE:', font=font_en_sub, fill='#93C5FD')
+    draw.text((430, 353), '• QR code resolves to server-side verification only.', font=font_en_body, fill='#CBD5E1')
+    draw.text((430, 380), '• No sensitive personal data (NID/Phone/Address) is embedded.', font=font_en_body, fill='#CBD5E1')
+    draw.text((430, 407), '• This card remains the property of PGDEA / PGCB.', font=font_en_body, fill='#CBD5E1')
+    draw.text((430, 440), 'যদি কার্ডটি পাওয়া যায় তবে পিজিসিবি ভবন, আফতাবনগর, ঢাকায় ফেরত দিন।', font=font_bn_body, fill='#F8FAFC')
+
+    draw.rectangle((12, 555, width - 12, height - 12), fill='#070D1E')
+    draw.text((45, 575), 'Power Grid Diploma Engineers Association (PGDEA) • PGCB Bhaban, Aftabnagar, Dhaka-1212', font=font_en_sm, fill='#94A3B8')
+
+    with open(png_path, 'wb') as f:
+        img.save(f, 'PNG', optimize=True)
+    return png_path
+
+
 @router.get('/card')
-def digital_card(user: User = Depends(current_user), db: Session = Depends(get_db)):
+def digital_card(side: str = 'front', user: User = Depends(current_user), db: Session = Depends(get_db)):
     m = db.scalar(
         select(Member)
         .options(selectinload(Member.circle), selectinload(Member.user), selectinload(Member.documents))
@@ -230,10 +287,24 @@ def digital_card(user: User = Depends(current_user), db: Session = Depends(get_d
     )
     if not m or m.status != 'ACTIVE' or not m.membership_id:
         raise HTTPException(409, 'Active membership is required')
-    path = build_card(m, user)
+    path = build_card_back(m) if side.lower() == 'back' else build_card(m, user)
     return FileResponse(path, media_type='image/png', filename=path.name)
 
 
+@router.get('/card/back')
+def digital_card_back(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    m = db.scalar(
+        select(Member)
+        .options(selectinload(Member.circle), selectinload(Member.user), selectinload(Member.documents))
+        .where(Member.user_id == user.id)
+    )
+    if not m or m.status != 'ACTIVE' or not m.membership_id:
+        raise HTTPException(409, 'Active membership is required')
+    path = build_card_back(m)
+    return FileResponse(path, media_type='image/png', filename=path.name)
+
+
+@router.get('/card.pdf')
 @router.get('/card/pdf')
 def digital_card_pdf(user: User = Depends(current_user), db: Session = Depends(get_db)):
     m = db.scalar(
@@ -243,17 +314,25 @@ def digital_card_pdf(user: User = Depends(current_user), db: Session = Depends(g
     )
     if not m or m.status != 'ACTIVE' or not m.membership_id:
         raise HTTPException(409, 'Active membership is required')
-    png_path = build_card(m, user)
-    pdf_path = png_path.with_suffix('.pdf')
-    with Image.open(png_path) as im:
+    front_path = build_card(m, user)
+    back_path = build_card_back(m)
+    pdf_path = front_path.with_suffix('.pdf')
+    with Image.open(front_path) as im_front, Image.open(back_path) as im_back:
         with open(pdf_path, 'wb') as f:
-            im.convert('RGB').save(f, 'PDF', resolution=300.0)
+            im_front.convert('RGB').save(
+                f,
+                'PDF',
+                resolution=300.0,
+                save_all=True,
+                append_images=[im_back.convert('RGB')],
+            )
     return FileResponse(pdf_path, media_type='application/pdf', filename=pdf_path.name)
 
 
 @router.get('/cards/{member_id}/png')
 def admin_download_card(
     member_id: int,
+    side: str = 'front',
     user: User = Depends(RoleChecker(['SUPER_ADMIN', 'MEMBERSHIP_OFFICER', 'CONTENT_EDITOR'])),
     db: Session = Depends(get_db)
 ):
@@ -265,7 +344,7 @@ def admin_download_card(
     )
     if not m or not m.membership_id:
         raise HTTPException(404, 'Approved member with membership ID not found')
-    path = build_card(m, m.user)
+    path = build_card_back(m) if side.lower() == 'back' else build_card(m, m.user)
     return FileResponse(path, media_type='image/png', filename=path.name)
 
 
@@ -283,9 +362,17 @@ def admin_download_card_pdf(
     )
     if not m or not m.membership_id:
         raise HTTPException(404, 'Approved member with membership ID not found')
-    png_path = build_card(m, m.user)
-    pdf_path = png_path.with_suffix('.pdf')
-    with Image.open(png_path) as im:
+    front_path = build_card(m, m.user)
+    back_path = build_card_back(m)
+    pdf_path = front_path.with_suffix('.pdf')
+    with Image.open(front_path) as im_front, Image.open(back_path) as im_back:
         with open(pdf_path, 'wb') as f:
-            im.convert('RGB').save(f, 'PDF', resolution=300.0)
+            im_front.convert('RGB').save(
+                f,
+                'PDF',
+                resolution=300.0,
+                save_all=True,
+                append_images=[im_back.convert('RGB')],
+            )
     return FileResponse(pdf_path, media_type='application/pdf', filename=pdf_path.name)
+

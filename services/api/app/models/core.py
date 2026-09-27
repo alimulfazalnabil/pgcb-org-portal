@@ -275,7 +275,16 @@ class PaymentTransaction(Base):
 
     @property
     def completed_at(self) -> datetime | None:
-        return self.updated_at if self.status in ('SUCCESS', 'COMPLETED') else None
+        return self.updated_at if self.status in ('PAID', 'SUCCESS', 'COMPLETED') else None
+
+    @property
+    def receipt_no(self) -> str | None:
+        if self.provider_payload and isinstance(self.provider_payload, dict) and self.provider_payload.get('receipt_no'):
+            return str(self.provider_payload['receipt_no'])
+        if self.status in ('PAID', 'SUCCESS', 'COMPLETED') and self.id:
+            year = (self.updated_at or self.created_at or datetime.utcnow()).year
+            return f'PGCB-RCP-{year}-{int(self.id):06d}'
+        return None
 
 class NotificationDelivery(Base):
     __tablename__ = 'notification_deliveries'

@@ -36,6 +36,18 @@ CIRCLES = [
     'বরিশাল',
 ]
 
+OFFICIAL_CIRCLES: list[tuple[str, str]] = [
+    ('ঢাকা', 'Dhaka'),
+    ('চট্টগ্রাম', 'Chattogram'),
+    ('কুমিল্লা', 'Cumilla'),
+    ('সিলেট', 'Sylhet'),
+    ('খুলনা', 'Khulna'),
+    ('রাজশাহী', 'Rajshahi'),
+    ('রংপুর', 'Rangpur'),
+    ('ময়মনসিংহ', 'Mymensingh'),
+    ('বরিশাল', 'Barishal'),
+]
+
 DESIGNATIONS = [
     ('উপ-সহকারী প্রকৌশলী', 'Sub-Assistant Engineer'),
     ('সহকারী প্রকৌশলী', 'Assistant Engineer'),
@@ -68,6 +80,10 @@ def get_or_create_user(
         db.add(u)
         db.flush()
     u.email_verified = True
+    if not settings.is_production_like:
+        u.mfa_enabled = False
+        u.mfa_secret = None
+        u.mfa_secret_enc = None
     return u
 
 
@@ -82,8 +98,8 @@ def seed_synthetic_members(db: Session, count: int = 2000) -> int:
 
     circles = db.scalars(select(Circle).where(Circle.active == True)).all()
     if not circles:
-        for n in CIRCLES:
-            db.add(Circle(name_bn=n, name_en=n, active=True))
+        for bn, en in OFFICIAL_CIRCLES:
+            db.add(Circle(name_bn=bn, name_en=en, active=True))
         db.commit()
         circles = db.scalars(select(Circle).where(Circle.active == True)).all()
 
@@ -173,9 +189,13 @@ def main(synthetic_count: int = 0) -> None:
 
     db = SessionLocal()
     try:
-        for n in CIRCLES:
-            if not db.scalar(select(Circle).where(Circle.name_bn == n)):
-                db.add(Circle(name_bn=n, name_en=n, active=True))
+        for bn, en in OFFICIAL_CIRCLES:
+            existing_circle = db.scalar(select(Circle).where(Circle.name_bn == bn))
+            if not existing_circle:
+                db.add(Circle(name_bn=bn, name_en=en, active=True))
+            elif not existing_circle.name_en or existing_circle.name_en == existing_circle.name_bn:
+                existing_circle.name_en = en
+                existing_circle.active = True
         db.commit()
 
         if is_prod_like:

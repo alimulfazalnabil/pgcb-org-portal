@@ -140,6 +140,13 @@ def notifications(user: User = Depends(current_user), db: Session = Depends(get_
     return [{'id': n.id, 'title_bn': n.title_bn, 'body_bn': n.body_bn, 'type': n.notification_type, 'read_at': n.read_at, 'created_at': n.created_at} for n in rows]
 
 
+@router.get('/notifications/unread-count')
+def notifications_unread_count(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from sqlalchemy import func
+    count = db.scalar(select(func.count(Notification.id)).where(Notification.user_id == user.id, Notification.read_at.is_(None))) or 0
+    return {'unread_count': count}
+
+
 @router.post('/notifications/{notification_id}/read')
 def mark_notification_read(notification_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     n = db.scalar(select(Notification).where(Notification.id == notification_id, Notification.user_id == user.id))
@@ -147,3 +154,47 @@ def mark_notification_read(notification_id: int, user: User = Depends(current_us
         raise HTTPException(404, 'Notification not found')
     n.read_at = datetime.utcnow(); db.commit()
     return {'ok': True}
+
+
+@router.post('/notifications/read-all')
+def mark_all_notifications_read(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    unread = db.scalars(select(Notification).where(Notification.user_id == user.id, Notification.read_at.is_(None))).all()
+    for n in unread:
+        n.read_at = now
+    db.commit()
+    return {'ok': True, 'updated': len(unread)}
+
+
+@router.get('/notification-preferences')
+def get_notification_preferences(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    import json
+    from app.models import SiteSetting
+    defaults = {'email_enabled': True, 'sms_enabled': True, 'in_app_enabled': True}
+    row = db.scalar(select(SiteSetting).where(SiteSetting.key == f'notification_prefs_user_{user.id}'))
+    if row and row.value:
+        try:
+            defaults.update(json.loads(row.value))
+        except Exception:
+            pass
+    return defaults
+
+
+@router.put('/notification-preferences')
+def update_notification_preferences(payload: dict, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    import json
+    from app.models import SiteSetting
+    prefs = {
+        'email_enabled': bool(payload.get('email_enabled', True)),
+        'sms_enabled': bool(payload.get('sms_enabled', True)),
+        'in_app_enabled': bool(payload.get('in_app_enabled', True)),
+    }
+    key = f'notification_prefs_user_{user.id}'
+    row = db.scalar(select(SiteSetting).where(SiteSetting.key == key))
+    if row:
+        row.value = json.dumps(prefs)
+    else:
+        db.add(SiteSetting(key=key, value=json.dumps(prefs), category='NOTIFICATION_PREFS'))
+    db.commit()
+    return {'ok': True, **prefs}
+

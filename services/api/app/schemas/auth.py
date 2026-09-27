@@ -16,7 +16,8 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    mfa_code: str | None = Field(default=None, pattern=r'^\d{6}$')
+    mfa_code: str | None = Field(default=None, pattern=r'^(\d{6}|PGCB-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4})$')
+    otp_code: str | None = Field(default=None, pattern=r'^(\d{6}|PGCB-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4})$')
 
 
 class PasswordResetRequest(BaseModel):

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.rbac import require_permission
 from app.core.security import hash_password
-from app.core.mfa import generate_secret, otpauth_uri, verify_totp, encrypt_secret, decrypt_secret
+from app.core.mfa import generate_secret, otpauth_uri, verify_totp, encrypt_secret, decrypt_secret, generate_backup_codes
 from app.db.session import get_db
 from app.models import (
     AuditLog,
@@ -678,13 +678,17 @@ def update_user(user_id: int, payload: AdminUserUpdate, request: Request, admin:
 
 
 # ---- Administrator MFA ----
+def _require_any_admin(user: User = Depends(require_permission('admin.stats'))) -> User:
+    return user
+
+
 @router.get('/mfa/status')
-def mfa_status(admin: User = Depends(require_permission('settings.read'))):
+def mfa_status(admin: User = Depends(_require_any_admin)):
     return {'enabled': bool(admin.mfa_enabled)}
 
 
 @router.post('/mfa/setup')
-def mfa_setup(admin: User = Depends(require_permission('settings.write')), db: Session = Depends(get_db)):
+def mfa_setup(admin: User = Depends(_require_any_admin), db: Session = Depends(get_db)):
     secret = generate_secret()
     uri = otpauth_uri(secret, admin.email)
     try:
@@ -706,24 +710,51 @@ def mfa_setup(admin: User = Depends(require_permission('settings.write')), db: S
 
 
 @router.post('/mfa/enable')
-def mfa_enable(code: str, request: Request, admin: User = Depends(require_permission('settings.write')), db: Session = Depends(get_db)):
+def mfa_enable(
+    request: Request,
+    code: str | None = None,
+    payload: dict | None = None,
+    admin: User = Depends(_require_any_admin),
+    db: Session = Depends(get_db),
+):
+    resolved_code = code or (payload.get('code') if isinstance(payload, dict) else None)
+    if not resolved_code:
+        raise HTTPException(400, 'Authenticator code is required')
     secret = decrypt_secret(admin.mfa_secret_enc) or admin.mfa_secret
     if not secret:
         raise HTTPException(400, 'MFA setup has not been started')
-    if not verify_totp(secret, code):
+    if not verify_totp(secret, str(resolved_code)):
         raise HTTPException(400, 'Invalid authenticator code')
     admin.mfa_enabled = True
+    backup_codes = generate_backup_codes(db, admin.id, count=8)
     audit(db, admin, 'ENABLE_MFA', 'USER', admin.id, _actor_ip(request))
     db.commit()
-    return {'ok': True, 'enabled': True}
+    return {'ok': True, 'enabled': True, 'backup_codes': backup_codes}
+
+
+@router.post('/mfa/backup-codes')
+def mfa_backup_codes(request: Request, admin: User = Depends(_require_any_admin), db: Session = Depends(get_db)):
+    if not admin.mfa_enabled:
+        raise HTTPException(400, 'MFA must be enabled before generating backup codes')
+    backup_codes = generate_backup_codes(db, admin.id, count=8)
+    audit(db, admin, 'REGENERATE_MFA_BACKUP_CODES', 'USER', admin.id, _actor_ip(request))
+    db.commit()
+    return {'ok': True, 'backup_codes': backup_codes}
 
 
 @router.post('/mfa/disable')
-def mfa_disable(code: str, request: Request, admin: User = Depends(require_permission('settings.write')), db: Session = Depends(get_db)):
+def mfa_disable(
+    request: Request,
+    code: str | None = None,
+    payload: dict | None = None,
+    admin: User = Depends(_require_any_admin),
+    db: Session = Depends(get_db),
+):
+    resolved_code = code or (payload.get('code') if isinstance(payload, dict) else None)
     if not admin.mfa_enabled:
         raise HTTPException(400, 'MFA is not enabled')
     secret = decrypt_secret(admin.mfa_secret_enc) or admin.mfa_secret
-    if not secret or not verify_totp(secret, code):
+    if not secret or not resolved_code or not verify_totp(secret, str(resolved_code)):
         raise HTTPException(400, 'Invalid authenticator code')
     admin.mfa_enabled = False
     admin.mfa_secret = None
@@ -811,7 +842,7 @@ def payments(status: str | None = None, purpose: str | None = None, limit: int =
     if status: stmt = stmt.where(PaymentTransaction.status == status)
     if purpose: stmt = stmt.where(PaymentTransaction.purpose == purpose)
     rows = db.scalars(stmt).all()
-    return [{'id': p.id, 'user_id': p.user_id, 'member_id': p.member_id, 'event_registration_id': p.event_registration_id, 'purpose': p.purpose, 'amount': p.amount, 'currency': p.currency, 'provider': p.provider, 'transaction_ref': p.transaction_ref, 'status': p.status, 'created_at': p.created_at, 'updated_at': p.updated_at} for p in rows]
+    return [{'id': p.id, 'user_id': p.user_id, 'member_id': p.member_id, 'event_registration_id': p.event_registration_id, 'purpose': p.purpose, 'amount': p.amount, 'currency': p.currency, 'provider': p.provider, 'transaction_ref': p.transaction_ref, 'receipt_no': p.receipt_no, 'status': p.status, 'created_at': p.created_at, 'updated_at': p.updated_at} for p in rows]
 
 @router.patch('/payments/{payment_id}')
 def update_payment(payment_id: int, payload: PaymentStatusUpdate, request: Request, admin: User = Depends(require_permission('finance.write')), db: Session = Depends(get_db)):
@@ -821,15 +852,14 @@ def update_payment(payment_id: int, payload: PaymentStatusUpdate, request: Reque
     if not item: raise HTTPException(404, 'Payment not found')
     item.status = payload.status
     if payload.transaction_ref is not None: item.transaction_ref = payload.transaction_ref
-    if payload.status == 'PAID' and item.purpose == 'MEMBERSHIP' and item.member_id:
-        from app.models import MembershipRenewal
-        from app.domain.membership import renew_membership
-        existing_renewal = db.scalar(select(MembershipRenewal).where(MembershipRenewal.payment_id == item.id))
-        if not existing_renewal:
+    if payload.status == 'PAID':
+        from app.services.receipt_service import activate_membership_from_payment, ensure_receipt_metadata
+        ensure_receipt_metadata(item)
+        if item.purpose in {'MEMBERSHIP', 'RENEWAL', 'APPLICATION'} and item.member_id:
             member = db.get(Member, item.member_id)
             if not member:
                 raise HTTPException(409, 'Member not found for renewal')
-            renew_membership(db, member, item.id, item.amount, item.currency)
+            activate_membership_from_payment(db, item)
     if item.event_registration_id:
         reg = db.get(EventRegistration, item.event_registration_id)
         if reg:
@@ -837,7 +867,7 @@ def update_payment(payment_id: int, payload: PaymentStatusUpdate, request: Reque
             elif payload.status == 'FAILED': reg.payment_status = 'FAILED'
             elif payload.status == 'REFUNDED': reg.payment_status = 'REFUNDED'
     audit(db, admin, 'UPDATE_PAYMENT', 'PAYMENT', item.id, _actor_ip(request)); db.commit()
-    return {'ok': True, 'status': item.status}
+    return {'ok': True, 'status': item.status, 'receipt_no': item.receipt_no}
 
 @router.get('/notification-deliveries')
 def notification_deliveries(limit: int = 100, _: User = Depends(require_permission('notification.write')), db: Session = Depends(get_db)):
@@ -871,31 +901,53 @@ def audit_logs(limit: int = 100, _: User = Depends(require_permission('audit.rea
     return [{'id': x.id, 'user_id': x.user_id, 'action': x.action, 'entity': x.entity, 'entity_id': x.entity_id, 'ip_address': x.ip_address, 'created_at': x.created_at} for x in rows]
 
 
-# ---- Member CSV Import (Batch Processing) ----
+# ---- Member CSV Import (Batch Processing & Import Wizard) ----
 @router.post('/imports/members/preview')
 async def preview_members_csv(
     file: UploadFile = File(...),
+    column_mapping: str | None = None,
     _: User = Depends(require_permission('member.import')),
     db: Session = Depends(get_db),
 ):
-    """Parse and validate uploaded members CSV without writing to the database."""
+    """Parse and validate uploaded members CSV with optional column mapping, duplicate detection, and summary metrics."""
+    import json as _json
+
     content = await file.read()
     try:
         text_data = content.decode('utf-8-sig')
     except UnicodeDecodeError:
         text_data = content.decode('latin-1')
 
-    raw_rows = list(csv.DictReader(StringIO(text_data)))
+    mapping: dict[str, str] = {}
+    if column_mapping:
+        try:
+            mapping = _json.loads(column_mapping)
+        except Exception:
+            mapping = {}
+
+    reader = csv.DictReader(StringIO(text_data))
+    detected_columns = list(reader.fieldnames or [])
+    raw_rows = list(reader)
     rows = []
     seen_emails: set[str] = set()
     valid_count = 0
     error_count = 0
+    duplicate_count = 0
+    missing_email_count = 0
 
-    # Cache existing circles and candidate user emails for fast validation without loading all users
+    def _col(r: dict, target: str, fallbacks: tuple[str, ...] = ()) -> str:
+        mapped_col = mapping.get(target)
+        if mapped_col and r.get(mapped_col) is not None:
+            return str(r.get(mapped_col) or '').strip()
+        for k in (target, *fallbacks):
+            if r.get(k) is not None:
+                return str(r.get(k) or '').strip()
+        return ''
+
     circles = db.scalars(select(Circle)).all()
     existing_circles = {c.name_bn.strip(): c.id for c in circles}
     existing_circles.update({c.name_en.strip(): c.id for c in circles if c.name_en})
-    candidate_emails = {(r.get('email') or '').strip().lower() for r in raw_rows if (r.get('email') or '').strip()}
+    candidate_emails = {_col(r, 'email').lower() for r in raw_rows if _col(r, 'email')}
     existing_users = (
         set(db.scalars(select(User.email).where(User.email.in_(candidate_emails))).all())
         if candidate_emails
@@ -904,23 +956,29 @@ async def preview_members_csv(
 
     for idx, row in enumerate(raw_rows, start=2):
         errors: list[str] = []
-        name_bn = (row.get('name_bn') or row.get('full_name_bn') or row.get('name') or '').strip()
-        name_en = (row.get('name_en') or row.get('full_name_en') or '').strip() or None
-        email = (row.get('email') or '').strip().lower()
-        phone = (row.get('phone') or '').strip() or None
-        employee_id = (row.get('employee_id') or '').strip() or None
-        designation_bn = (row.get('designation_bn') or row.get('designation') or '').strip() or None
-        circle_val = (row.get('circle') or row.get('circle_id') or '').strip()
+        is_duplicate = False
+        name_bn = _col(row, 'name_bn', ('full_name_bn', 'name'))
+        name_en = _col(row, 'name_en', ('full_name_en',)) or None
+        email = _col(row, 'email').lower()
+        phone = _col(row, 'phone', ('mobile',)) or None
+        employee_id = _col(row, 'employee_id', ('emp_id',)) or None
+        designation_bn = _col(row, 'designation_bn', ('designation',)) or None
+        circle_val = _col(row, 'circle', ('circle_id',))
 
         if not name_bn:
             errors.append('নাম (Bangla name) আবশ্যক (required)')
         if not email:
+            missing_email_count += 1
             errors.append('ইমেইল (Email) আবশ্যক (required)')
         elif '@' not in email or '.' not in email.split('@')[-1]:
             errors.append('সঠিক ইমেইল ফরম্যাট দিন (Invalid email format)')
         elif email in seen_emails:
+            is_duplicate = True
+            duplicate_count += 1
             errors.append('একই ফাইলে ইমেইল একাধিকবার রয়েছে (Duplicate email in file)')
         elif email in existing_users:
+            is_duplicate = True
+            duplicate_count += 1
             errors.append('ইমেইলটি ইতোমধ্যে নিবন্ধিত (Email already exists in database)')
 
         circle_id = None
@@ -947,13 +1005,18 @@ async def preview_members_csv(
             'designation_bn': designation_bn,
             'circle_id': circle_id,
             'valid': is_valid,
+            'duplicate': is_duplicate,
             'errors': errors,
         })
 
     return {
+        'detected_columns': detected_columns,
         'total_rows': len(rows),
         'valid_count': valid_count,
         'error_count': error_count,
+        'invalid_count': max(0, error_count - duplicate_count),
+        'duplicate_count': duplicate_count,
+        'missing_email_count': missing_email_count,
         'rows': rows,
     }
 

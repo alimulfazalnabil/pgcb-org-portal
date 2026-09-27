@@ -17,3 +17,6 @@ services/api/storage/certificates/*
 services/api/storage/public/*
 services/api/storage/cards/*
 !services/api/storage/**/.gitkeep
+backups/
+services/api/backups/
+

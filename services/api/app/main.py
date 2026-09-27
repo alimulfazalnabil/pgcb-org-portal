@@ -17,6 +17,8 @@ from app.routers.payments import router as payments_router
 from app.routers.payment_webhooks import router as payment_webhooks_router
 from app.routers.certificates import router as certificates_router
 from app.routers.workflows import router as workflows_router
+from app.routers.secretariat import router as secretariat_router
+from app.routers.helpdesk import router as helpdesk_router
 
 from app.storage import get_storage
 
@@ -110,6 +112,8 @@ app.include_router(public.router, prefix='/api/v1')
 app.include_router(membership.router, prefix='/api/v1')
 app.include_router(card.router, prefix='/api/v1')
 app.include_router(admin.router, prefix='/api/v1')
+app.include_router(secretariat_router, prefix='/api/v1')
+app.include_router(helpdesk_router, prefix='/api/v1')
 app.include_router(event_registration_router, prefix='/api/v1')
 app.include_router(event_public_router, prefix='/api/v1')
 app.include_router(payments_router, prefix='/api/v1')
