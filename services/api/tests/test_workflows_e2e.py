@@ -475,9 +475,10 @@ def test_p0_golden_e2e_and_security_sprint():
     assert cert_list_res.status_code == 200, cert_list_res.text
     certs = cert_list_res.json()
     assert len(certs) >= 1
-    cert_token = certs[0]['token']
+    cert_no = certs[0].get('certificate_no') or certs[0].get('certificate_number')
+    assert cert_no and cert_no.startswith('PGCB-CERT-')
 
-    cert_verify_res = client.get(f'/api/v1/certificates/verify/{cert_token}')
+    cert_verify_res = client.get(f'/api/v1/certificates/verify/{cert_no}')
     assert cert_verify_res.status_code == 200, cert_verify_res.text
     assert cert_verify_res.json()['valid'] is True
 
