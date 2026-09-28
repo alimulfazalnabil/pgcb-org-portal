@@ -56,8 +56,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from datetime import datetime
+import uuid
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from app.core.middleware import observability_tracker
+
+CONTROLLED_500_MESSAGE = 'Something went wrong. Please try again or contact the Secretariat.'
+
+
+def generate_pgcb_error_id() -> str:
+    now = datetime.utcnow()
+    suffix = uuid.uuid4().hex[:4].upper()
+    return f"PGCB-{now.strftime('%Y')}-{now.strftime('%m%d')}-{suffix}"
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -69,10 +80,32 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         403: 'FORBIDDEN',
         404: 'NOT_FOUND',
         409: 'CONFLICT',
+        413: 'PAYLOAD_TOO_LARGE',
         422: 'VALIDATION_ERROR',
         429: 'RATE_LIMITED',
         500: 'INTERNAL_SERVER_ERROR',
     }
+    if exc.status_code >= 500:
+        error_id = generate_pgcb_error_id()
+        observability_tracker.record_error_id(error_id, request.method, request.url.path, 'HTTPException500')
+        logger.error(f"ERROR-ID: {error_id} | Path: {request.url.path} | Detail: {exc.detail}")
+        headers = dict(getattr(exc, 'headers', None) or {})
+        headers['X-Error-ID'] = error_id
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                'detail': CONTROLLED_500_MESSAGE,
+                'error_id': error_id,
+                'error': {
+                    'code': 'INTERNAL_SERVER_ERROR',
+                    'message': CONTROLLED_500_MESSAGE,
+                    'error_id': error_id,
+                    'request_id': request_id,
+                },
+            },
+            headers=headers,
+        )
+
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -84,6 +117,28 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             },
         },
         headers=getattr(exc, 'headers', None),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    request_id = getattr(request.state, 'request_id', request.headers.get('X-Request-ID') or 'unknown')
+    error_id = generate_pgcb_error_id()
+    observability_tracker.record_error_id(error_id, request.method, request.url.path, type(exc).__name__)
+    logger.exception(f"ERROR-ID: {error_id} | Unhandled exception at {request.method} {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            'detail': CONTROLLED_500_MESSAGE,
+            'error_id': error_id,
+            'error': {
+                'code': 'INTERNAL_SERVER_ERROR',
+                'message': CONTROLLED_500_MESSAGE,
+                'error_id': error_id,
+                'request_id': request_id,
+            },
+        },
+        headers={'X-Error-ID': error_id, 'X-Request-ID': request_id},
     )
 
 
