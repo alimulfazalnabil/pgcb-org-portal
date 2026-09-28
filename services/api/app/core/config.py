@@ -14,10 +14,7 @@ def _normalize_origin_url(raw: str) -> str:
         return val
     if val.startswith(('localhost', '127.0.0.1')):
         return f'http://{val}'
-    if '.' in val:
-        return f'https://{val}'
-    # Bare Render service hostname from `fromService: property: host`
-    return f'https://{val}.onrender.com'
+    return f'https://{val}'
 
 
 class Settings(BaseSettings):
@@ -29,6 +26,7 @@ class Settings(BaseSettings):
     db_user: str | None = None
     db_password: str | None = None
     db_sslmode: str = 'prefer'
+    secret_key: str | None = None
     jwt_secret: str = 'dev-only-secret-change-me-please-use-a-32-byte-random-secret'
     jwt_expire_minutes: int = 60
     cookie_name: str = 'pgcb_access_token'
@@ -53,6 +51,7 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     metrics_token: str | None = None
     log_level: str = 'INFO'
+    payment_mode: str = 'sandbox'
     bkash_app_key: str | None = None
     bkash_app_secret: str | None = None
     bkash_username: str | None = None
