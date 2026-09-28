@@ -422,23 +422,17 @@ def _execute_member_tools(db: Session, user: User, q_lower: str) -> tuple[list[d
         return tools_used, ans_en, ans_bn
 
     if any(k in q_lower for k in ('my application', 'application status', 'আমার আবেদন')):
-        app_row = None
-        if member:
-            app_row = db.scalar(
-                select(MembershipApplication)
-                .where(MembershipApplication.member_id == member.id)
-                .order_by(MembershipApplication.id.desc())
-            )
-        app_status = app_row.status if app_row else (member.status if member else 'NONE')
+        app_status = member.status if member else 'NONE'
+        app_no = member.application_no if member else 'N/A'
         tools_used.append(
             {
                 'tool_name': 'my_application_status',
                 'authorized': True,
-                'result': {'application_status': app_status},
+                'result': {'application_status': app_status, 'application_no': app_no},
             }
         )
-        ans_en = f'Your membership application status is currently {app_status}.'
-        ans_bn = f'আপনার সদস্যপদ আবেদনের বর্তমান অবস্থা হলো {app_status}।'
+        ans_en = f'Your membership application ({app_no}) status is currently {app_status}.'
+        ans_bn = f'আপনার সদস্যপদ আবেদন ({app_no})-এর বর্তমান অবস্থা হলো {app_status}।'
         return tools_used, ans_en, ans_bn
 
     return tools_used, None, None
