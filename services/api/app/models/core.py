@@ -655,3 +655,24 @@ class AIQueryLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
+class Role(Base, TimestampMixin):
+    __tablename__ = 'roles'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    name_bn: Mapped[str] = mapped_column(String(120))
+    name_en: Mapped[str] = mapped_column(String(120))
+    permissions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class MembershipApplication(Base, TimestampMixin):
+    __tablename__ = 'membership_applications'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey('members.id', ondelete='CASCADE'), index=True)
+    application_no: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    membership_type: Mapped[str] = mapped_column(String(50), default='GENERAL', index=True)
+    circle_id: Mapped[int | None] = mapped_column(ForeignKey('circles.id', ondelete='SET NULL'), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), default='PENDING', index=True)
+    reviewer_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
