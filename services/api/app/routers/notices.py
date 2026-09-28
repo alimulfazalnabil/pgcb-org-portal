@@ -4,8 +4,9 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db
-from app.core.rbac import require_permission
+from app.core.rbac import has_permission, require_permission
 from app.models.core import Notice, User
+from app.routers.cms import notify_members_of_publication, record_content_revision
 from app.schemas.content import NoticeCreate, NoticeResponse, NoticeUpdate
 from app.services import audit
 
@@ -59,6 +60,11 @@ def create_notice(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("notice.write")),
 ):
+    if data.is_published and not has_permission(user.role, "content.publish"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Content Editor cannot publish directly without Publisher/Admin approval",
+        )
     item = Notice(
         title_bn=data.title_bn,
         title_en=data.title_en,
@@ -69,12 +75,26 @@ def create_notice(
         attachment_url=data.attachment_url,
         is_pinned=data.is_pinned,
         is_published=data.is_published,
-        published_at=data.published_at or datetime.utcnow(),
+        published_at=(data.published_at or datetime.utcnow()) if data.is_published else None,
         expires_at=data.expires_at,
     )
     db.add(item)
     db.commit()
     db.refresh(item)
+    record_content_revision(
+        db,
+        entity_type="NOTICE",
+        entity_id=item.id,
+        status="PUBLISHED" if item.is_published else "DRAFT",
+        title_bn=item.title_bn,
+        title_en=item.title_en,
+        content_snapshot={"category": item.category, "priority": item.priority, "content_bn": item.content_bn},
+        changed_by=user.id,
+        published_by=user.id if item.is_published else None,
+        change_note="Initial notice creation",
+    )
+    if item.is_published:
+        notify_members_of_publication(db, "NOTICE", item.id, item.title_bn, item.content_bn)
     audit(db, user, "CREATE_NOTICE", "notice", item.id)
     db.commit()
     return item
@@ -92,10 +112,27 @@ def update_notice(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notice not found")
 
     update_dict = data.model_dump(exclude_unset=True)
+    if update_dict.get("is_published") and not has_permission(user.role, "content.publish"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Content Editor cannot publish directly without Publisher/Admin approval",
+        )
     for field, val in update_dict.items():
         setattr(item, field, val)
 
     item.updated_at = datetime.utcnow()
+    record_content_revision(
+        db,
+        entity_type="NOTICE",
+        entity_id=item.id,
+        status="PUBLISHED" if item.is_published else "DRAFT",
+        title_bn=item.title_bn,
+        title_en=item.title_en,
+        content_snapshot={"category": item.category, "priority": item.priority, "content_bn": item.content_bn},
+        changed_by=user.id,
+        published_by=user.id if item.is_published else None,
+        change_note="Updated notice",
+    )
     audit(db, user, "UPDATE_NOTICE", "notice", item.id)
     db.commit()
     db.refresh(item)

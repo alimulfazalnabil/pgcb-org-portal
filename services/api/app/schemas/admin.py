@@ -8,6 +8,7 @@ class AdminUserCreate(BaseModel):
     name_en: str | None = None
     phone: str | None = None
     role: str = 'MEMBER'
+    circle_id: int | None = None
     is_active: bool = True
 
 
@@ -16,8 +17,12 @@ class AdminUserUpdate(BaseModel):
     name_en: str | None = None
     phone: str | None = None
     role: str | None = None
+    circle_id: int | None = None
     is_active: bool | None = None
 
 
 class MessageStatusUpdate(BaseModel):
-    status: str = Field(pattern='^(NEW|IN_PROGRESS|RESOLVED|ARCHIVED)$')
+    status: str = Field(pattern='^(NEW|ASSIGNED|IN_PROGRESS|WAITING|RESOLVED|CLOSED|ARCHIVED)$')
+    assigned_to: int | None = None
+    response_text: str | None = None
+

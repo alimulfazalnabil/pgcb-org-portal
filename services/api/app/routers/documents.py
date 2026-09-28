@@ -1,13 +1,16 @@
+import hashlib
+import hmac
 import io
 from datetime import datetime
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db
+from app.core.config import settings
+from app.core.deps import current_user, get_db
 from app.core.rbac import require_permission
-from app.models.core import Document, User
+from app.models.core import ContentRevision, Document, SiteSetting, User
 from app.schemas.content import DocumentCreate, DocumentResponse, DocumentUpdate
 from app.services import audit
 from app.utils.storage import delete_file, get_file_bytes, save_bytes, validate_upload_bytes
@@ -15,9 +18,38 @@ from app.utils.storage import delete_file, get_file_bytes, save_bytes, validate_
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
+def _sign_doc_token(doc_id: int, expires_ts: int) -> str:
+    msg = f"doc:{doc_id}:{expires_ts}".encode()
+    sig = hmac.new(settings.jwt_secret.encode(), msg, hashlib.sha256).hexdigest()[:32]
+    return f"{expires_ts}.{sig}"
+
+
+def _verify_doc_token(doc_id: int, token: str | None) -> bool:
+    if not token or "." not in token:
+        return False
+    try:
+        exp_str, sig = token.split(".", 1)
+        exp_ts = int(exp_str)
+    except ValueError:
+        return False
+    if exp_ts < int(datetime.utcnow().timestamp()):
+        return False
+    expected = _sign_doc_token(doc_id, exp_ts).split(".", 1)[1]
+    return hmac.compare_digest(expected, sig)
+
+
+def _is_private_doc(db: Session, doc: Document) -> bool:
+    if (doc.category or "").upper() in ("PRIVATE", "INTERNAL", "CONFIDENTIAL", "MEMBER_ONLY"):
+        return True
+    flag = db.scalar(select(SiteSetting).where(SiteSetting.key == f"doc_private:{doc.id}"))
+    return bool(flag and flag.value == "true")
+
+
 @router.get("", response_model=list[DocumentResponse])
 def list_documents(
     category: str | None = None,
+    q: str | None = None,
+    year: int | None = None,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -30,7 +62,19 @@ def list_documents(
     )
     if category:
         stmt = stmt.where(Document.category == category.upper())
-    return db.scalars(stmt.offset(offset).limit(limit)).all()
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                Document.title_bn.like(like),
+                Document.title_en.like(like),
+                Document.description_bn.like(like),
+            )
+        )
+    rows = list(db.scalars(stmt.offset(offset).limit(limit)).all())
+    if year is not None:
+        rows = [d for d in rows if d.created_at and d.created_at.year == year]
+    return rows
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
@@ -41,11 +85,51 @@ def get_document(document_id: int, db: Session = Depends(get_db)):
     return doc
 
 
-@router.get("/{document_id}/download")
-def download_document(document_id: int, db: Session = Depends(get_db)):
+@router.get("/{document_id}/signed-url")
+def create_signed_download_url(
+    document_id: int,
+    expires_in_seconds: int = Query(default=900, ge=60, le=86400),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
     doc = db.get(Document, document_id)
-    if not doc or not doc.is_published:
+    if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    exp_ts = int(datetime.utcnow().timestamp()) + expires_in_seconds
+    token = _sign_doc_token(doc.id, exp_ts)
+    audit(db, user, "GENERATE_SIGNED_DOC_URL", "DOCUMENT", doc.id)
+    db.commit()
+    return {
+        "document_id": doc.id,
+        "token": token,
+        "expires_at": exp_ts,
+        "download_url": f"/api/v1/documents/{doc.id}/download?token={token}",
+    }
+
+
+@router.get("/{document_id}/download")
+def download_document(
+    document_id: int,
+    request: Request,
+    token: str | None = None,
+    db: Session = Depends(get_db),
+):
+    doc = db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    is_private = _is_private_doc(db, doc) or not doc.is_published
+    actor_user: User | None = None
+    try:
+        actor_user = current_user(request, db)
+    except Exception:
+        actor_user = None
+
+    if is_private and not actor_user and not _verify_doc_token(doc.id, token):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Controlled document requires authentication or a valid temporary download token",
+        )
 
     try:
         content = get_file_bytes(doc.file_path)
@@ -57,8 +141,9 @@ def download_document(document_id: int, db: Session = Depends(get_db)):
             detail=f"Document file not found on storage: {exc}",
         )
 
-    # Increment download count
     doc.download_count += 1
+    if actor_user:
+        audit(db, actor_user, "DOWNLOAD_DOCUMENT", "DOCUMENT", doc.id, request.client.host if request.client else None)
     db.commit()
 
     media_type = doc.content_type or "application/octet-stream"
@@ -118,10 +203,21 @@ def create_document(
         is_published=data.is_published,
     )
     db.add(item)
-    db.commit()
-    db.refresh(item)
+    db.flush()
+    db.add(
+        ContentRevision(
+            entity_type="DOCUMENT",
+            entity_id=item.id,
+            version_number=1,
+            workflow_status="PUBLISHED" if item.is_published else "DRAFT",
+            snapshot={"title_bn": item.title_bn, "title_en": item.title_en, "category": item.category, "version": item.version, "file_path": item.file_path},
+            change_summary="Initial document upload",
+            changed_by=user.id,
+        )
+    )
     audit(db, user, "CREATE_DOCUMENT", "document", item.id)
     db.commit()
+    db.refresh(item)
     return item
 
 
@@ -162,3 +258,4 @@ def delete_document(
     db.delete(item)
     db.commit()
     return None
+

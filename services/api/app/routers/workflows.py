@@ -6,9 +6,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.rbac import require_permission
+from app.core.rbac import has_permission, require_permission
 from app.db.session import get_db
 from app.models import Certificate, Circular, ContentWorkflow, Document, Event, Journal, Notice, User
+from app.models.core import News
+from app.routers.cms import notify_members_of_publication, record_content_revision
 from app.services import audit
 
 router = APIRouter(prefix='/admin/workflows', tags=['cms-workflows'])
@@ -23,6 +25,7 @@ class WorkflowTransition(BaseModel):
 CONTENT_MAP = {
     'CIRCULAR': Circular,
     'NOTICE': Notice,
+    'NEWS': News,
     'DOCUMENT': Document,
     'CERTIFICATE': Certificate,
     'JOURNAL': Journal,
@@ -80,9 +83,20 @@ def transition(
     entity_id: int,
     payload: WorkflowTransition,
     request: Request,
-    admin: User = Depends(require_permission('content.publish')),
+    admin: User = Depends(require_permission('content.read')),
     db: Session = Depends(get_db),
 ):
+    status = payload.status
+    if status in {'SCHEDULED', 'PUBLISHED', 'ARCHIVED'}:
+        if not has_permission(admin.role, 'content.publish'):
+            raise HTTPException(403, 'Insufficient permissions: Publisher or Super Admin role required to publish or archive content')
+    elif status in {'IN_REVIEW', 'APPROVED'}:
+        if not (has_permission(admin.role, 'content.review') or has_permission(admin.role, 'content.publish')):
+            raise HTTPException(403, 'Insufficient permissions: Reviewer, Publisher, or Super Admin role required to review/approve content')
+    else:
+        if not (has_permission(admin.role, 'content.write') or has_permission(admin.role, 'content.review') or has_permission(admin.role, 'content.publish')):
+            raise HTTPException(403, 'Insufficient permissions to modify content workflow')
+
     typ = entity_type.upper()
     model = CONTENT_MAP.get(typ)
     if not model:
@@ -96,7 +110,6 @@ def transition(
     if not workflow:
         workflow = ContentWorkflow(entity_type=typ, entity_id=entity_id, status='DRAFT')
         db.add(workflow)
-    status = payload.status
     current = (workflow.status if workflow else None) or 'DRAFT'
     allowed = {
         'DRAFT': {'SUBMITTED', 'IN_REVIEW', 'PUBLISHED'},
@@ -130,6 +143,34 @@ def transition(
     if status == 'ARCHIVED':
         workflow.published_at = None
     _set_published(entity, status, now)
+
+    record_content_revision(
+        db,
+        entity_type=typ,
+        entity_id=entity_id,
+        status=status,
+        title_bn=getattr(entity, 'title_bn', None),
+        title_en=getattr(entity, 'title_en', None),
+        content_snapshot={
+            'status': status,
+            'review_note': payload.review_note,
+            'is_published': getattr(entity, 'is_published', None),
+        },
+        changed_by=admin.id,
+        approved_by=workflow.reviewed_by if status in ('APPROVED', 'PUBLISHED', 'SCHEDULED') else None,
+        published_by=workflow.published_by if status == 'PUBLISHED' else None,
+        change_note=payload.review_note or f'Workflow transition {current} -> {status}',
+    )
+
+    if status == 'PUBLISHED' and typ in {'NOTICE', 'CIRCULAR', 'NEWS'}:
+        notify_members_of_publication(
+            db,
+            entity_type=typ,
+            entity_id=entity_id,
+            title_bn=getattr(entity, 'title_bn', typ),
+            body_bn=getattr(entity, 'summary_bn', None) or getattr(entity, 'content_bn', None),
+        )
+
     audit(db, admin, f'WORKFLOW_{status}', typ, entity_id, request.client.host if request.client else None)
     db.commit()
     db.refresh(workflow)
@@ -138,4 +179,5 @@ def transition(
         **_serialize_workflow(workflow),
         'is_published': getattr(entity, 'is_published', None),
     }
+
 

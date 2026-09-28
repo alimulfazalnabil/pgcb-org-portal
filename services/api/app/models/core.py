@@ -437,3 +437,99 @@ class Document(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class News(Base):
+    __tablename__ = 'news_articles'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    slug: Mapped[str] = mapped_column(String(240), unique=True, index=True)
+    title_bn: Mapped[str] = mapped_column(String(500), index=True)
+    title_en: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    summary_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_en: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_bn: Mapped[str] = mapped_column(Text)
+    content_en: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String(80), default='GENERAL', index=True)
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    cover_image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    gallery_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    author_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    author_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    is_featured: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), default='DRAFT', index=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    seo_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    meta_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    canonical_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    og_image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    robots: Mapped[str] = mapped_column(String(60), default='index,follow')
+    view_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ContentRevision(Base):
+    __tablename__ = 'content_revisions'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(50), index=True)
+    entity_id: Mapped[int] = mapped_column(Integer, index=True)
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    workflow_status: Mapped[str] = mapped_column(String(30), default='DRAFT', index=True)
+    snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    change_summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    changed_by: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    published_by: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class Announcement(Base):
+    __tablename__ = 'announcements'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title_bn: Mapped[str] = mapped_column(String(500), index=True)
+    title_en: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    body_bn: Mapped[str] = mapped_column(Text)
+    body_en: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_scope: Mapped[str] = mapped_column(String(40), default='ALL_MEMBERS', index=True)  # ALL_MEMBERS, CIRCLE, STATUS, ADMINS, COMMITTEE
+    target_circle_id: Mapped[int | None] = mapped_column(ForeignKey('circles.id', ondelete='SET NULL'), nullable=True, index=True)
+    target_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    channels: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    priority: Mapped[str] = mapped_column(String(20), default='NORMAL', index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    sent_count: Mapped[int] = mapped_column(Integer, default=0)
+    published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class SEOMetadata(Base):
+    __tablename__ = 'seo_metadata'
+    __table_args__ = (UniqueConstraint('entity_type', 'entity_id', name='uq_seo_metadata_entity'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(50), index=True)
+    entity_id: Mapped[int] = mapped_column(Integer, index=True)
+    slug: Mapped[str | None] = mapped_column(String(240), nullable=True, index=True)
+    seo_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    meta_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    canonical_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    og_image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    robots: Mapped[str] = mapped_column(String(60), default='index,follow')
+    structured_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ContactInquiryMeta(Base):
+    __tablename__ = 'contact_inquiry_meta'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey('contact_messages.id', ondelete='CASCADE'), unique=True, index=True)
+    ticket_no: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), default='NEW', index=True)  # NEW, ASSIGNED, IN_PROGRESS, WAITING, RESOLVED, CLOSED
+    assigned_to: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True)
+    response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    responded_by: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+

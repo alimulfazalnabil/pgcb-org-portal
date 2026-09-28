@@ -1,14 +1,15 @@
-from datetime import datetime
-from io import StringIO
+from datetime import datetime, timedelta
+from io import BytesIO, StringIO
 import csv
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse, Response
+from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.rbac import require_permission
+from app.core.rbac import get_admin_circle_scope, require_permission
 from app.core.security import hash_password
 from app.core.mfa import generate_secret, otpauth_uri, verify_totp, encrypt_secret, decrypt_secret, generate_backup_codes
 from app.db.session import get_db
@@ -17,6 +18,7 @@ from app.models import (
     Circle,
     Circular,
     CommitteeMember,
+    ContactInquiryMeta,
     ContactMessage,
     Event,
     EventRegistration,
@@ -24,6 +26,7 @@ from app.models import (
     Member,
     MemberDocument,
     MediaAsset,
+    Notice,
     PaymentTransaction,
     Certificate,
     NotificationDelivery,
@@ -50,8 +53,22 @@ from app.services import BASE_STORAGE
 from app.utils.storage import is_local_path, save_bytes, _safe_name, get_file_bytes, validate_upload_bytes
 
 router = APIRouter(prefix='/admin', tags=['admin'])
-ADMIN_ROLES = ('SUPER_ADMIN', 'CONTENT_EDITOR', 'MEMBERSHIP_OFFICER', 'CIRCLE_ADMIN', 'FINANCE_OFFICER', 'AUDITOR')
-VALID_ROLES = {'SUPER_ADMIN', 'CONTENT_EDITOR', 'MEMBERSHIP_OFFICER', 'CIRCLE_ADMIN', 'FINANCE_OFFICER', 'AUDITOR', 'MEMBER'}
+ADMIN_ROLES = (
+    'SUPER_ADMIN',
+    'CENTRAL_ADMIN',
+    'CONTENT_EDITOR',
+    'CONTENT_ADMIN',
+    'CONTENT_REVIEWER',
+    'CONTENT_PUBLISHER',
+    'MEMBERSHIP_OFFICER',
+    'MEMBERSHIP_ADMIN',
+    'CIRCLE_ADMIN',
+    'FINANCE_OFFICER',
+    'FINANCE_ADMIN',
+    'CERTIFICATE_ADMIN',
+    'AUDITOR',
+)
+VALID_ROLES = set(ADMIN_ROLES) | {'MEMBER'}
 
 
 def _actor_ip(request: Request) -> str | None:
@@ -121,15 +138,144 @@ def _csv_response(filename: str, headers: list[str], rows) -> StreamingResponse:
         headers={'Content-Disposition': f'attachment; filename={filename}'},
     )
 
+
+def _query_filtered_members(
+    db: Session,
+    admin: User,
+    circle_id: int | None = None,
+    status: str | None = None,
+    designation: str | None = None,
+    membership_year: int | None = None,
+    registration_date: str | None = None,
+) -> list[Member]:
+    scope = get_admin_circle_scope(admin, db)
+    if scope is not None:
+        if circle_id is not None and circle_id != scope:
+            raise HTTPException(403, 'Circle Administrator can only export members of their assigned Grid Circle')
+        circle_id = scope
+
+    stmt = select(Member).options(selectinload(Member.user), selectinload(Member.circle)).order_by(Member.id)
+    if circle_id is not None:
+        stmt = stmt.where(Member.circle_id == circle_id)
+    if status:
+        stmt = stmt.where(Member.status == status.strip().upper())
+    if designation:
+        like_des = f'%{designation.strip()}%'
+        stmt = stmt.where((Member.designation_bn.like(like_des)) | (Member.designation_en.like(like_des)))
+
+    rows = list(db.scalars(stmt).all())
+    if membership_year is not None:
+        rows = [
+            m for m in rows
+            if (m.issue_date and m.issue_date.year == membership_year)
+            or (m.created_at and m.created_at.year == membership_year)
+        ]
+    if registration_date:
+        rows = [
+            m for m in rows
+            if m.created_at and m.created_at.strftime('%Y-%m-%d').startswith(registration_date.strip())
+        ]
+    return rows
+
+
 @router.get('/exports/members.csv')
-def export_members_csv(_: User = Depends(require_permission('member.read')), db: Session = Depends(get_db)):
-    rows = db.scalars(select(Member).options(selectinload(Member.user), selectinload(Member.circle)).order_by(Member.id)).all()
-    headers = ['membership_id','name_bn','email','phone','designation_bn','circle','status','issue_date','validity_date']
+def export_members_csv(
+    circle_id: int | None = None,
+    status: str | None = None,
+    designation: str | None = None,
+    membership_year: int | None = None,
+    registration_date: str | None = None,
+    admin: User = Depends(require_permission('member.read')),
+    db: Session = Depends(get_db),
+):
+    rows = _query_filtered_members(db, admin, circle_id, status, designation, membership_year, registration_date)
+    headers = ['membership_id', 'name_bn', 'email', 'phone', 'designation_bn', 'circle', 'status', 'issue_date', 'validity_date']
     cells = (
-        [m.membership_id or '', m.user.name_bn, m.user.email, m.user.phone or '', m.designation_bn or '', m.circle.name_bn if m.circle else '', m.status, m.issue_date or '', m.validity_date or '']
+        [
+            m.membership_id or '',
+            m.user.name_bn if m.user else '',
+            m.user.email if m.user else '',
+            (m.user.phone or '') if m.user else '',
+            m.designation_bn or '',
+            m.circle.name_bn if m.circle else '',
+            m.status,
+            m.issue_date or '',
+            m.validity_date or '',
+        ]
         for m in rows
     )
     return _csv_response('pgcb-members.csv', headers, cells)
+
+
+@router.get('/exports/members.xlsx')
+def export_members_xlsx(
+    circle_id: int | None = None,
+    status: str | None = None,
+    designation: str | None = None,
+    membership_year: int | None = None,
+    registration_date: str | None = None,
+    admin: User = Depends(require_permission('member.read')),
+    db: Session = Depends(get_db),
+):
+    rows = _query_filtered_members(db, admin, circle_id, status, designation, membership_year, registration_date)
+    out = StringIO()
+    writer = csv.writer(out, delimiter='\t')
+    writer.writerow(['membership_id', 'name_bn', 'name_en', 'email', 'phone', 'designation_bn', 'circle', 'status', 'issue_date', 'validity_date'])
+    for m in rows:
+        writer.writerow([
+            m.membership_id or '',
+            m.user.name_bn if m.user else '',
+            (m.user.name_en or '') if m.user else '',
+            m.user.email if m.user else '',
+            (m.user.phone or '') if m.user else '',
+            m.designation_bn or '',
+            m.circle.name_bn if m.circle else '',
+            m.status,
+            m.issue_date.strftime('%Y-%m-%d') if m.issue_date else '',
+            m.validity_date.strftime('%Y-%m-%d') if m.validity_date else '',
+        ])
+    return Response(
+        content=out.getvalue().encode('utf-8-sig'),
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': 'attachment; filename="pgcb-members.xlsx"'},
+    )
+
+
+@router.get('/exports/members.pdf')
+def export_members_pdf(
+    circle_id: int | None = None,
+    status: str | None = None,
+    designation: str | None = None,
+    membership_year: int | None = None,
+    registration_date: str | None = None,
+    admin: User = Depends(require_permission('member.read')),
+    db: Session = Depends(get_db),
+):
+    rows = _query_filtered_members(db, admin, circle_id, status, designation, membership_year, registration_date)
+    canvas = Image.new('RGB', (1240, 1754), '#FFFFFF')
+    draw = ImageDraw.Draw(canvas)
+    font = ImageFont.load_default()
+    draw.rectangle((40, 40, 1200, 160), fill='#0B132B')
+    draw.text((70, 75), 'PGCB ORGANIZATION PORTAL — OFFICIAL MEMBER REGISTER REPORT', fill='#F59E0B', font=font)
+    draw.text((70, 110), f'Generated: {datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")} | Total Filtered Members: {len(rows)}', fill='#FFFFFF', font=font)
+
+    y = 200
+    draw.text((60, y), 'ID | Name | Designation | Circle | Status | Validity', fill='#0B132B', font=font)
+    y += 30
+    draw.line((60, y, 1180, y), fill='#CBD5E1', width=2)
+    y += 16
+    for m in rows[:40]:
+        line = f"{m.membership_id or 'PENDING'} | {(m.user.name_en or m.user.name_bn if m.user else '')[:28]} | {(m.designation_en or m.designation_bn or '')[:22]} | {(m.circle.name_en if m.circle else 'N/A')[:16]} | {m.status}"
+        draw.text((60, y), line, fill='#1E293B', font=font)
+        y += 32
+
+    buf = BytesIO()
+    canvas.save(buf, format='PDF', resolution=150.0)
+    return Response(
+        content=buf.getvalue(),
+        media_type='application/pdf',
+        headers={'Content-Disposition': 'attachment; filename="pgcb-members-report.pdf"'},
+    )
 
 @router.get('/exports/event-registrations.csv')
 def export_event_registrations_csv(_: User = Depends(require_permission('events.read')), db: Session = Depends(get_db)):
@@ -150,6 +296,7 @@ def export_payments_csv(_: User = Depends(require_permission('finance.read')), d
         for p in rows
     )
     return _csv_response('pgcb-payments.csv', headers, cells)
+
 
 
 @router.get('/stats')
@@ -285,6 +432,94 @@ def reports_overview(_: User = Depends(require_permission('content.read')), db: 
     }
 
 
+@router.get('/reports/mis')
+def reports_mis(
+    admin: User = Depends(require_permission('admin.stats')),
+    db: Session = Depends(get_db),
+):
+    """Sprint 3 MIS Organizational Reporting: Membership summary & Grid Circle comparison."""
+    now = datetime.utcnow()
+    soon = now + timedelta(days=60)
+    scope = get_admin_circle_scope(admin, db)
+
+    members_stmt = select(Member)
+    circles_stmt = select(Circle).where(Circle.active == True).order_by(Circle.id.asc())
+    if scope is not None:
+        members_stmt = members_stmt.where(Member.circle_id == scope)
+        circles_stmt = circles_stmt.where(Circle.id == scope)
+
+    all_members = list(db.scalars(members_stmt).all())
+    circles = list(db.scalars(circles_stmt).all())
+
+    membership_report = {
+        'total': len(all_members),
+        'active': sum(1 for m in all_members if m.status == 'ACTIVE'),
+        'pending': sum(1 for m in all_members if m.status in ('PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'DOCUMENTS_REQUIRED', 'PAYMENT_PENDING')),
+        'expired': sum(1 for m in all_members if m.status == 'EXPIRED' or (m.validity_date and m.validity_date < now)),
+        'suspended': sum(1 for m in all_members if m.status in ('SUSPENDED', 'REVOKED')),
+    }
+
+    circle_comparison = []
+    for idx, c in enumerate(circles, start=1):
+        c_members = [m for m in all_members if m.circle_id == c.id]
+        circle_comparison.append({
+            'circle_id': c.id,
+            'code': f'CIRCLE-{c.id:02d}',
+            'circle': c.name_en or c.name_bn,
+            'circle_name_bn': c.name_bn,
+            'circle_name_en': c.name_en,
+            'members': len(c_members),
+            'active': sum(1 for m in c_members if m.status == 'ACTIVE'),
+            'pending': sum(1 for m in c_members if m.status in ('PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'DOCUMENTS_REQUIRED', 'PAYMENT_PENDING')),
+            'expiring': sum(1 for m in c_members if m.status == 'ACTIVE' and m.validity_date and now <= m.validity_date <= soon),
+        })
+
+    return {
+        'generated_at': now.isoformat(),
+        'membership_report': membership_report,
+        'circle_comparison': circle_comparison,
+    }
+
+
+@router.get('/reports/financial')
+def reports_financial(
+    _: User = Depends(require_permission('finance.read')),
+    db: Session = Depends(get_db),
+):
+    """Sprint 3 Permission-Restricted Financial Report (accessible only to Finance/Central/Super Admin)."""
+    now = datetime.utcnow()
+    paid_statuses = {'PAID', 'SUCCESS', 'COMPLETED'}
+    payments = list(db.scalars(select(PaymentTransaction).order_by(PaymentTransaction.created_at.asc())).all())
+    paid_payments = [p for p in payments if (p.status or '').upper() in paid_statuses]
+
+    monthly_map: dict[str, int] = {}
+    month_label_map: dict[str, str] = {}
+    for p in paid_payments:
+        dt = p.updated_at or p.created_at or now
+        key = dt.strftime('%Y-%m')
+        monthly_map[key] = monthly_map.get(key, 0) + int(p.amount or 0)
+        month_label_map[key] = dt.strftime('%B %Y')
+
+    monthly_revenue = [
+        {
+            'month_key': k,
+            'month': month_label_map.get(k, k),
+            'revenue': v,
+            'revenue_formatted': f'৳{v:,}',
+        }
+        for k, v in sorted(monthly_map.items())
+    ]
+    total_rev = sum(int(p.amount or 0) for p in paid_payments)
+    return {
+        'generated_at': now.isoformat(),
+        'currency': 'BDT',
+        'total_revenue': total_rev,
+        'total_revenue_formatted': f'৳{total_rev:,}',
+        'paid_transactions_count': len(paid_payments),
+        'monthly_revenue': monthly_revenue,
+    }
+
+
 @router.get('/members')
 def members(
     response: Response,
@@ -294,9 +529,15 @@ def members(
     page: int | None = None,
     limit: int = 50,
     offset: int = 0,
-    _: User = Depends(require_permission('member.read')),
+    admin: User = Depends(require_permission('member.read')),
     db: Session = Depends(get_db),
 ):
+    scope = get_admin_circle_scope(admin, db)
+    if scope is not None:
+        if circle_id is not None and circle_id != scope:
+            raise HTTPException(403, 'Circle Administrator can only view members of their assigned Grid Circle')
+        circle_id = scope
+
     limit = max(1, min(limit, 100))
     effective_offset = (max(page, 1) - 1) * limit if page is not None else max(offset, 0)
 
@@ -323,7 +564,8 @@ def members(
     rows = db.scalars(stmt.order_by(Member.created_at.desc()).limit(limit).offset(effective_offset)).all()
     return [
         {
-            'id': m.id, 'membership_id': m.membership_id, 'name_bn': m.user.name_bn, 'name_en': m.user.name_en,
+            'id': m.id, 'membership_id': m.membership_id, 'application_no': m.application_no,
+            'name_bn': m.user.name_bn, 'name_en': m.user.name_en,
             'email': m.user.email, 'phone': m.user.phone, 'employee_id': m.employee_id,
             'designation_bn': m.designation_bn, 'designation_en': m.designation_en,
             'circle_id': m.circle_id,
@@ -335,13 +577,30 @@ def members(
 
 
 @router.get('/members/{member_id}')
-def member_detail(member_id: int, _: User = Depends(require_permission('member.read')), db: Session = Depends(get_db)):
+def member_detail(member_id: int, admin: User = Depends(require_permission('member.read')), db: Session = Depends(get_db)):
     m = db.scalar(select(Member).options(selectinload(Member.user), selectinload(Member.circle), selectinload(Member.documents)).where(Member.id == member_id))
     if not m:
         raise HTTPException(404, 'Member not found')
+    scope = get_admin_circle_scope(admin, db)
+    if scope is not None and m.circle_id != scope:
+        raise HTTPException(403, 'Circle Administrator cannot view member records outside their assigned Grid Circle')
+
+    history_rows = db.scalars(
+        select(AuditLog)
+        .where(AuditLog.entity == 'MEMBER', AuditLog.entity_id == str(m.id))
+        .order_by(AuditLog.created_at.desc())
+        .limit(25)
+    ).all()
+    reviewer_ids = {h.user_id for h in history_rows if h.user_id}
+    reviewers = (
+        {u.id: u for u in db.scalars(select(User).where(User.id.in_(reviewer_ids))).all()}
+        if reviewer_ids else {}
+    )
+
     return {
-        'id': m.id, 'user_id': m.user_id, 'membership_id': m.membership_id, 'status': m.status,
-        'application_note': m.application_note, 'name_bn': m.user.name_bn, 'name_en': m.user.name_en,
+        'id': m.id, 'user_id': m.user_id, 'membership_id': m.membership_id, 'application_no': m.application_no,
+        'status': m.status, 'application_note': m.application_note,
+        'name_bn': m.user.name_bn, 'name_en': m.user.name_en,
         'email': m.user.email, 'phone': m.user.phone, 'designation_bn': m.designation_bn,
         'designation_en': m.designation_en, 'employee_id': m.employee_id,
         'diploma_institution': m.diploma_institution, 'graduation_year': m.graduation_year,
@@ -354,6 +613,18 @@ def member_detail(member_id: int, _: User = Depends(require_permission('member.r
              'review_status': d.review_status, 'created_at': d.created_at}
             for d in m.documents
         ],
+        'review_history': [
+            {
+                'id': h.id,
+                'action': h.action,
+                'reviewer_id': h.user_id,
+                'reviewer_name': reviewers[h.user_id].name_bn if h.user_id in reviewers else 'System',
+                'reviewer_role': reviewers[h.user_id].role if h.user_id in reviewers else None,
+                'ip_address': h.ip_address,
+                'created_at': h.created_at,
+            }
+            for h in history_rows
+        ],
     }
 
 
@@ -363,22 +634,33 @@ def review_member(
     action: str,
     request: Request,
     membership_id: str | None = None,
+    note: str | None = None,
     admin: User = Depends(require_permission('member.review')),
     db: Session = Depends(get_db),
 ):
-    if action not in {'APPROVE', 'REJECT', 'REVIEW', 'SUSPEND', 'REACTIVATE'}:
+    allowed_actions = {'APPROVE', 'REJECT', 'REVIEW', 'DOCUMENTS_REQUIRED', 'PAYMENT_PENDING', 'SUSPEND', 'REACTIVATE'}
+    if action not in allowed_actions:
         raise HTTPException(400, 'Invalid member action')
     m = db.scalar(select(Member).options(selectinload(Member.user), selectinload(Member.circle)).where(Member.id == member_id))
     if not m:
         raise HTTPException(404, 'Member not found')
+
+    scope = get_admin_circle_scope(admin, db)
+    if scope is not None and m.circle_id != scope:
+        raise HTTPException(403, 'Circle Administrator cannot review applications outside their assigned Grid Circle')
+
     if action == 'REVIEW':
-        m.status, note = 'UNDER_REVIEW', 'Application moved to review.'
+        m.status, resolved_note = 'UNDER_REVIEW', note or 'Application moved to review.'
+    elif action == 'DOCUMENTS_REQUIRED':
+        m.status, resolved_note = 'DOCUMENTS_REQUIRED', note or 'Additional verification documents requested.'
+    elif action == 'PAYMENT_PENDING':
+        m.status, resolved_note = 'PAYMENT_PENDING', note or 'Application verified; awaiting membership fee payment.'
     elif action == 'REJECT':
-        m.status, note = 'REJECTED', 'Membership application rejected.'
+        m.status, resolved_note = 'REJECTED', note or 'Membership application rejected.'
     elif action == 'SUSPEND':
-        m.status, note = 'SUSPENDED', 'Membership suspended by an administrator.'
+        m.status, resolved_note = 'SUSPENDED', note or 'Membership suspended by an administrator.'
     elif action == 'REACTIVATE':
-        m.status, note = 'ACTIVE', 'Membership reactivated.'
+        m.status, resolved_note = 'ACTIVE', note or 'Membership reactivated.'
     else:
         m.status = 'ACTIVE'
         if membership_id and membership_id.strip():
@@ -386,12 +668,19 @@ def review_member(
         elif not m.membership_id:
             m.membership_id = next_membership_id(db)
         m.issue_date, m.validity_date = membership_dates()
-        note = f'Membership approved with ID {m.membership_id}.'
-    m.application_note = note
+        resolved_note = note or f'Membership approved with ID {m.membership_id}.'
+    m.application_note = resolved_note
     audit(db, admin, f'{action}_MEMBER', 'MEMBER', m.id, _actor_ip(request))
-    notify(db, m.user_id, 'সদস্যতা আপডেট', note, 'MEMBERSHIP')
+    notify(db, m.user_id, 'সদস্যতা আপডেট', resolved_note, 'MEMBERSHIP')
     db.commit(); db.refresh(m)
-    return {'ok': True, 'membership_id': m.membership_id, 'status': m.status, 'issue_date': m.issue_date, 'validity_date': m.validity_date}
+    return {
+        'ok': True,
+        'membership_id': m.membership_id,
+        'status': m.status,
+        'application_note': m.application_note,
+        'issue_date': m.issue_date,
+        'validity_date': m.validity_date,
+    }
 
 
 @router.post('/documents/{document_id}/review')
@@ -401,6 +690,11 @@ def review_document(document_id: int, action: str, request: Request, admin: User
     d = db.get(MemberDocument, document_id)
     if not d:
         raise HTTPException(404, 'Document not found')
+    scope = get_admin_circle_scope(admin, db)
+    if scope is not None:
+        m = db.get(Member, d.member_id)
+        if not m or m.circle_id != scope:
+            raise HTTPException(403, 'Circle Administrator cannot review documents outside their assigned Grid Circle')
     d.review_status = action
     audit(db, admin, f'{action}_DOCUMENT', 'MEMBER_DOCUMENT', d.id, _actor_ip(request))
     db.commit()
@@ -432,8 +726,6 @@ def upload_public_asset(request: Request, file: UploadFile = File(...), admin: U
     allowed = {'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'video/mp4'}
     if file.content_type not in allowed:
         raise HTTPException(400, 'Unsupported public asset type')
-    # Read in bounded chunks so an oversized body is rejected as soon as the cap
-    # is exceeded instead of being buffered entirely into memory first.
     chunk_size = 1024 * 1024
     buffer = bytearray()
     while True:
@@ -467,15 +759,38 @@ def admin_circulars(_: User = Depends(require_permission('content.read')), db: S
 
 @router.post('/circulars', response_model=CircularResponse)
 def create_circular(payload: CircularCreate, request: Request, admin: User = Depends(require_permission('content.write')), db: Session = Depends(get_db)):
+    from app.core.rbac import has_permission
+    from app.routers.cms import notify_members_of_publication, record_content_revision
+    if payload.is_published and not has_permission(admin.role, 'content.publish'):
+        raise HTTPException(403, 'Content Editor cannot publish directly without Publisher/Admin approval')
     item = Circular(**payload.model_dump())
     if item.is_published and not item.published_at:
         item.published_at = datetime.utcnow()
-    db.add(item); db.flush(); audit(db, admin, 'CREATE', 'CIRCULAR', item.id, _actor_ip(request)); db.commit(); db.refresh(item)
+    db.add(item); db.flush()
+    record_content_revision(
+        db,
+        entity_type='CIRCULAR',
+        entity_id=item.id,
+        status='PUBLISHED' if item.is_published else 'DRAFT',
+        title_bn=item.title_bn,
+        title_en=item.title_en,
+        content_snapshot={'reference_no': item.reference_no, 'category': item.category, 'summary_bn': item.summary_bn},
+        changed_by=admin.id,
+        published_by=admin.id if item.is_published else None,
+        change_note='Initial circular creation',
+    )
+    if item.is_published:
+        notify_members_of_publication(db, 'CIRCULAR', item.id, item.title_bn, item.summary_bn)
+    audit(db, admin, 'CREATE', 'CIRCULAR', item.id, _actor_ip(request)); db.commit(); db.refresh(item)
     return CircularResponse.model_validate(item)
 
 
 @router.put('/circulars/{circular_id}', response_model=CircularResponse)
 def update_circular(circular_id: int, payload: CircularCreate, request: Request, admin: User = Depends(require_permission('content.write')), db: Session = Depends(get_db)):
+    from app.core.rbac import has_permission
+    from app.routers.cms import record_content_revision
+    if payload.is_published and not has_permission(admin.role, 'content.publish'):
+        raise HTTPException(403, 'Content Editor cannot publish directly without Publisher/Admin approval')
     item = db.get(Circular, circular_id)
     if not item:
         raise HTTPException(404, 'Circular not found')
@@ -483,6 +798,18 @@ def update_circular(circular_id: int, payload: CircularCreate, request: Request,
         setattr(item, k, v)
     if item.is_published and not item.published_at:
         item.published_at = datetime.utcnow()
+    record_content_revision(
+        db,
+        entity_type='CIRCULAR',
+        entity_id=item.id,
+        status='PUBLISHED' if item.is_published else 'DRAFT',
+        title_bn=item.title_bn,
+        title_en=item.title_en,
+        content_snapshot={'reference_no': item.reference_no, 'category': item.category, 'summary_bn': item.summary_bn},
+        changed_by=admin.id,
+        published_by=admin.id if item.is_published else None,
+        change_note='Updated circular',
+    )
     audit(db, admin, 'UPDATE', 'CIRCULAR', item.id, _actor_ip(request)); db.commit(); db.refresh(item)
     return CircularResponse.model_validate(item)
 
@@ -496,14 +823,223 @@ def delete_circular(circular_id: int, request: Request, admin: User = Depends(re
     return {'ok': True}
 
 
+def _build_circle_dashboard_payload(db: Session, circle: Circle) -> dict:
+    now = datetime.utcnow()
+    soon = now + timedelta(days=60)
+    c_members = list(
+        db.scalars(
+            select(Member)
+            .options(selectinload(Member.user))
+            .where(Member.circle_id == circle.id)
+            .order_by(Member.created_at.desc())
+        ).all()
+    )
+    circle_admin = db.scalar(
+        select(User)
+        .join(Member, Member.user_id == User.id)
+        .where(Member.circle_id == circle.id, User.role == 'CIRCLE_ADMIN', User.is_active == True)
+    )
+    member_ids = [m.id for m in c_members]
+    recent_payments = (
+        list(
+            db.scalars(
+                select(PaymentTransaction)
+                .where(PaymentTransaction.member_id.in_(member_ids))
+                .order_by(PaymentTransaction.created_at.desc())
+                .limit(5)
+            ).all()
+        )
+        if member_ids else []
+    )
+    recent_notices = list(
+        db.scalars(select(Notice).where(Notice.is_published == True).order_by(Notice.published_at.desc()).limit(5)).all()
+    )
+    upcoming_events = list(
+        db.scalars(select(Event).where(Event.is_published == True).order_by(Event.event_date.desc()).limit(5)).all()
+    )
+    pending_apps = [
+        m for m in c_members
+        if m.status in ('PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'DOCUMENTS_REQUIRED', 'PAYMENT_PENDING')
+    ]
+
+    return {
+        'circle': {
+            'id': circle.id,
+            'code': f'CIRCLE-{circle.id:02d}',
+            'name_bn': circle.name_bn,
+            'name_en': circle.name_en,
+            'location_bn': circle.name_bn,
+            'location_en': circle.name_en,
+            'description_bn': circle.description_bn,
+            'active': circle.active,
+            'administrator': {
+                'id': circle_admin.id,
+                'name_bn': circle_admin.name_bn,
+                'name_en': circle_admin.name_en,
+                'email': circle_admin.email,
+                'phone': circle_admin.phone,
+            } if circle_admin else None,
+        },
+        'kpis': {
+            'members': len(c_members),
+            'active': sum(1 for m in c_members if m.status == 'ACTIVE'),
+            'pending': len(pending_apps),
+            'expiring': sum(1 for m in c_members if m.status == 'ACTIVE' and m.validity_date and now <= m.validity_date <= soon),
+        },
+        'recent_applications': [
+            {
+                'id': m.id,
+                'application_no': m.application_no,
+                'membership_id': m.membership_id,
+                'name_bn': m.user.name_bn if m.user else '—',
+                'name_en': m.user.name_en if m.user else None,
+                'designation_bn': m.designation_bn,
+                'status': m.status,
+                'created_at': m.created_at,
+            }
+            for m in pending_apps[:8]
+        ],
+        'recent_notices': [
+            {'id': n.id, 'title_bn': n.title_bn, 'category': n.category, 'published_at': n.published_at}
+            for n in recent_notices
+        ],
+        'upcoming_events': [
+            {'id': e.id, 'title_bn': e.title_bn, 'event_date': e.event_date, 'location_bn': e.location_bn}
+            for e in upcoming_events
+        ],
+        'recent_payments': [
+            {
+                'id': p.id,
+                'member_id': p.member_id,
+                'purpose': p.purpose,
+                'amount': p.amount,
+                'amount_formatted': f'৳{int(p.amount):,}',
+                'status': p.status,
+                'receipt_no': p.receipt_no,
+                'created_at': p.created_at,
+            }
+            for p in recent_payments
+        ],
+    }
+
+
 # ---- Circles / committees ----
 @router.get('/circles')
-def admin_circles(_: User = Depends(require_permission('circle.read')), db: Session = Depends(get_db)):
-    return db.scalars(select(Circle).order_by(Circle.name_bn)).all()
+def admin_circles(admin: User = Depends(require_permission('circle.read')), db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    soon = now + timedelta(days=60)
+    scope = get_admin_circle_scope(admin, db)
+    stmt = select(Circle).order_by(Circle.id.asc())
+    if scope is not None:
+        stmt = stmt.where(Circle.id == scope)
+    circles = list(db.scalars(stmt).all())
+    all_members = list(db.scalars(select(Member)).all())
+    circle_admins = list(
+        db.execute(
+            select(Member.circle_id, User)
+            .join(User, Member.user_id == User.id)
+            .where(User.role == 'CIRCLE_ADMIN', User.is_active == True)
+        ).all()
+    )
+    admin_by_circle = {cid: u for cid, u in circle_admins if cid}
+
+    result = []
+    for c in circles:
+        c_members = [m for m in all_members if m.circle_id == c.id]
+        ca = admin_by_circle.get(c.id)
+        result.append({
+            'id': c.id,
+            'code': f'CIRCLE-{c.id:02d}',
+            'name_bn': c.name_bn,
+            'name_en': c.name_en,
+            'location_bn': c.name_bn,
+            'location_en': c.name_en,
+            'description_bn': c.description_bn,
+            'active': c.active,
+            'members_count': len(c_members),
+            'active_members': sum(1 for m in c_members if m.status == 'ACTIVE'),
+            'pending_members': sum(1 for m in c_members if m.status in ('PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'DOCUMENTS_REQUIRED', 'PAYMENT_PENDING')),
+            'expiring_members': sum(1 for m in c_members if m.status == 'ACTIVE' and m.validity_date and now <= m.validity_date <= soon),
+            'administrator': {
+                'id': ca.id,
+                'name_bn': ca.name_bn,
+                'name_en': ca.name_en,
+                'email': ca.email,
+                'phone': ca.phone,
+            } if ca else None,
+        })
+    return result
+
+
+@router.get('/circle-dashboard')
+def get_my_circle_dashboard(
+    circle_id: int | None = None,
+    admin: User = Depends(require_permission('circle.read')),
+    db: Session = Depends(get_db),
+):
+    scope = get_admin_circle_scope(admin, db)
+    target_id = scope if scope is not None else circle_id
+    if scope is not None and circle_id is not None and circle_id != scope:
+        raise HTTPException(403, 'Circle Administrator can only access their assigned Grid Circle dashboard')
+    if not target_id or target_id < 1:
+        first_circle = db.scalar(select(Circle).where(Circle.active == True).order_by(Circle.id.asc()))
+        if not first_circle:
+            raise HTTPException(404, 'No active Grid Circle found')
+        target_id = first_circle.id
+    circle = db.get(Circle, target_id)
+    if not circle:
+        raise HTTPException(404, 'Circle not found')
+    return _build_circle_dashboard_payload(db, circle)
+
+
+@router.get('/circles/{circle_id}/dashboard')
+def get_circle_dashboard_by_id(
+    circle_id: int,
+    admin: User = Depends(require_permission('circle.read')),
+    db: Session = Depends(get_db),
+):
+    scope = get_admin_circle_scope(admin, db)
+    if scope is not None and circle_id != scope:
+        raise HTTPException(403, 'Circle Administrator can only access their assigned Grid Circle dashboard')
+    circle = db.get(Circle, circle_id)
+    if not circle:
+        raise HTTPException(404, 'Circle not found')
+    return _build_circle_dashboard_payload(db, circle)
+
+
+@router.post('/circles/{circle_id}/assign-admin')
+def assign_circle_administrator(
+    circle_id: int,
+    payload: dict,
+    request: Request,
+    admin: User = Depends(require_permission('user.write')),
+    db: Session = Depends(get_db),
+):
+    circle = db.get(Circle, circle_id)
+    if not circle:
+        raise HTTPException(404, 'Circle not found')
+    user_id = payload.get('user_id')
+    if not user_id:
+        raise HTTPException(400, 'user_id is required')
+    user = db.get(User, int(user_id))
+    if not user:
+        raise HTTPException(404, 'User not found')
+    user.role = 'CIRCLE_ADMIN'
+    m = db.scalar(select(Member).where(Member.user_id == user.id))
+    if not m:
+        m = Member(user_id=user.id, circle_id=circle.id, status='ACTIVE')
+        db.add(m)
+    else:
+        m.circle_id = circle.id
+    audit(db, admin, 'ASSIGN_CIRCLE_ADMIN', 'CIRCLE', circle.id, _actor_ip(request))
+    db.commit()
+    return {'ok': True, 'circle_id': circle.id, 'user_id': user.id, 'role': user.role}
 
 
 @router.post('/circles')
 def create_circle(payload: CircleCreate, request: Request, admin: User = Depends(require_permission('circle.write')), db: Session = Depends(get_db)):
+    if get_admin_circle_scope(admin, db) is not None:
+        raise HTTPException(403, 'Circle Administrator cannot create new global Grid Circles')
     if db.scalar(select(Circle).where(Circle.name_bn == payload.name_bn)):
         raise HTTPException(409, 'Circle already exists')
     item = Circle(**payload.model_dump()); db.add(item); db.flush(); audit(db, admin, 'CREATE', 'CIRCLE', item.id, _actor_ip(request)); db.commit(); db.refresh(item)
@@ -512,6 +1048,9 @@ def create_circle(payload: CircleCreate, request: Request, admin: User = Depends
 
 @router.put('/circles/{circle_id}')
 def update_circle(circle_id: int, payload: CircleCreate, request: Request, admin: User = Depends(require_permission('circle.write')), db: Session = Depends(get_db)):
+    scope = get_admin_circle_scope(admin, db)
+    if scope is not None and circle_id != scope:
+        raise HTTPException(403, 'Circle Administrator can only modify their assigned Grid Circle')
     item = db.get(Circle, circle_id)
     if not item:
         raise HTTPException(404, 'Circle not found')
@@ -523,12 +1062,15 @@ def update_circle(circle_id: int, payload: CircleCreate, request: Request, admin
 
 @router.delete('/circles/{circle_id}')
 def delete_circle(circle_id: int, request: Request, admin: User = Depends(require_permission('circle.write')), db: Session = Depends(get_db)):
+    if get_admin_circle_scope(admin, db) is not None:
+        raise HTTPException(403, 'Circle Administrator cannot archive global Grid Circles')
     item = db.get(Circle, circle_id)
     if not item:
         raise HTTPException(404, 'Circle not found')
     item.active = False
     audit(db, admin, 'ARCHIVE', 'CIRCLE', item.id, _actor_ip(request)); db.commit()
     return {'ok': True}
+
 
 
 @router.get('/committee')
@@ -602,24 +1144,79 @@ _crud_router(
 )
 
 
-# ---- Contact inbox ----
+# ---- Contact & Inquiry Service Desk ----
+def _ensure_inquiry_meta(db: Session, msg: ContactMessage) -> ContactInquiryMeta:
+    meta = db.scalar(select(ContactInquiryMeta).where(ContactInquiryMeta.message_id == msg.id))
+    if not meta:
+        year = (msg.created_at or datetime.utcnow()).year
+        ticket_no = f'PGCB-REQ-{year}-{msg.id:06d}'
+        meta = ContactInquiryMeta(
+            message_id=msg.id,
+            ticket_no=ticket_no,
+            status=msg.status or 'NEW',
+        )
+        db.add(meta)
+        db.commit()
+        db.refresh(meta)
+    return meta
+
+
 @router.get('/messages')
-def messages(_: User = Depends(require_permission('content.read')), db: Session = Depends(get_db)):
+def messages(
+    status: str | None = None,
+    _: User = Depends(require_permission('content.read')),
+    db: Session = Depends(get_db),
+):
     rows = db.scalars(select(ContactMessage).order_by(ContactMessage.created_at.desc()).limit(200)).all()
-    return [
-        {'id': x.id, 'name': x.name, 'email': x.email, 'phone': x.phone,
-         'subject': x.subject, 'message': x.message, 'status': x.status, 'created_at': x.created_at}
-        for x in rows
-    ]
+    items = []
+    for x in rows:
+        meta = _ensure_inquiry_meta(db, x)
+        resolved_status = meta.status or x.status
+        if status and resolved_status != status.upper():
+            continue
+        items.append({
+            'id': x.id,
+            'ticket_no': meta.ticket_no,
+            'name': x.name,
+            'email': x.email,
+            'phone': x.phone,
+            'subject': x.subject,
+            'message': x.message,
+            'status': resolved_status,
+            'assigned_to': meta.assigned_to,
+            'response_text': meta.response_text,
+            'responded_by': meta.responded_by,
+            'responded_at': meta.responded_at,
+            'created_at': x.created_at,
+        })
+    return items
 
 
 @router.patch('/messages/{message_id}')
 def update_message(message_id: int, payload: MessageStatusUpdate, request: Request, admin: User = Depends(require_permission('content.write')), db: Session = Depends(get_db)):
     item = db.get(ContactMessage, message_id)
-    if not item: raise HTTPException(404, 'Message not found')
+    if not item:
+        raise HTTPException(404, 'Message not found')
+    meta = _ensure_inquiry_meta(db, item)
     item.status = payload.status
-    audit(db, admin, 'UPDATE_STATUS', 'CONTACT_MESSAGE', item.id, _actor_ip(request)); db.commit()
-    return {'ok': True, 'status': item.status}
+    meta.status = payload.status
+    if payload.assigned_to is not None:
+        meta.assigned_to = payload.assigned_to
+    if payload.response_text is not None:
+        meta.response_text = payload.response_text
+        meta.responded_by = admin.id
+        meta.responded_at = datetime.utcnow()
+    audit(db, admin, 'UPDATE_STATUS', 'CONTACT_MESSAGE', item.id, _actor_ip(request))
+    db.commit()
+    return {
+        'ok': True,
+        'id': item.id,
+        'ticket_no': meta.ticket_no,
+        'status': meta.status,
+        'assigned_to': meta.assigned_to,
+        'response_text': meta.response_text,
+        'responded_at': meta.responded_at,
+    }
 
 
 # ---- Users ----
@@ -634,7 +1231,7 @@ def admin_users(
     db: Session = Depends(get_db),
 ):
     limit = max(1, min(limit, 100))
-    stmt = select(User)
+    stmt = select(User).options(selectinload(User.member))
     count_stmt = select(func.count(User.id))
     if role:
         stmt = stmt.where(User.role == role)
@@ -648,8 +1245,11 @@ def admin_users(
     response.headers['X-Total-Count'] = str(total)
     rows = db.scalars(stmt.order_by(User.created_at.desc()).limit(limit).offset(max(offset, 0))).all()
     return [
-        {'id': u.id, 'email': u.email, 'name_bn': u.name_bn, 'phone': u.phone,
-         'role': u.role, 'is_active': u.is_active, 'created_at': u.created_at}
+        {
+            'id': u.id, 'email': u.email, 'name_bn': u.name_bn, 'name_en': u.name_en, 'phone': u.phone,
+            'role': u.role, 'circle_id': u.member.circle_id if u.member else None,
+            'is_active': u.is_active, 'created_at': u.created_at,
+        }
         for u in rows
     ]
 
@@ -664,10 +1264,10 @@ def create_user(payload: AdminUserCreate, request: Request, admin: User = Depend
     user = User(email=email, password_hash=hash_password(payload.password), name_bn=payload.name_bn,
                 name_en=payload.name_en, phone=payload.phone, role=payload.role, is_active=payload.is_active)
     db.add(user); db.flush()
-    if payload.role == 'MEMBER':
-        db.add(Member(user_id=user.id))
+    if payload.role in ('MEMBER', 'CIRCLE_ADMIN') or payload.circle_id is not None:
+        db.add(Member(user_id=user.id, circle_id=payload.circle_id))
     audit(db, admin, 'CREATE', 'USER', user.id, _actor_ip(request)); db.commit(); db.refresh(user)
-    return {'id': user.id, 'email': user.email, 'role': user.role}
+    return {'id': user.id, 'email': user.email, 'role': user.role, 'circle_id': payload.circle_id}
 
 
 @router.patch('/users/{user_id}')
@@ -682,8 +1282,15 @@ def update_user(user_id: int, payload: AdminUserUpdate, request: Request, admin:
     for field in ('name_bn', 'name_en', 'phone', 'is_active'):
         value = getattr(payload, field)
         if value is not None: setattr(user, field, value)
+    if payload.circle_id is not None:
+        m = db.scalar(select(Member).where(Member.user_id == user.id))
+        if not m:
+            db.add(Member(user_id=user.id, circle_id=payload.circle_id))
+        else:
+            m.circle_id = payload.circle_id
     audit(db, admin, 'UPDATE', 'USER', user.id, _actor_ip(request)); db.commit(); db.refresh(user)
-    return {'id': user.id, 'email': user.email, 'role': user.role, 'is_active': user.is_active}
+    return {'id': user.id, 'email': user.email, 'role': user.role, 'circle_id': payload.circle_id, 'is_active': user.is_active}
+
 
 
 # ---- Administrator MFA ----
@@ -905,9 +1512,42 @@ def upsert_setting(payload: SiteSettingUpdate, request: Request, admin: User = D
 
 @router.get('/audit')
 @router.get('/audit-logs')
-def audit_logs(limit: int = 100, _: User = Depends(require_permission('audit.read')), db: Session = Depends(get_db)):
-    rows = db.scalars(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(min(max(limit, 1), 300))).all()
-    return [{'id': x.id, 'user_id': x.user_id, 'action': x.action, 'entity': x.entity, 'entity_id': x.entity_id, 'ip_address': x.ip_address, 'created_at': x.created_at} for x in rows]
+def audit_logs(
+    limit: int = 100,
+    action: str | None = None,
+    entity: str | None = None,
+    _: User = Depends(require_permission('audit.read')),
+    db: Session = Depends(get_db),
+):
+    stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
+    if action:
+        stmt = stmt.where(AuditLog.action == action.upper())
+    if entity:
+        stmt = stmt.where(AuditLog.entity == entity.upper())
+    rows = db.scalars(stmt.limit(min(max(limit, 1), 300))).all()
+    uids = {x.user_id for x in rows if x.user_id}
+    user_map = (
+        {u.id: u for u in db.scalars(select(User).where(User.id.in_(uids))).all()}
+        if uids else {}
+    )
+    return [
+        {
+            'id': x.id,
+            'user_id': x.user_id,
+            'user_name': user_map[x.user_id].name_bn if x.user_id in user_map else 'System',
+            'user_email': user_map[x.user_id].email if x.user_id in user_map else None,
+            'role': user_map[x.user_id].role if x.user_id in user_map else 'SYSTEM',
+            'action': x.action,
+            'entity': x.entity,
+            'entity_id': x.entity_id,
+            'ip_address': x.ip_address,
+            'result': 'FAILED' if 'FAIL' in (x.action or '') else 'SUCCESS',
+            'timestamp': x.created_at,
+            'created_at': x.created_at,
+        }
+        for x in rows
+    ]
+
 
 
 # ---- Member CSV Import (Batch Processing & Import Wizard) ----

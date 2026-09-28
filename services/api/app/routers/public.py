@@ -179,13 +179,28 @@ def public_asset(filename: str):
 
 @router.get('/circulars/{circular_id}')
 def circular_detail(circular_id: int, db: Session = Depends(get_db)):
+    import json
     item = db.get(Circular, circular_id)
     if not item or not item.is_published:
         raise HTTPException(404, 'Circular not found')
+    meta_row = db.scalar(select(SiteSetting).where(SiteSetting.key == f'circular_meta:{circular_id}'))
+    meta = {
+        'issuing_authority': 'কেন্দ্রীয় কার্যনির্বাহী পরিষদ, পিজিসিবি',
+        'effective_date': item.published_at.strftime('%Y-%m-%d') if item.published_at else None,
+        'target_audience': 'ALL_MEMBERS',
+        'related_circular_id': None,
+        'superseded_circular_id': None,
+    }
+    if meta_row and meta_row.value:
+        try:
+            meta.update(json.loads(meta_row.value))
+        except Exception:
+            pass
     return {
         'id': item.id, 'category': item.category, 'reference_no': item.reference_no,
         'title_bn': item.title_bn, 'title_en': item.title_en, 'summary_bn': item.summary_bn,
         'document_url': item.document_url, 'published_at': item.published_at, 'priority': item.priority,
+        **meta,
     }
 
 @router.get('/journals/{journal_id}')
@@ -369,6 +384,7 @@ def _compute_relevance(query_norm: str, tokens: list[str], title: str | None, su
 
 @router.get('/search/suggestions')
 def search_suggestions(q: str = Query(..., min_length=1, max_length=100), db: Session = Depends(get_db)):
+    from app.models.core import News
     norm = _normalize_bangla(q)
     like = f'%{norm}%'
     suggestions: list[str] = []
@@ -376,6 +392,9 @@ def search_suggestions(q: str = Query(..., min_length=1, max_length=100), db: Se
         if title and title not in suggestions:
             suggestions.append(title)
     for title in db.scalars(select(Circular.title_bn).where(Circular.is_published == True, Circular.title_bn.like(like)).limit(4)).all():
+        if title and title not in suggestions:
+            suggestions.append(title)
+    for title in db.scalars(select(News.title_bn).where(News.is_published == True, News.title_bn.like(like)).limit(3)).all():
         if title and title not in suggestions:
             suggestions.append(title)
     for title in db.scalars(select(Event.title_bn).where(Event.is_published == True, Event.title_bn.like(like)).limit(3)).all():
@@ -390,15 +409,16 @@ def search_suggestions(q: str = Query(..., min_length=1, max_length=100), db: Se
 @router.get('/search')
 def site_search(
     q: str = Query(..., min_length=2, max_length=100),
-    type: str | None = Query(default=None, description='Filter by entity type: MEMBER, CIRCULAR, NOTICE, EVENT, DOCUMENT, JOURNAL, COMMITTEE, CIRCLE, CERTIFICATE'),
+    type: str | None = Query(default=None, description='Filter by entity type: MEMBER, CIRCULAR, NOTICE, NEWS, EVENT, DOCUMENT, JOURNAL, COMMITTEE, CIRCLE, CERTIFICATE'),
     category: str | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
     limit: int = Query(30, ge=1, le=60),
     db: Session = Depends(get_db),
 ):
-    """Unified search across 9 institutional content domains with Bangla normalization, typo tolerance, filters, and relevance ranking."""
+    """Unified search across institutional content domains with Bangla normalization, typo tolerance, filters, and relevance ranking."""
     from app.models import Certificate
+    from app.models.core import News
 
     query_norm = _normalize_bangla(q)
     tokens = [t for t in query_norm.split() if len(t) >= 2] or [query_norm]
@@ -425,6 +445,14 @@ def site_search(
             stmt = stmt.where(Notice.category == category.upper())
         for x in db.scalars(stmt.order_by(Notice.is_pinned.desc(), Notice.published_at.desc()).limit(per_type)).all():
             results.append({'type': 'NOTICE', 'id': x.id, 'category': x.category, 'title_bn': x.title_bn, 'summary_bn': x.content_bn[:150] if x.content_bn else '', 'date': x.published_at, 'href': f'/notices/{x.id}'})
+
+    # 1b. News
+    if _type_wanted('NEWS'):
+        stmt = select(News).where(News.is_published == True, _token_or(News.title_bn, News.title_en, News.summary_bn, News.content_bn, News.tags))
+        if category:
+            stmt = stmt.where(News.category == category.upper())
+        for x in db.scalars(stmt.order_by(News.is_featured.desc(), News.published_at.desc()).limit(per_type)).all():
+            results.append({'type': 'NEWS', 'id': x.id, 'category': x.category, 'title_bn': x.title_bn, 'summary_bn': x.summary_bn or (x.content_bn[:150] if x.content_bn else ''), 'date': x.published_at, 'href': f'/news/{x.slug}'})
 
     # 2. Documents
     if _type_wanted('DOCUMENT'):
@@ -542,9 +570,15 @@ def public_stats(db: Session = Depends(get_db)):
 
 @router.post('/contact')
 def contact(payload: ContactCreate, db: Session = Depends(get_db)):
+    from app.models import ContactInquiryMeta
     item = ContactMessage(name=payload.name, email=payload.email.lower(), phone=payload.phone, subject=payload.subject, message=payload.message)
-    db.add(item); db.commit(); db.refresh(item)
-    return {'ok': True, 'message_id': item.id}
+    db.add(item); db.flush()
+    year = datetime.utcnow().year
+    ticket_no = f'PGCB-REQ-{year}-{item.id:06d}'
+    meta = ContactInquiryMeta(message_id=item.id, ticket_no=ticket_no, status='NEW')
+    db.add(meta)
+    db.commit(); db.refresh(item)
+    return {'ok': True, 'message_id': item.id, 'ticket_no': ticket_no, 'status': 'NEW'}
 
 
 class PublicMembershipApplyRequest(BaseModel):
