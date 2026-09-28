@@ -377,13 +377,13 @@ def test_p0_golden_e2e_and_security_sprint():
     # 6. ADMIN REVIEW & 7. PAYMENT + 8. PAYMENT VERIFICATION (P0.3)
     # P0.3a: Browser tampering with payment amount must be rejected by the server
     tampered_pay = client.post(
-        '/api/v1/payments',
+        '/api/v1/member/payments',
         headers=applicant_headers,
         json={
-            'purpose': 'MEMBERSHIP_FEE',
-            'membership_plan_id': 'ANNUAL',
+            'purpose': 'MEMBERSHIP',
+            'membership_plan_id': 'ANNUAL_STANDARD',
             'amount': 15,  # Tampered low amount
-            'method': 'BKASH',
+            'provider': 'BKASH',
         },
     )
     assert tampered_pay.status_code == 400
