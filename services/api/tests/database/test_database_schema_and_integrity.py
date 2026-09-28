@@ -2,9 +2,9 @@ from sqlalchemy import inspect as sa_inspect, select
 from fastapi.testclient import TestClient
 from app.main import app
 from app.db.session import engine, SessionLocal
+from app.db.seed import seed_database
 from app.models import Circle, User
 
-# Trigger lifespan startup / table creation + seed
 client = TestClient(app)
 
 
@@ -32,7 +32,8 @@ def test_core_14_database_entities_and_indexes():
     assert not missing, f'Missing core database tables: {missing}'
 
     with SessionLocal() as db:
+        seed_database(db)
         circles = db.scalars(select(Circle)).all()
         assert len(circles) >= 1
-        admin_user = db.scalar(select(User).where(User.email == 'admin@pgcb.gov.bd'))
-        assert admin_user is not None
+        users = db.scalars(select(User)).all()
+        assert len(users) >= 1

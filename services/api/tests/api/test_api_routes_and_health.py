@@ -23,14 +23,14 @@ def test_health_and_ready_endpoints():
 
 def test_public_cms_and_directory_endpoints():
     for path in (
-        '/api/v1/public/home',
-        '/api/v1/public/notices',
+        '/api/v1/public/settings',
+        '/api/v1/public/members',
         '/api/v1/public/circulars',
         '/api/v1/public/events',
-        '/api/v1/public/documents',
         '/api/v1/public/committee',
         '/api/v1/public/circles',
-        '/api/v1/public/directory',
+        '/api/v1/notices',
+        '/api/v1/documents',
     ):
         res = client.get(path)
         assert res.status_code == 200, f'Failed endpoint {path}: {res.text}'
