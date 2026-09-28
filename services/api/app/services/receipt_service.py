@@ -206,6 +206,42 @@ def activate_membership_from_payment(
         f"Membership active until {val_str}. Verified payment {payment.transaction_ref or payment.id} "
         f"(Receipt: {payment.receipt_no})."
     )
+    from app.models import Membership, MembershipApplication, Payment as CanonicalPayment
+    app_row = db.scalar(select(MembershipApplication).where(MembershipApplication.member_id == member.id))
+    if app_row:
+        app_row.status = "ACTIVE"
+    if member.membership_id:
+        mem_rec = db.scalar(select(Membership).where(Membership.membership_id == member.membership_id))
+        if not mem_rec:
+            db.add(
+                Membership(
+                    member_id=member.id,
+                    membership_id=member.membership_id,
+                    membership_type=member.membership_type or "GENERAL",
+                    status="ACTIVE",
+                    issue_date=member.issue_date or datetime.utcnow(),
+                    validity_date=member.validity_date,
+                )
+            )
+        else:
+            mem_rec.status = "ACTIVE"
+            mem_rec.validity_date = member.validity_date
+    tx_ref = payment.transaction_ref or payment.provider_transaction_id or f"PGCB-TX-{payment.id}"
+    if not db.scalar(select(CanonicalPayment).where(CanonicalPayment.transaction_id == tx_ref)):
+        db.add(
+            CanonicalPayment(
+                user_id=payment.user_id,
+                member_id=member.id,
+                transaction_id=tx_ref,
+                receipt_no=payment.receipt_no,
+                provider=payment.provider or "BKASH",
+                purpose=payment.purpose or "MEMBERSHIP",
+                amount=int(payment.amount),
+                currency=payment.currency or "BDT",
+                status="PAID",
+                paid_at=datetime.utcnow(),
+            )
+        )
     db.flush()
 
     # Automatically issue Membership Certificate if not yet issued for this member
