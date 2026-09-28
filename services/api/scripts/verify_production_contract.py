@@ -39,7 +39,11 @@ def check_contract(mode: str) -> bool:
     db_url = os.getenv("DATABASE_URL", "")
     redis_url = os.getenv("REDIS_URL", "")
     storage_backend = os.getenv("STORAGE_BACKEND", "persistent_disk" if is_prod_like else "local").lower()
-    storage_root = os.getenv("STORAGE_ROOT", "/var/data/uploads" if is_prod_like else "./storage")
+    storage_root = (
+        os.getenv("UPLOAD_DIRECTORY")
+        or os.getenv("UPLOAD_DIR")
+        or os.getenv("STORAGE_ROOT", "/home/pgcbuser/storage/uploads" if is_prod_like else "./storage")
+    )
     jwt_secret = os.getenv("JWT_SECRET", "")
     mfa_key = os.getenv("MFA_ENCRYPTION_KEY", "")
     frontend_url = os.getenv("FRONTEND_URL", "")
@@ -132,7 +136,7 @@ def check_contract(mode: str) -> bool:
 
     # 6. Frontend URL (CORS / Redirects)
     if not frontend_url and is_prod_like:
-        warnings.append("FRONTEND_URL is not set. Configure FRONTEND_URL via Render service reference.")
+        warnings.append("FRONTEND_URL is not set. Configure FRONTEND_URL in HostSeba environment settings.")
         print("[-] FRONTEND_URL       : [NOT SET]")
     else:
         print(f"[+] FRONTEND_URL       : {frontend_url or 'http://localhost:3000'}")
