@@ -11,9 +11,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.audit import write_audit_log
-from app.core.deps import current_user, get_current_user
-from app.core.rbac import has_permission, is_circle_scoped_admin, normalize_role, require_permission
+from app.core.deps import current_user
+from app.core.rbac import canonical_role, get_admin_circle_scope, has_permission, require_permission
 from app.db.session import get_db
 from app.models import (
     AIQueryLog,
@@ -24,10 +23,10 @@ from app.models import (
     KnowledgeFAQ,
     Member,
     MembershipApplication,
-    MembershipRenewal,
     PaymentTransaction,
     User,
 )
+from app.services import audit
 from app.services.knowledge_service import (
     can_user_access_document,
     ensure_default_knowledge_seeded,
@@ -62,7 +61,6 @@ def _detect_prompt_injection(question: str) -> bool:
 
 
 def _sanitize_pii(text: str) -> str:
-    # Mask accidental 10/13/17 digit NID numbers or raw hashes if any appear in text
     return re.sub(r'\b\d{13,17}\b', '[REDACTED-NID]', text)
 
 
@@ -160,7 +158,7 @@ def _serialize_knowledge_doc(doc: KnowledgeDocument) -> dict[str, Any]:
 @router.post('/admin/knowledge/documents')
 def create_knowledge_document(
     payload: KnowledgeDocCreateRequest,
-    user: User = Depends(require_permission('cms.write')),
+    user: User = Depends(require_permission('content.write')),
     db: Session = Depends(get_db),
 ):
     pub_dt = None
@@ -196,14 +194,7 @@ def create_knowledge_document(
         effective_date=eff_dt,
         created_by=user.id,
     )
-    write_audit_log(
-        db,
-        actor_user_id=user.id,
-        action='knowledge.document.ingest',
-        entity_type='KnowledgeDocument',
-        entity_id=str(doc.id),
-        metadata={'title': doc.title_en or doc.title_bn, 'version': doc.version, 'access_level': doc.access_level},
-    )
+    audit(db, user, 'knowledge.document.ingest', 'KnowledgeDocument', doc.id)
     db.commit()
     return _serialize_knowledge_doc(doc)
 
@@ -218,7 +209,7 @@ async def ingest_knowledge_file(
     access_level: str = Form('PUBLIC'),
     circle_id: int | None = Form(None),
     supersedes_id: int | None = Form(None),
-    user: User = Depends(require_permission('cms.write')),
+    user: User = Depends(require_permission('content.write')),
     db: Session = Depends(get_db),
 ):
     raw_bytes = await file.read()
@@ -239,14 +230,7 @@ async def ingest_knowledge_file(
         supersedes_id=supersedes_id,
         created_by=user.id,
     )
-    write_audit_log(
-        db,
-        actor_user_id=user.id,
-        action='knowledge.file.ingest',
-        entity_type='KnowledgeDocument',
-        entity_id=str(doc.id),
-        metadata={'filename': fname, 'chunks': doc.chunk_count},
-    )
+    audit(db, user, 'knowledge.file.ingest', 'KnowledgeDocument', doc.id)
     db.commit()
     return _serialize_knowledge_doc(doc)
 
@@ -255,7 +239,7 @@ async def ingest_knowledge_file(
 def list_knowledge_documents(
     category: str | None = None,
     include_historical: bool = True,
-    user: User = Depends(require_permission('cms.read')),
+    user: User = Depends(require_permission('content.read')),
     db: Session = Depends(get_db),
 ):
     ensure_default_knowledge_seeded(db)
@@ -265,14 +249,14 @@ def list_knowledge_documents(
     if not include_historical:
         stmt = stmt.where(KnowledgeDocument.is_current == True)
     docs = db.scalars(stmt).all()
-    return [_serialize_knowledge_doc(d) for d in docs if can_user_access_document(user, d)]
+    return [_serialize_knowledge_doc(d) for d in docs if can_user_access_document(user, d, db=db)]
 
 
 @router.post('/admin/knowledge/documents/{doc_id}/supersede')
 def supersede_knowledge_document(
     doc_id: int,
     payload: SupersedeDocRequest,
-    user: User = Depends(require_permission('cms.write')),
+    user: User = Depends(require_permission('content.write')),
     db: Session = Depends(get_db),
 ):
     old_doc = db.get(KnowledgeDocument, doc_id)
@@ -286,14 +270,7 @@ def supersede_knowledge_document(
     new_doc.supersedes_id = old_doc.id
     new_doc.is_current = True
     new_doc.approval_status = 'PUBLISHED'
-    write_audit_log(
-        db,
-        actor_user_id=user.id,
-        action='knowledge.document.supersede',
-        entity_type='KnowledgeDocument',
-        entity_id=str(old_doc.id),
-        metadata={'superseded_by_id': new_doc.id},
-    )
+    audit(db, user, 'knowledge.document.supersede', 'KnowledgeDocument', old_doc.id)
     db.commit()
     return {
         'ok': True,
@@ -314,7 +291,7 @@ async def get_knowledge_document_source(
         raise HTTPException(status_code=404, detail='Knowledge document not found')
 
     user = await _optional_user(request, db)
-    if not can_user_access_document(user, doc):
+    if not can_user_access_document(user, doc, db=db):
         if user is None:
             raise HTTPException(status_code=401, detail='Authentication required to view this document source')
         raise HTTPException(status_code=403, detail='Insufficient permissions to view this document source')
@@ -372,11 +349,8 @@ async def semantic_document_search(
 
 def _execute_member_tools(db: Session, user: User, q_lower: str) -> tuple[list[dict[str, Any]], str | None, str | None]:
     tools_used: list[dict[str, Any]] = []
-    member = db.get(Member, user.member_id) if user.member_id else None
-    if not member:
-        member = db.scalar(select(Member).where(Member.email == user.email))
+    member = db.scalar(select(Member).where(Member.user_id == user.id))
 
-    # 1. Personal membership status / expiry / ID
     if any(k in q_lower for k in ('my membership', 'my status', 'my id', 'আমার সদস্যপদ', 'আমার স্ট্যাটাস', 'মেয়াদ')):
         circle_name = 'Unassigned'
         if member and member.circle_id:
@@ -384,7 +358,7 @@ def _execute_member_tools(db: Session, user: User, q_lower: str) -> tuple[list[d
             if circle:
                 circle_name = circle.name_en or circle.name_bn
         status_val = member.status if member else 'PENDING'
-        mid_val = (member.membership_number or member.membership_id) if member else 'Not Assigned'
+        mid_val = member.membership_id if member else 'Not Assigned'
         exp_val = member.validity_date.strftime('%d %b %Y') if (member and member.validity_date) else 'Lifetime / N/A'
         tools_used.append(
             {
@@ -402,7 +376,6 @@ def _execute_member_tools(db: Session, user: User, q_lower: str) -> tuple[list[d
         ans_bn = f'আপনার ব্যক্তিগত সদস্যপদ স্ট্যাটাস হলো {status_val} (সদস্য আইডি: {mid_val}, গ্রিড সার্কেল: {circle_name}, মেয়াদ: {exp_val})।'
         return tools_used, ans_en, ans_bn
 
-    # 2. Personal payment history
     if any(k in q_lower for k in ('my payment', 'my receipt', 'paid', 'আমার পেমেন্ট', 'আমার রসিদ')):
         txs = []
         if member:
@@ -431,7 +404,6 @@ def _execute_member_tools(db: Session, user: User, q_lower: str) -> tuple[list[d
         ans_bn = f'আপনার মোট {len(paid_txs)} টি যাচাইকৃত পেমেন্ট রয়েছে যার সর্বমোট পরিমাণ ৳{total_paid:,} টাকা (সর্বশেষ রেফারেন্স: {latest_ref})।'
         return tools_used, ans_en, ans_bn
 
-    # 3. Personal certificates
     if any(k in q_lower for k in ('my certificate', 'আমার সনদ')):
         certs = []
         if member:
@@ -450,7 +422,6 @@ def _execute_member_tools(db: Session, user: User, q_lower: str) -> tuple[list[d
         ans_bn = f'আপনার সনদ ওয়ালেটে বর্তমানে {len(certs)} টি অফিসিয়াল সনদ রয়েছে।'
         return tools_used, ans_en, ans_bn
 
-    # 4. Personal application status
     if any(k in q_lower for k in ('my application', 'application status', 'আমার আবেদন')):
         app_row = None
         if member:
@@ -481,10 +452,10 @@ def _execute_admin_tools(
     requested_circle_id: int | None = None,
 ) -> tuple[list[dict[str, Any]], str | None, str | None]:
     tools_used: list[dict[str, Any]] = []
-    role = normalize_role(user.role)
-    is_circle_admin = is_circle_scoped_admin(role)
+    role = canonical_role(user.role)
+    is_circle_admin = role == 'CIRCLE_ADMIN'
+    scoped_circle_id = get_admin_circle_scope(user, db) if is_circle_admin else None
 
-    # Detect if query mentions a specific circle by name or code (e.g. "Dhaka", "Chattogram", "Circle 01", "Circle 02")
     all_circles = db.scalars(select(Circle).order_by(Circle.id.asc())).all()
     target_circle: Circle | None = None
     if requested_circle_id is not None:
@@ -502,17 +473,15 @@ def _execute_admin_tools(
                 target_circle = c
                 break
 
-    # Enforce strict Circle-Level Data Isolation for CIRCLE_ADMIN
     if is_circle_admin:
-        if target_circle and user.circle_id is not None and int(target_circle.id) != int(user.circle_id):
+        if target_circle and scoped_circle_id is not None and int(target_circle.id) != int(scoped_circle_id):
             raise HTTPException(
                 status_code=403,
                 detail='Circle Admin is only authorized to query data for their own assigned Grid Circle.',
             )
-        if target_circle is None and user.circle_id is not None:
-            target_circle = db.get(Circle, user.circle_id)
+        if target_circle is None and scoped_circle_id is not None and scoped_circle_id != -1:
+            target_circle = db.get(Circle, scoped_circle_id)
 
-    # Tool 1: "Which Circles have the highest number of pending applications?"
     if any(k in q_lower for k in ('which circle', 'highest', 'ranking', 'compare circle', 'কোন সার্কেলে')):
         if is_circle_admin:
             raise HTTPException(
@@ -559,7 +528,6 @@ def _execute_admin_tools(
         )
         return tools_used, ans_en, ans_bn
 
-    # Tool 2: Pending applications (optionally scoped to a Circle)
     if any(k in q_lower for k in ('pending application', 'pending member', 'অপেক্ষমাণ আবেদন', 'পেন্ডিং')):
         stmt = select(Member).where(
             Member.status.in_(['PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'DOCUMENTS_REQUIRED', 'PAYMENT_PENDING'])
@@ -592,7 +560,6 @@ def _execute_admin_tools(
         ans_bn = f'{scope_label}-এ বর্তমানে {len(pending_members)} টি অপেক্ষমাণ আবেদন রয়েছে।'
         return tools_used, ans_en, ans_bn
 
-    # Tool 3: Member statistics ("How many active members are currently registered?")
     if any(k in q_lower for k in ('how many', 'active member', 'total member', 'statistics', 'registered', 'কতজন সক্রিয়', 'মোট সদস্য')):
         base_stmt = select(func.count(Member.id))
         active_stmt = select(func.count(Member.id)).where(Member.status == 'ACTIVE')
@@ -642,7 +609,6 @@ def _execute_admin_tools(
         )
         return tools_used, ans_en, ans_bn
 
-    # Tool 4: Revenue / financial summary
     if any(k in q_lower for k in ('revenue', 'finance', 'collection', 'রাজস্ব', 'আয়', 'তহবিল')):
         if not has_permission(user.role, 'finance.read'):
             raise HTTPException(status_code=403, detail='Finance permission required for revenue intelligence.')
@@ -685,7 +651,7 @@ async def ask_ai_assistant(
         raise HTTPException(status_code=400, detail='Invalid assistant mode. Must be PUBLIC, MEMBER, or ADMIN.')
 
     user = await _optional_user(request, db)
-    user_role = normalize_role(user.role) if user else 'PUBLIC'
+    user_role = canonical_role(user.role) if user else 'PUBLIC'
 
     # 1. Prompt-Injection & Security Guardrail
     if _detect_prompt_injection(question):
@@ -708,14 +674,7 @@ async def ask_ai_assistant(
             estimated_cost_usd=0.0,
         )
         db.add(log_item)
-        write_audit_log(
-            db,
-            actor_user_id=user.id if user else None,
-            action='ai.security.prompt_injection_blocked',
-            entity_type='AIQueryLog',
-            entity_id='security',
-            metadata={'mode': mode, 'question_excerpt': question[:120]},
-        )
+        audit(db, user, 'ai.security.prompt_injection_blocked', 'AIQueryLog', 'security')
         db.commit()
         return {
             'question': question,
@@ -749,7 +708,6 @@ async def ask_ai_assistant(
         if user_role == 'MEMBER':
             raise HTTPException(status_code=403, detail='Admin role required for Admin AI Assistant.')
 
-    # If PUBLIC mode user asks for another member's private records or admin stats, block if it requires auth
     if mode == 'PUBLIC' and any(
         k in q_lower for k in ('my payment history', 'my personal application', 'pending applications from')
     ):
@@ -769,7 +727,7 @@ async def ask_ai_assistant(
             db, user, q_lower, requested_circle_id=payload.circle_id
         )
 
-    # 3. Knowledge Base Semantic Retrieval (scoped to user's permission level; PUBLIC mode forces user=None)
+    # 3. Knowledge Base Semantic Retrieval
     retrieval_user = None if mode == 'PUBLIC' else user
     kb_search = search_knowledge_base(
         db,
@@ -799,7 +757,6 @@ async def ask_ai_assistant(
         for p in passages
     ]
 
-    # Determine category for usage monitoring
     if any(k in q_lower for k in ('renew', 'নবায়ন', 'নবায়ন', 'fee', 'ফি', 'pay')):
         q_category = 'RENEWAL_AND_FEES'
     elif any(k in q_lower for k in ('constitution', 'rule', 'গঠনতন্ত্র', 'বিধিমালা')):
@@ -811,7 +768,6 @@ async def ask_ai_assistant(
     else:
         q_category = 'GENERAL'
 
-    # 4. Synthesize Grounded Response or Safe "No Answer" Fallback
     if tool_ans_en:
         confidence = 0.96
         unanswered = False
@@ -834,7 +790,6 @@ async def ask_ai_assistant(
             f"{_sanitize_pii(top['snippet'])}"
         )
     else:
-        # Safe "No Answer" Fallback — never hallucinate institutional policy
         confidence = 0.0
         unanswered = True
         sources = []
@@ -885,14 +840,7 @@ async def ask_ai_assistant(
     )
     db.add(log_entry)
     if tools_used:
-        write_audit_log(
-            db,
-            actor_user_id=user.id if user else None,
-            action='ai.tool.executed',
-            entity_type='AIQueryLog',
-            entity_id=mode,
-            metadata={'tools': [t['tool_name'] for t in tools_used], 'role': user_role},
-        )
+        audit(db, user, 'ai.tool.executed', 'AIQueryLog', mode)
     db.commit()
 
     return {
@@ -916,7 +864,7 @@ async def ask_ai_assistant(
 @router.post('/admin/ai/generate-faqs')
 def generate_smart_faqs(
     payload: GenerateFAQRequest,
-    user: User = Depends(require_permission('cms.write')),
+    user: User = Depends(require_permission('content.write')),
     db: Session = Depends(get_db),
 ):
     ensure_default_knowledge_seeded(db)
@@ -963,14 +911,7 @@ def generate_smart_faqs(
             }
         )
 
-    write_audit_log(
-        db,
-        actor_user_id=user.id,
-        action='ai.faq.generate_drafts',
-        entity_type='KnowledgeDocument',
-        entity_id=str(doc.id),
-        metadata={'generated_count': len(created_faqs)},
-    )
+    audit(db, user, 'ai.faq.generate_drafts', 'KnowledgeDocument', doc.id)
     db.commit()
     return {
         'document_id': doc.id,
@@ -985,7 +926,7 @@ def generate_smart_faqs(
 @router.get('/admin/ai/faqs')
 def list_admin_faqs(
     status: str | None = None,
-    user: User = Depends(require_permission('cms.read')),
+    user: User = Depends(require_permission('content.read')),
     db: Session = Depends(get_db),
 ):
     stmt = select(KnowledgeFAQ).order_by(KnowledgeFAQ.id.desc())
@@ -1015,7 +956,7 @@ def list_admin_faqs(
 def update_or_approve_faq(
     faq_id: int,
     payload: FAQUpdateRequest,
-    user: User = Depends(require_permission('cms.write')),
+    user: User = Depends(require_permission('content.write')),
     db: Session = Depends(get_db),
 ):
     faq = db.get(KnowledgeFAQ, faq_id)
@@ -1035,7 +976,7 @@ def update_or_approve_faq(
         target_status = payload.status.upper()
         if target_status not in ('DRAFT', 'REVIEW', 'APPROVED', 'PUBLISHED', 'ARCHIVED'):
             raise HTTPException(status_code=400, detail='Invalid FAQ status')
-        if target_status == 'PUBLISHED' and not has_permission(user.role, 'cms.publish'):
+        if target_status == 'PUBLISHED' and not has_permission(user.role, 'content.publish'):
             raise HTTPException(status_code=403, detail='Only authorized publishers/admins can publish FAQs')
         faq.status = target_status
         if target_status in ('APPROVED', 'PUBLISHED'):
@@ -1043,14 +984,7 @@ def update_or_approve_faq(
         if target_status == 'PUBLISHED':
             faq.published_at = datetime.utcnow()
 
-    write_audit_log(
-        db,
-        actor_user_id=user.id,
-        action='ai.faq.update',
-        entity_type='KnowledgeFAQ',
-        entity_id=str(faq.id),
-        metadata={'status': faq.status},
-    )
+    audit(db, user, 'ai.faq.update', 'KnowledgeFAQ', faq.id)
     db.commit()
     db.refresh(faq)
     return {
@@ -1091,7 +1025,7 @@ def list_published_faqs(category: str | None = None, db: Session = Depends(get_d
 @router.post('/admin/ai/content-assist')
 def ai_content_assist(
     payload: ContentAssistRequest,
-    user: User = Depends(require_permission('cms.write')),
+    user: User = Depends(require_permission('content.write')),
     db: Session = Depends(get_db),
 ):
     title_bn = payload.title_bn.strip()
@@ -1109,14 +1043,7 @@ def ai_content_assist(
     slug_words = re.findall(r'[a-z0-9]+', (title_en or 'pgcb-official-notice').lower())
     suggested_slug = '-'.join(slug_words[:8]) or 'pgcb-official-update'
 
-    write_audit_log(
-        db,
-        actor_user_id=user.id,
-        action='ai.cms.content_assist',
-        entity_type=payload.entity_type,
-        entity_id='draft',
-        metadata={'actions': payload.actions},
-    )
+    audit(db, user, 'ai.cms.content_assist', payload.entity_type, 'draft')
     db.commit()
 
     return {
@@ -1154,7 +1081,7 @@ def ai_content_assist(
 
 @router.get('/admin/ai/analytics')
 def get_ai_usage_analytics(
-    user: User = Depends(require_permission('reports.read')),
+    user: User = Depends(require_permission('analytics.read')),
     db: Session = Depends(get_db),
 ):
     now = datetime.utcnow()
@@ -1206,13 +1133,13 @@ def get_ai_usage_analytics(
 
 @router.get('/admin/analytics/intelligence')
 def get_admin_intelligence_dashboard(
-    user: User = Depends(require_permission('reports.read')),
+    user: User = Depends(require_permission('analytics.read')),
     db: Session = Depends(get_db),
 ):
     now = datetime.utcnow()
     month_start = datetime(now.year, now.month, 1)
-    role = normalize_role(user.role)
-    circle_filter = user.circle_id if is_circle_scoped_admin(role) else None
+    role = canonical_role(user.role)
+    circle_filter = get_admin_circle_scope(user, db) if role == 'CIRCLE_ADMIN' else None
 
     members_stmt = select(func.count(Member.id))
     active_stmt = select(func.count(Member.id)).where(Member.status == 'ACTIVE')
@@ -1228,7 +1155,7 @@ def get_admin_intelligence_dashboard(
         MembershipApplication.submitted_at >= month_start
     )
 
-    if circle_filter is not None:
+    if circle_filter is not None and circle_filter != -1:
         members_stmt = members_stmt.where(Member.circle_id == circle_filter)
         active_stmt = active_stmt.where(Member.circle_id == circle_filter)
         pending_stmt = pending_stmt.where(Member.circle_id == circle_filter)
@@ -1253,7 +1180,7 @@ def get_admin_intelligence_dashboard(
     circles = db.scalars(select(Circle).order_by(Circle.id.asc())).all()
     circles_by_pending: list[dict[str, Any]] = []
     for c in circles:
-        if circle_filter is not None and int(c.id) != int(circle_filter):
+        if circle_filter is not None and circle_filter != -1 and int(c.id) != int(circle_filter):
             continue
         p_cnt = int(
             db.scalar(
