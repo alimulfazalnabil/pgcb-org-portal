@@ -22,7 +22,6 @@ from app.models import (
     KnowledgeDocument,
     KnowledgeFAQ,
     Member,
-    MembershipApplication,
     PaymentTransaction,
     User,
 )
