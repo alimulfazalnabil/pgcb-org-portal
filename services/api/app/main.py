@@ -20,6 +20,7 @@ from app.routers.workflows import router as workflows_router
 from app.routers.secretariat import router as secretariat_router
 from app.routers.helpdesk import router as helpdesk_router
 from app.routers.cms import router as cms_router
+from app.routers.ai import router as ai_router
 
 from app.storage import get_storage
 
@@ -129,6 +130,7 @@ app.include_router(workflows_router, prefix='/api/v1')
 app.include_router(notices.router, prefix='/api/v1')
 app.include_router(documents.router, prefix='/api/v1')
 app.include_router(cms_router, prefix='/api/v1')
+app.include_router(ai_router, prefix='/api/v1')
 
 
 @app.get('/')
