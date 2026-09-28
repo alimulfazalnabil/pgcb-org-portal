@@ -575,3 +575,83 @@ class ContactInquiryMeta(Base):
     responded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class KnowledgeDocument(Base):
+    __tablename__ = 'knowledge_documents'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title_bn: Mapped[str] = mapped_column(String(500), index=True)
+    title_en: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
+    category: Mapped[str] = mapped_column(String(80), default='MEMBERSHIP_GUIDELINES', index=True)
+    version: Mapped[str] = mapped_column(String(40), default='2026.1', index=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    supersedes_id: Mapped[int | None] = mapped_column(ForeignKey('knowledge_documents.id', ondelete='SET NULL'), nullable=True)
+    superseded_by_id: Mapped[int | None] = mapped_column(ForeignKey('knowledge_documents.id', ondelete='SET NULL'), nullable=True)
+    publication_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    effective_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    author: Mapped[str | None] = mapped_column(String(200), default='PGCB Secretariat', nullable=True)
+    approval_status: Mapped[str] = mapped_column(String(30), default='PUBLISHED', index=True)  # DRAFT, REVIEW, APPROVED, PUBLISHED, SUPERSEDED, ARCHIVED
+    source_type: Mapped[str] = mapped_column(String(40), default='PDF')  # PDF, DOCX, TEXT, DOCUMENT, NOTICE, CIRCULAR
+    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    source_entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    access_level: Mapped[str] = mapped_column(String(40), default='PUBLIC', index=True)  # PUBLIC, MEMBER, CIRCLE_ADMIN, CENTRAL_ADMIN, SUPER_ADMIN
+    circle_id: Mapped[int | None] = mapped_column(ForeignKey('circles.id', ondelete='SET NULL'), nullable=True, index=True)
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cleaned_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = 'knowledge_chunks'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey('knowledge_documents.id', ondelete='CASCADE'), index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+    section_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    page_number: Mapped[int] = mapped_column(Integer, default=1)
+    content: Mapped[str] = mapped_column(Text)
+    tokens_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class KnowledgeFAQ(Base):
+    __tablename__ = 'knowledge_faqs'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int | None] = mapped_column(ForeignKey('knowledge_documents.id', ondelete='SET NULL'), nullable=True, index=True)
+    question_bn: Mapped[str] = mapped_column(String(500), index=True)
+    question_en: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
+    answer_bn: Mapped[str] = mapped_column(Text)
+    answer_en: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String(80), default='MEMBERSHIP_GUIDELINES', index=True)
+    section_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    page_ref: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default='DRAFT', index=True)  # DRAFT, REVIEW, APPROVED, PUBLISHED, ARCHIVED
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AIQueryLog(Base):
+    __tablename__ = 'ai_query_logs'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True)
+    user_role: Mapped[str] = mapped_column(String(60), default='PUBLIC', index=True)
+    assistant_mode: Mapped[str] = mapped_column(String(30), default='PUBLIC', index=True)  # PUBLIC, MEMBER, ADMIN
+    question: Mapped[str] = mapped_column(Text)
+    question_category: Mapped[str] = mapped_column(String(80), default='GENERAL', index=True)
+    answer_preview: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    confidence: Mapped[float] = mapped_column( default=0.0)
+    unanswered: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    security_flagged: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    documents_searched: Mapped[int] = mapped_column(Integer, default=0)
+    sources_cited: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tools_called: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_time_ms: Mapped[int] = mapped_column(Integer, default=0)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost_usd: Mapped[float] = mapped_column(default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
