@@ -120,4 +120,17 @@ export const adminApi = {
     request<any>('/admin/ai/content-assist', { method: 'POST', body: JSON.stringify(data) }),
   getAiUsageAnalytics: () => request<any>('/admin/ai/analytics'),
   getAdminIntelligence: () => request<any>('/admin/analytics/intelligence'),
+  getSystemHealth: () => request<any>('/admin/system/health'),
+  runSmokeTest: () => request<any>('/admin/system/smoke-test', { method: 'POST' }),
 };
+
+export const getAIUsageAnalytics = () => adminApi.getAiUsageAnalytics();
+export const getAdminIntelligenceDashboard = () => adminApi.getAdminIntelligence();
+export const getAdminKnowledgeDocuments = (params?: { category?: string; include_historical?: boolean }) =>
+  adminApi.getKnowledgeDocuments(params);
+export const getAdminFAQs = (status?: string) => adminApi.getAdminFaqs(status);
+export const createKnowledgeDocument = (data: any) => adminApi.createKnowledgeDocument(data);
+export const generateSmartFAQs = (documentId: number, maxFaqs = 5) => adminApi.generateSmartFaqs(documentId, maxFaqs);
+export const updateAdminFAQ = (faqId: number, data: any) => adminApi.updateAdminFaq(faqId, data);
+export const runAIContentAssist = (data: any) => adminApi.aiContentAssist(data);
+

@@ -235,4 +235,73 @@ export interface MemberDashboardData {
   }>;
 }
 
+export interface KnowledgeDocumentItem {
+  id: number;
+  title_bn: string;
+  title_en?: string | null;
+  category: string;
+  version: string;
+  is_current: boolean;
+  supersedes_id?: number | null;
+  superseded_by_id?: number | null;
+  publication_date?: string | null;
+  effective_date?: string | null;
+  author?: string | null;
+  approval_status: string;
+  source_type: string;
+  source_url?: string | null;
+  access_level: string;
+  circle_id?: number | null;
+  chunk_count: number;
+  created_at?: string | null;
+}
+
+export interface KnowledgeFAQItem {
+  id: number;
+  document_id?: number | null;
+  question_bn: string;
+  question_en?: string | null;
+  answer_bn: string;
+  answer_en?: string | null;
+  category: string;
+  section_ref?: string | null;
+  page_ref?: number | null;
+  status: string;
+  approved_by?: number | null;
+  published_at?: string | null;
+}
+
+export interface AIUsageAnalytics {
+  questions_today: number;
+  total_questions: number;
+  documents_searched: number;
+  unanswered: number;
+  security_blocked: number;
+  avg_response_time_sec: number;
+  failure_rate: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  by_category: Record<string, number>;
+  top_source_documents: Array<{ title: string; citations: number }>;
+}
+
+export interface AdminIntelligenceDashboard {
+  members: number;
+  active: number;
+  pending: number;
+  expiring_next_30_days: number;
+  applications_this_month: number;
+  revenue_this_month: number;
+  revenue_this_month_formatted: string;
+  circles_by_pending_applications: Array<{
+    circle_id: number;
+    circle_code: string;
+    circle_name_en: string;
+    circle_name_bn: string;
+    pending_applications: number;
+    active_members: number;
+  }>;
+}
+
+
 
