@@ -483,7 +483,17 @@ def test_p0_golden_e2e_and_security_sprint():
     assert cert_verify_res.json()['valid'] is True
 
     # P0.6: Backup & Restore Verification Drill
-    dr_res = run_disaster_recovery_drill()
-    assert dr_res['overall_status'] == 'PASS'
-    assert dr_res['within_rto'] is True
+    import tempfile
+    from pathlib import Path
+    from app.core.config import settings
+    from app.services import BASE_STORAGE
+
+    with tempfile.TemporaryDirectory() as tmp_backup:
+        dr_res = run_disaster_recovery_drill(
+            database_url=settings.database_url,
+            storage_root=BASE_STORAGE,
+            backup_dir=Path(tmp_backup),
+        )
+        assert dr_res['drill_status'] == 'PASSED'
+        assert dr_res['drill_duration_seconds'] < 60
 
