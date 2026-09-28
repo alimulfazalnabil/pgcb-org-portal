@@ -28,7 +28,7 @@ from app.services.payment_service import transition_payment_status, validate_pay
 
 router = APIRouter(tags=["Payments"])
 
-VALID_MEMBERSHIP_AMOUNTS = {500, 1000, 1500, 2000, 2500, 5000, 10000}
+VALID_MEMBERSHIP_AMOUNTS = {500, 1000, 1500, 2000, 2500, 4000, 5000, 10000}
 
 
 def _validate_payment_amount(
@@ -606,20 +606,50 @@ def list_payments(user: User = Depends(current_user), db: Session = Depends(get_
     )
     rows = db.scalars(stmt).all()
 
-    return [
-        {
-            'id': p.id,
-            'purpose': p.purpose or 'MEMBERSHIP',
-            'amount': float(p.amount),
-            'currency': p.currency,
-            'provider': p.provider,
-            'transaction_ref': p.transaction_ref,
-            'receipt_no': p.receipt_no,
-            'status': p.status,
-            'created_at': p.created_at,
-        }
-        for p in rows
-    ]
+    purpose_en_map = {
+        'MEMBERSHIP': 'Membership Fee',
+        'MEMBERSHIP_FEE': 'Membership Fee',
+        'RENEWAL': 'Membership Renewal Fee',
+        'APPLICATION': 'Membership Application Fee',
+        'EVENT': 'Event Registration Fee',
+        'DONATION': 'Welfare Contribution',
+    }
+    purpose_bn_map = {
+        'MEMBERSHIP': 'সদস্যপদ ফি',
+        'MEMBERSHIP_FEE': 'সদস্যপদ ফি',
+        'RENEWAL': 'সদস্যপদ নবায়ন ফি',
+        'APPLICATION': 'সদস্যপদ আবেদন ফি',
+        'EVENT': 'ইভেন্ট নিবন্ধন ফি',
+        'DONATION': 'কল্যাণ তহবিল অনুদান',
+    }
+
+    result = []
+    for p in rows:
+        purpose_key = (p.purpose or 'MEMBERSHIP').upper()
+        is_paid = p.status in ('PAID', 'SUCCESS', 'COMPLETED')
+        created_dt = p.created_at or datetime.utcnow()
+        result.append(
+            {
+                'id': p.id,
+                'date': created_dt.strftime('%Y-%m-%d'),
+                'purpose': purpose_key,
+                'purpose_label': purpose_en_map.get(purpose_key, 'Membership Fee'),
+                'purpose_label_bn': purpose_bn_map.get(purpose_key, 'সদস্যপদ ফি'),
+                'membership_plan_id': p.membership_plan_id,
+                'amount': float(p.amount),
+                'amount_formatted': f"৳{int(p.amount):,}",
+                'currency': p.currency,
+                'provider': p.provider,
+                'transaction_ref': p.transaction_ref,
+                'receipt_no': p.receipt_no,
+                'status': 'PAID' if is_paid else p.status,
+                'has_receipt': is_paid,
+                'receipt_url': f"/api/v1/member/payments/{p.id}/receipt" if is_paid else None,
+                'receipt_pdf_url': f"/api/v1/member/payments/{p.id}/receipt.pdf" if is_paid else None,
+                'created_at': p.created_at,
+            }
+        )
+    return result
 
 
 @router.get("/member/payments/{payment_id}/receipt")

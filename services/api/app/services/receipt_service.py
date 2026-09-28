@@ -40,6 +40,8 @@ MEMBERSHIP_PLAN_FEES = {
     "REGULAR": 2000,
     "ANNUAL_RENEWAL": 2000,
     "RENEWAL": 2000,
+    "RENEWAL_1YR": 2000,
+    "RENEWAL_2YR": 4000,
     "APPLICATION": 500,
     "NEW_APPLICATION": 500,
     "ASSOCIATE": 1500,
@@ -188,12 +190,20 @@ def activate_membership_from_payment(
     existing_renewal = db.scalar(select(MembershipRenewal).where(MembershipRenewal.payment_id == payment.id))
     is_first_activation = existing_renewal is None
     if is_first_activation:
-        renew_membership(db, member, payment.id, int(payment.amount), payment.currency)
+        renew_membership(
+            db,
+            member,
+            payment.id,
+            int(payment.amount),
+            payment.currency,
+            plan_code=payment.membership_plan_id,
+        )
     else:
         member.status = "ACTIVE"
 
+    val_str = member.validity_date.strftime("%d %b %Y") if member.validity_date else "N/A"
     member.application_note = (
-        f"Membership active. Verified payment {payment.transaction_ref or payment.id} "
+        f"Membership active until {val_str}. Verified payment {payment.transaction_ref or payment.id} "
         f"(Receipt: {payment.receipt_no})."
     )
     db.flush()
@@ -221,14 +231,17 @@ def activate_membership_from_payment(
         pass
 
     if user and is_first_activation:
+        is_renewal = (payment.purpose or "").upper() == "RENEWAL"
+        title_bn = "সদস্যপদ নবায়ন সফল হয়েছে" if is_renewal else "পেমেন্ট ও সদস্যপদ সক্রিয়করণ সফল"
+        body_bn = (
+            f"আপনার ৳{payment.amount} পেমেন্ট যাচাই সম্পন্ন হয়েছে (রসিদ নং: {payment.receipt_no})। "
+            f"সদস্য আইডি: {member.membership_id} • নতুন মেয়াদ: {val_str}।"
+        )
         db.add(
             Notification(
                 user_id=user.id,
-                title_bn="পেমেন্ট ও সদস্যপদ সক্রিয়করণ সফল",
-                body_bn=(
-                    f"আপনার ৳{payment.amount} পেমেন্ট যাচাই সম্পন্ন হয়েছে (রসিদ নং: {payment.receipt_no})। "
-                    f"সদস্য আইডি: {member.membership_id}।"
-                ),
+                title_bn=title_bn,
+                body_bn=body_bn,
                 notification_type="PAYMENT",
             )
         )

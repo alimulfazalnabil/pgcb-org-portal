@@ -143,8 +143,15 @@ def build_card(member: Member, user: User | None = None) -> Path:
         draw.text((115, 370), 'MEMBER PHOTO', font=font_en_sm, fill='#94A3B8')
 
     # Status Pill Below Photo
-    draw.rounded_rectangle((45, 440, 275, 482), radius=10, fill='#064E3B', outline='#10B981', width=2)
-    draw.text((75, 451), '● ACTIVE MEMBER', font=font_en_badge, fill='#34D399')
+    status_upper = (member.status or 'ACTIVE').upper()
+    if status_upper == 'ACTIVE':
+        pill_fill, pill_outline, pill_text, pill_color = '#064E3B', '#10B981', '● ACTIVE MEMBER', '#34D399'
+    elif status_upper == 'EXPIRED':
+        pill_fill, pill_outline, pill_text, pill_color = '#78350F', '#F59E0B', '● EXPIRED MEMBER', '#FCD34D'
+    else:
+        pill_fill, pill_outline, pill_text, pill_color = '#7F1D1D', '#EF4444', f'● {status_upper[:12]}', '#FCA5A5'
+    draw.rounded_rectangle((45, 440, 275, 482), radius=10, fill=pill_fill, outline=pill_outline, width=2)
+    draw.text((75, 451), pill_text, font=font_en_badge, fill=pill_color)
 
     # Employee ID Box Below Status
     draw.rounded_rectangle((45, 494, 275, 532), radius=10, fill='#1E293B', outline='#334155', width=1)
@@ -276,6 +283,83 @@ def build_card_back(member: Member) -> Path:
     with open(png_path, 'wb') as f:
         img.save(f, 'PNG', optimize=True)
     return png_path
+
+
+@router.get('/card/details')
+@router.get('/card/metadata')
+def digital_card_details(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Return structured Digital ID Card metadata (including QR base64, expiry indicator, and revoked/expired state) for mobile wallet rendering."""
+    import base64
+    m = db.scalar(
+        select(Member)
+        .options(selectinload(Member.circle), selectinload(Member.user), selectinload(Member.documents))
+        .where(Member.user_id == user.id)
+    )
+    if not m:
+        raise HTTPException(404, 'Member profile not found')
+
+    now = datetime.utcnow()
+    status = (m.status or 'PENDING').upper()
+    iss_year = (m.issue_date or now).year
+    val_year = m.validity_date.year if m.validity_date else iss_year + 1
+    days_until_expiry = (m.validity_date.date() - now.date()).days if m.validity_date else None
+
+    if status in ('REVOKED', 'SUSPENDED', 'REJECTED'):
+        expiry_indicator = status
+    elif days_until_expiry is not None and days_until_expiry < 0:
+        expiry_indicator = 'EXPIRED'
+    elif status == 'EXPIRED':
+        expiry_indicator = 'EXPIRED'
+    elif days_until_expiry is not None and days_until_expiry <= 60:
+        expiry_indicator = 'EXPIRING_SOON'
+    elif status == 'ACTIVE':
+        expiry_indicator = 'VALID'
+    else:
+        expiry_indicator = status
+
+    qr_data_url = None
+    token = None
+    verify_url = None
+    if m.membership_id:
+        token = verification_token(m.membership_id)
+        verify_url = f"{settings.frontend_url.rstrip('/')}/verify?token={token}"
+        qr = qrcode.QRCode(box_size=6, border=2)
+        qr.add_data(verify_url)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="#0B132B", back_color="#FFFFFF").convert('RGB')
+        buf = io.BytesIO()
+        qr_img.save(buf, format='PNG')
+        qr_data_url = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+
+    return {
+        'member_id': m.id,
+        'membership_id': m.membership_id,
+        'membership_type': m.membership_type or 'GENERAL',
+        'name_bn': user.name_bn,
+        'name_en': user.name_en or user.name_bn,
+        'designation_bn': m.designation_bn,
+        'designation_en': m.designation_en or m.designation_bn,
+        'employee_id': m.employee_id,
+        'circle_bn': m.circle.name_bn if m.circle else 'কেন্দ্রীয় সচিবালয়',
+        'circle_en': m.circle.name_en if m.circle else 'Central',
+        'diploma_institution': m.diploma_institution,
+        'status': status,
+        'is_active': status == 'ACTIVE' and (days_until_expiry is None or days_until_expiry >= 0),
+        'is_expired': expiry_indicator == 'EXPIRED',
+        'is_revoked': status in ('REVOKED', 'SUSPENDED'),
+        'expiry_indicator': expiry_indicator,
+        'days_until_expiry': days_until_expiry,
+        'issue_date': m.issue_date,
+        'validity_date': m.validity_date,
+        'valid_until_formatted': m.validity_date.strftime('%d %b %Y') if m.validity_date else None,
+        'valid_years': f'{iss_year}–{val_year}' if m.membership_id else None,
+        'verification_token': token,
+        'verification_url': verify_url,
+        'qr_data_url': qr_data_url,
+        'front_png_url': '/api/v1/member/card?side=front' if m.membership_id and status == 'ACTIVE' else None,
+        'back_png_url': '/api/v1/member/card?side=back' if m.membership_id and status == 'ACTIVE' else None,
+        'pdf_url': '/api/v1/member/card/pdf' if m.membership_id and status == 'ACTIVE' else None,
+    }
 
 
 @router.get('/card')
