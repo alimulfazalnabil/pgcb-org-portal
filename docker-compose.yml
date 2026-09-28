@@ -18,13 +18,17 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pgcb}:${POSTGRES_PASSWORD:-pgcb_dev_password}@postgres:5432/${POSTGRES_DB:-pgcb_portal}
       DB_SSLMODE: ${DB_SSLMODE:-prefer}
+      SECRET_KEY: ${SECRET_KEY:-replace-this-secret-key-in-real-environments-32-chars}
       JWT_SECRET: ${JWT_SECRET:-replace-this-in-real-environments-minimum-32-chars}
       APP_ENV: ${APP_ENV:-development}
+      PAYMENT_MODE: ${PAYMENT_MODE:-sandbox}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:8000}
       REDIS_RATE_LIMIT_ENABLED: "false"
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       STORAGE_ROOT: ${STORAGE_ROOT:-/data/uploads}
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
+      UPLOAD_DIRECTORY: ${UPLOAD_DIRECTORY:-/data/uploads}
       BACKUP_DIR: ${BACKUP_DIR:-/data/backups}
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
       BKASH_WEBHOOK_SECRET: ${BKASH_WEBHOOK_SECRET:-}
@@ -38,18 +42,23 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 10
     ports: ["8000:8000"]
 
   web:
-    build: {context: ./apps/web}
+    build:
+      context: ./apps/web
+      args:
+        NEXT_PUBLIC_API_BASE_PATH: /backend
+        INTERNAL_API_URL: http://api:8000
     environment:
       NEXT_PUBLIC_API_BASE_PATH: /backend
       INTERNAL_API_URL: http://api:8000
-    depends_on: [api]
+    depends_on:
+      api: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
