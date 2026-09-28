@@ -1144,8 +1144,8 @@ def get_admin_intelligence_dashboard(
         Member.validity_date.is_not(None),
         Member.validity_date <= now + timedelta(days=30),
     )
-    apps_month_stmt = select(func.count(MembershipApplication.id)).where(
-        MembershipApplication.submitted_at >= month_start
+    apps_month_stmt = select(func.count(Member.id)).where(
+        Member.created_at >= month_start
     )
 
     if circle_filter is not None and circle_filter != -1:
@@ -1153,6 +1153,7 @@ def get_admin_intelligence_dashboard(
         active_stmt = active_stmt.where(Member.circle_id == circle_filter)
         pending_stmt = pending_stmt.where(Member.circle_id == circle_filter)
         expiring_stmt = expiring_stmt.where(Member.circle_id == circle_filter)
+        apps_month_stmt = apps_month_stmt.where(Member.circle_id == circle_filter)
 
     members_total = int(db.scalar(members_stmt) or 0)
     active_members = int(db.scalar(active_stmt) or 0)
