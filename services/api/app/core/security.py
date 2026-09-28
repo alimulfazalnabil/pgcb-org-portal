@@ -16,7 +16,7 @@ except ImportError:
 
 from app.core.config import settings
 
-ALGORITHM = settings.jwt_algorithm
+ALGORITHM = getattr(settings, "jwt_algorithm", "HS256")
 SECRET_KEY = settings.jwt_secret
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.jwt_expire_minutes
 
