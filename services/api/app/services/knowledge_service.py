@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.rbac import normalize_role
+from app.core.rbac import canonical_role, get_admin_circle_scope
 from app.models import (
     Circular,
     Document,
@@ -326,17 +326,17 @@ def ingest_knowledge_document(
     return doc
 
 
-def can_user_access_document(user: User | None, doc: KnowledgeDocument) -> bool:
+def can_user_access_document(user: User | None, doc: KnowledgeDocument, db: Session | None = None) -> bool:
     level = (doc.access_level or 'PUBLIC').upper()
 
     if user is None:
         return level == 'PUBLIC'
 
-    role = normalize_role(user.role)
+    role = canonical_role(user.role)
     if role == 'SUPER_ADMIN':
         return True
 
-    if role in ('CENTRAL_ADMIN', 'ADMIN', 'SECRETARIAT_ADMIN', 'FINANCE_ADMIN', 'MEMBERSHIP_ADMIN', 'CONTENT_ADMIN', 'AUDITOR'):
+    if role in ('CENTRAL_ADMIN', 'ADMIN', 'SECRETARIAT_ADMIN', 'FINANCE_OFFICER', 'MEMBERSHIP_OFFICER', 'CONTENT_PUBLISHER', 'AUDITOR'):
         return level in ('PUBLIC', 'MEMBER', 'CIRCLE_ADMIN', 'CENTRAL_ADMIN')
 
     if role == 'CIRCLE_ADMIN':
@@ -345,7 +345,8 @@ def can_user_access_document(user: User | None, doc: KnowledgeDocument) -> bool:
         if level == 'CIRCLE_ADMIN':
             if doc.circle_id is None:
                 return True
-            return user.circle_id is not None and int(doc.circle_id) == int(user.circle_id)
+            scoped_cid = get_admin_circle_scope(user, db) if db is not None else getattr(user, 'circle_id', None)
+            return scoped_cid is not None and scoped_cid != -1 and int(doc.circle_id) == int(scoped_cid)
         return False
 
     # Regular authenticated MEMBER / CONTENT_EDITOR / etc.
@@ -525,7 +526,7 @@ def search_knowledge_base(
     # Filter by RBAC access level & date/year filters
     authorized_docs: dict[int, KnowledgeDocument] = {}
     for doc in all_docs:
-        if not can_user_access_document(user, doc):
+        if not can_user_access_document(user, doc, db=db):
             continue
         if year is not None and doc.publication_date and doc.publication_date.year != int(year):
             continue
