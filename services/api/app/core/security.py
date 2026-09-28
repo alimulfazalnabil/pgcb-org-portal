@@ -14,9 +14,11 @@ try:
 except ImportError:
     pwd_context = None
 
-ALGORITHM = "HS256"
-SECRET_KEY = os.getenv("JWT_SECRET", "super-secret-development-key-change-me")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TTL", 30))
+from app.core.config import settings
+
+ALGORITHM = settings.jwt_algorithm
+SECRET_KEY = settings.jwt_secret
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.jwt_expire_minutes
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
