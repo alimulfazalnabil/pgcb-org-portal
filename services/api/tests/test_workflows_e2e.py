@@ -456,14 +456,14 @@ def test_p0_golden_e2e_and_security_sprint():
             db.rollback()
 
     # 11. DIGITAL ID
-    card_res = client.get('/api/v1/card/me', headers=applicant_headers)
+    card_res = client.get('/api/v1/member/card/details', headers=applicant_headers)
     assert card_res.status_code == 200, card_res.text
     card_data = card_res.json()
     assert card_data['membership_id'] == assigned_mid
     assert card_data['status'] == 'ACTIVE'
 
     # 12. QR VERIFICATION
-    qr_res = client.get(f'/api/v1/card/verify/{assigned_mid}')
+    qr_res = client.get(f'/api/v1/public/verify/{assigned_mid}')
     assert qr_res.status_code == 200, qr_res.text
     qr_data = qr_res.json()
     assert qr_data['membership_id'] == assigned_mid
