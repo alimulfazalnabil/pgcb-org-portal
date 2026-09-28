@@ -497,3 +497,124 @@ def test_p0_golden_e2e_and_security_sprint():
         assert dr_res['drill_status'] == 'PASSED'
         assert dr_res['drill_duration_seconds'] < 60
 
+
+def test_pre_hosting_local_hardening_suite():
+    """
+    Pre-Hosting Local Hardening Verification:
+    1. Core Database (14 core tables present & queryable)
+    2. 6-Role RBAC Matrix (Member, Circle Admin, Finance Admin, Content Admin, Central Admin, Super Admin)
+    3. Sandbox Payment & Webhook Simulation (Development -> Payment Sandbox -> Webhook Simulation -> Activation)
+    """
+    from sqlalchemy import inspect as sa_inspect
+    from app.db.session import engine
+    from app.core.rbac import has_permission
+
+    # 1. Verify all 14 core database entities exist in schema
+    inspector = sa_inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    required_tables = {
+        'users',
+        'members',
+        'roles',
+        'circles',
+        'membership_renewals',
+        'membership_applications',
+        'payment_transactions',
+        'documents',
+        'certificates',
+        'events',
+        'notices',
+        'circulars',
+        'notifications',
+        'audit_logs',
+    }
+    missing = required_tables - existing_tables
+    assert not missing, f'Missing core database tables: {missing}'
+
+    # 2. Verify all 6 institutional RBAC roles
+    # Member
+    assert has_permission('MEMBER', 'member.self') is True
+    assert has_permission('MEMBER', 'admin.stats') is False
+    # Circle Admin
+    assert has_permission('CIRCLE_ADMIN', 'circle.write') is True
+    assert has_permission('CIRCLE_ADMIN', 'member.review') is True
+    assert has_permission('CIRCLE_ADMIN', 'finance.write') is False
+    # Finance Admin
+    assert has_permission('FINANCE_ADMIN', 'finance.read') is True
+    assert has_permission('FINANCE_ADMIN', 'finance.write') is True
+    assert has_permission('FINANCE_ADMIN', 'content.publish') is False
+    # Content Admin
+    assert has_permission('CONTENT_ADMIN', 'content.publish') is True
+    assert has_permission('CONTENT_ADMIN', 'news.publish') is True
+    assert has_permission('CONTENT_ADMIN', 'finance.write') is False
+    # Central Admin
+    assert has_permission('CENTRAL_ADMIN', 'member.review') is True
+    assert has_permission('CENTRAL_ADMIN', 'content.publish') is True
+    assert has_permission('CENTRAL_ADMIN', 'audit.read') is True
+    # Super Admin
+    assert has_permission('SUPER_ADMIN', 'finance.write') is True
+    assert has_permission('SUPER_ADMIN', 'any.custom.permission') is True
+
+    # 3. Verify Sandbox Payment & Webhook Simulation -> Membership Activation
+    ts = int(datetime.utcnow().timestamp() * 1000)
+    sb_email = f'sandbox_member_{ts}@pgcb.gov.bd'
+    sb_pass = 'SandboxPass123!'
+    reg = client.post(
+        '/api/v1/auth/register',
+        json={
+            'name_bn': 'স্যান্ডবক্স সদস্য',
+            'name_en': 'Sandbox Member',
+            'email': sb_email,
+            'phone': f'019{ts % 100000000:08d}',
+            'password': sb_pass,
+            'designation_bn': 'সহকারী প্রকৌশলী',
+        },
+    )
+    assert reg.status_code in (200, 201)
+    with SessionLocal() as db:
+        u = db.scalar(select(User).where(User.email == sb_email))
+        u.email_verified = True
+        db.commit()
+
+    login = client.post('/api/v1/auth/login', json={'email': sb_email, 'password': sb_pass})
+    assert login.status_code == 200
+    token = login.cookies.get('pgcb_access_token') or login.json().get('access_token')
+    headers = {'Authorization': f'Bearer {token}'}
+
+    # Create server-authoritative payment intent in sandbox mode
+    pay_intent = client.post(
+        '/api/v1/member/payments',
+        headers=headers,
+        json={
+            'purpose': 'MEMBERSHIP',
+            'membership_plan_id': 'ANNUAL_STANDARD',
+            'provider': 'BKASH',
+        },
+    )
+    assert pay_intent.status_code == 200, pay_intent.text
+    payment_id = pay_intent.json()['id']
+    assert pay_intent.json()['status'] == 'PENDING'
+
+    # Simulate Sandbox Webhook -> Payment PAID + Receipt Issued + Membership Activated
+    sim_res = client.post(
+        '/api/v1/payments/sandbox/simulate',
+        headers=headers,
+        json={'payment_id': payment_id},
+    )
+    assert sim_res.status_code == 200, sim_res.text
+    sim_data = sim_res.json()
+    assert sim_data['status'] == 'success'
+    assert sim_data['payment_mode'] == 'sandbox'
+    assert sim_data['payment_status'] == 'PAID'
+    assert sim_data['receipt_no'].startswith('PGCB-RCP-')
+
+    # Idempotent replay check
+    replay_res = client.post(
+        '/api/v1/payments/sandbox/simulate',
+        headers=headers,
+        json={'payment_id': payment_id},
+    )
+    assert replay_res.status_code == 200
+    assert replay_res.json()['idempotent_replay'] is True
+
+
