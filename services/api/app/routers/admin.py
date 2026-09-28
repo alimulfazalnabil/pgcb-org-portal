@@ -707,6 +707,7 @@ def review_member(
     if scope is not None and m.circle_id != scope:
         raise HTTPException(403, 'Circle Administrator cannot review applications outside their assigned Grid Circle')
 
+    prev_status = m.status
     if action == 'REVIEW':
         m.status, resolved_note = 'UNDER_REVIEW', note or 'Application moved to review.'
     elif action == 'DOCUMENTS_REQUIRED':
@@ -728,6 +729,42 @@ def review_member(
         m.issue_date, m.validity_date = membership_dates()
         resolved_note = note or f'Membership approved with ID {m.membership_id}.'
     m.application_note = resolved_note
+
+    from app.models import ApplicationReview, Membership, MembershipApplication
+    app_row = db.scalar(select(MembershipApplication).where(MembershipApplication.member_id == m.id))
+    if app_row:
+        app_row.status = m.status
+        app_row.reviewer_id = admin.id
+        app_row.review_note = resolved_note
+        app_row.reviewed_at = datetime.utcnow()
+    db.add(
+        ApplicationReview(
+            application_id=app_row.id if app_row else None,
+            member_id=m.id,
+            reviewer_id=admin.id,
+            action=action,
+            previous_status=prev_status,
+            new_status=m.status,
+            note=resolved_note,
+        )
+    )
+    if m.status == 'ACTIVE' and m.membership_id:
+        mem_rec = db.scalar(select(Membership).where(Membership.membership_id == m.membership_id))
+        if not mem_rec:
+            db.add(
+                Membership(
+                    member_id=m.id,
+                    membership_id=m.membership_id,
+                    membership_type=m.membership_type or 'GENERAL',
+                    status='ACTIVE',
+                    issue_date=m.issue_date or datetime.utcnow(),
+                    validity_date=m.validity_date,
+                )
+            )
+        else:
+            mem_rec.status = 'ACTIVE'
+            mem_rec.validity_date = m.validity_date
+
     audit(db, admin, f'{action}_MEMBER', 'MEMBER', m.id, _actor_ip(request))
     notify(db, m.user_id, 'সদস্যতা আপডেট', resolved_note, 'MEMBERSHIP')
     db.commit(); db.refresh(m)

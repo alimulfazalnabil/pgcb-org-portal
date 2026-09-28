@@ -5,7 +5,7 @@ from app.db.session import engine, SessionLocal
 from app.models import Circle, User
 
 
-def test_core_14_database_entities_and_indexes():
+def test_core_21_database_entities_and_indexes():
     with TestClient(app) as client:
         res = client.get('/health')
         assert res.status_code == 200
@@ -14,18 +14,25 @@ def test_core_14_database_entities_and_indexes():
     existing_tables = set(inspector.get_table_names())
     required_tables = {
         'users',
-        'members',
         'roles',
-        'circles',
-        'membership_renewals',
+        'permissions',
+        'members',
+        'grid_circles',
+        'memberships',
         'membership_applications',
+        'application_reviews',
+        'payments',
         'payment_transactions',
         'documents',
         'certificates',
         'events',
+        'event_registrations',
+        'news',
         'notices',
         'circulars',
+        'media_assets',
         'notifications',
+        'notification_templates',
         'audit_logs',
     }
     missing = required_tables - existing_tables

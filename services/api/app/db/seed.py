@@ -218,6 +218,25 @@ def main(synthetic_count: int = 0, production_only: bool = False) -> None:
                 existing_circle.active = True
         db.commit()
 
+        from app.models import GridCircle, NotificationTemplate, Permission
+        for bn, en in OFFICIAL_CIRCLES:
+            code = f"GC-{en.upper()[:6]}"
+            if not db.scalar(select(GridCircle).where(GridCircle.code == code)):
+                db.add(GridCircle(code=code, name_bn=bn, name_en=en, region=en, is_active=True))
+        all_perms = sorted({p for pset in ROLE_PERMISSIONS.values() for p in pset if p != '*'})
+        for p_code in all_perms:
+            if not db.scalar(select(Permission).where(Permission.code == p_code)):
+                mod = p_code.split('.')[0].upper() if '.' in p_code else 'CORE'
+                db.add(Permission(code=p_code, module=mod, description_en=f'Permission {p_code}', is_active=True))
+        for tpl_code, subj_bn, body_bn in [
+            ('WELCOME_VERIFY', 'অ্যাকাউন্ট যাচাইকরণ', 'পিজিসিবি পোর্টালে স্বাগতম। আপনার ইমেইল যাচাই করুন।'),
+            ('APPLICATION_APPROVED', 'সদস্যপদ অনুমোদিত', 'আপনার সদস্যপদ আবেদন অনুমোদিত হয়েছে।'),
+            ('PAYMENT_RECEIPT', 'পেমেন্ট রসিদ', 'আপনার পেমেন্ট সফলভাবে গৃহীত হয়েছে।'),
+        ]:
+            if not db.scalar(select(NotificationTemplate).where(NotificationTemplate.code == tpl_code)):
+                db.add(NotificationTemplate(code=tpl_code, channel='EMAIL', subject_bn=subj_bn, body_bn=body_bn, is_active=True))
+        db.commit()
+
         if is_prod_like:
             # Staging / Production: Never create predictable demo accounts.
             # Only provision an explicit admin if configured via environment variables.
