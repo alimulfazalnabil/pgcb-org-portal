@@ -56,6 +56,74 @@ def _matches_magic_bytes(ext: str, content: bytes) -> bool:
     return False
 
 
+EICAR_SIGNATURE = b'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
+MALICIOUS_PAYLOAD_PATTERNS = (
+    EICAR_SIGNATURE,
+    b'<?php',
+    b'<script',
+    b'javascript:',
+    b'/JavaScript',
+    b'/Launch',
+)
+
+
+def scan_upload_security(content: bytes, filename: str | None = None) -> None:
+    """
+    Perform virus/malware signature and active-content security scan on uploaded bytes.
+    Rejects EICAR test signatures, embedded PHP/script tags, and PDF active launch/JS actions.
+    """
+    sample = content[:262144]  # Scan first 256 KB
+    sample_lower = sample.lower()
+    if EICAR_SIGNATURE in sample:
+        raise HTTPException(400, 'Security scan failed: Virus signature (EICAR) detected in uploaded file')
+    for pat in (b'<?php', b'<script', b'javascript:'):
+        if pat in sample_lower:
+            raise HTTPException(400, 'Security scan failed: Embedded script or executable payload detected')
+    if content.startswith(b'%PDF-'):
+        for pdf_pat in (b'/JavaScript', b'/Launch'):
+            if pdf_pat in sample:
+                raise HTTPException(400, 'Security scan failed: Active PDF script or launch action is not permitted')
+
+
+def optimize_image_to_webp(
+    content: bytes,
+    max_width: int = 1600,
+    max_height: int = 1600,
+    quality: int = 82,
+) -> tuple[bytes, dict]:
+    """
+    Resize image to fit within max_width x max_height, strip EXIF metadata, and convert to WebP.
+    Returns (webp_bytes, metadata_dict).
+    """
+    import io
+    from PIL import Image
+
+    original_size = len(content)
+    with Image.open(io.BytesIO(content)) as img:
+        orig_w, orig_h = img.size
+        if img.mode not in ('RGB', 'RGBA'):
+            img = img.convert('RGBA' if 'A' in img.mode else 'RGB')
+        if orig_w > max_width or orig_h > max_height:
+            img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+        out_w, out_h = img.size
+        buf = io.BytesIO()
+        img.save(buf, format='WEBP', quality=quality, method=4)
+        webp_bytes = buf.getvalue()
+
+    meta = {
+        'original_bytes': original_size,
+        'optimized_bytes': len(webp_bytes),
+        'original_width': orig_w,
+        'original_height': orig_h,
+        'width': out_w,
+        'height': out_h,
+        'format': 'WEBP',
+        'content_type': 'image/webp',
+        'savings_percent': round(max(0.0, (1.0 - len(webp_bytes) / max(1, original_size)) * 100.0), 1),
+    }
+    return webp_bytes, meta
+
+
 def validate_upload_bytes(
     filename: str | None,
     content_type: str | None,
@@ -66,7 +134,7 @@ def validate_upload_bytes(
     allow_office: bool = False,
 ) -> tuple[str, str, str]:
     """
-    Validate file extension, MIME type, magic bytes, file size, and filename safety.
+    Validate file extension, MIME type, magic bytes, virus/security scan, file size, and filename safety.
     Returns (clean_display_filename, uuid_storage_filename, normalized_content_type).
     """
     raw_name = filename or ''
@@ -104,6 +172,8 @@ def validate_upload_bytes(
 
     if not _matches_magic_bytes(ext, content):
         raise HTTPException(400, 'File header magic bytes do not match the declared file type')
+
+    scan_upload_security(content, clean_name)
 
     resolved_ct = normalized_ct or next(iter(allowed_map[ext]))
     uuid_storage_name = f'{uuid.uuid4().hex}_{clean_name}'
