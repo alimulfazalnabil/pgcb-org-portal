@@ -94,4 +94,30 @@ export const adminApi = {
   createUser: (data: any) => request<any>('/admin/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (userId: number, data: any) =>
     request<any>(`/admin/users/${userId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  getKnowledgeDocuments: (params?: { category?: string; include_historical?: boolean }) => {
+    const query = new URLSearchParams();
+    if (params?.category) query.set('category', params.category);
+    if (params?.include_historical !== undefined) query.set('include_historical', String(params.include_historical));
+    return request<any[]>(`/admin/knowledge/documents?${query.toString()}`);
+  },
+  createKnowledgeDocument: (data: any) =>
+    request<any>('/admin/knowledge/documents', { method: 'POST', body: JSON.stringify(data) }),
+  supersedeKnowledgeDocument: (oldDocId: number, newDocumentId: number) =>
+    request<any>(`/admin/knowledge/documents/${oldDocId}/supersede`, {
+      method: 'POST',
+      body: JSON.stringify({ new_document_id: newDocumentId }),
+    }),
+  generateSmartFaqs: (documentId: number, maxFaqs = 5) =>
+    request<any>('/admin/ai/generate-faqs', {
+      method: 'POST',
+      body: JSON.stringify({ document_id: documentId, max_faqs: maxFaqs }),
+    }),
+  getAdminFaqs: (status?: string) =>
+    request<any[]>(`/admin/ai/faqs${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  updateAdminFaq: (faqId: number, data: any) =>
+    request<any>(`/admin/ai/faqs/${faqId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  aiContentAssist: (data: any) =>
+    request<any>('/admin/ai/content-assist', { method: 'POST', body: JSON.stringify(data) }),
+  getAiUsageAnalytics: () => request<any>('/admin/ai/analytics'),
+  getAdminIntelligence: () => request<any>('/admin/analytics/intelligence'),
 };
