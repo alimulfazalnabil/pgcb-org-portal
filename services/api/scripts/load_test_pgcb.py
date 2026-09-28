@@ -29,26 +29,28 @@ from typing import Any
 
 TARGET_DATASET_COUNTS = {
     'members': 1500,
-    'applications': 320,
-    'payments': 1050,
+    'applications': 520,
+    'payments': 2050,
     'notifications': 5100,
     'documents': 1020,
     'events': 110,
+    'audit_logs': 10000,
 }
 
 
 def run_realistic_db_benchmark(scale: float = 1.0) -> dict[str, Any]:
     """
     Create an isolated database with realistic PGCB production data volumes
-    (1,500 members, 320 applications, 1,050 payments, 5,100 notifications, 1,020 documents, 110 events),
+    (1,500 members, 520 applications, 2,050 payments, 5,100 notifications, 1,020 documents, 110 events, 10,000 audit logs),
     create all 12 production indexes, and benchmark expensive analytical & directory queries.
     """
     n_members = max(150, int(TARGET_DATASET_COUNTS['members'] * scale))
-    n_apps = max(35, int(TARGET_DATASET_COUNTS['applications'] * scale))
-    n_payments = max(105, int(TARGET_DATASET_COUNTS['payments'] * scale))
+    n_apps = max(55, int(TARGET_DATASET_COUNTS['applications'] * scale))
+    n_payments = max(205, int(TARGET_DATASET_COUNTS['payments'] * scale))
     n_notifs = max(510, int(TARGET_DATASET_COUNTS['notifications'] * scale))
     n_docs = max(105, int(TARGET_DATASET_COUNTS['documents'] * scale))
     n_events = max(15, int(TARGET_DATASET_COUNTS['events'] * scale))
+    n_audits = max(1000, int(TARGET_DATASET_COUNTS['audit_logs'] * scale))
 
     tracemalloc.start()
     cpu_start = time.process_time()

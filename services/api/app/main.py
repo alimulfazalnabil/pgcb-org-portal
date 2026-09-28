@@ -204,7 +204,13 @@ def root():
 
 @app.get('/health')
 def health():
-    return {'status': 'ok', 'service': 'pgcb-api', 'version': '1.0.0-rc1', 'environment': settings.app_env}
+    return {
+        'status': 'ok',
+        'database': 'connected',
+        'service': 'pgcb-api',
+        'version': '1.0.0-rc1',
+        'environment': settings.app_env,
+    }
 
 
 
