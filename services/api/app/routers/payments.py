@@ -711,5 +711,79 @@ def verify_payment_receipt(token_or_receipt_no: str, db: Session = Depends(get_d
         "currency": data["currency"],
         "payment_method": data["payment_method"],
         "status": data["status"],
+        "status": data["status"],
         "paid_at": data["paid_at"],
     }
+
+
+@router.post("/payments/sandbox/simulate")
+def simulate_sandbox_payment_webhook(
+    payload: dict,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Simulate a complete payment gateway webhook in sandbox/development mode:
+    Development -> Payment Sandbox -> Successful payment -> Webhook simulation -> Membership activation.
+    """
+    if settings.payment_mode.lower() != "sandbox" and settings.is_production_like:
+        raise HTTPException(403, "Sandbox payment simulation is disabled when PAYMENT_MODE is not sandbox")
+
+    payment_id = payload.get("payment_id")
+    transaction_ref = payload.get("transaction_ref")
+    core_tx = None
+    if payment_id and str(payment_id).isdigit():
+        core_tx = db.get(CorePaymentTransaction, int(payment_id))
+    elif transaction_ref:
+        core_tx = db.scalar(
+            select(CorePaymentTransaction).where(CorePaymentTransaction.transaction_ref == str(transaction_ref))
+        )
+    if not core_tx:
+        raise HTTPException(404, "Payment transaction not found")
+
+    if core_tx.status in ("PAID", "SUCCESS"):
+        return {
+            "status": "already_processed",
+            "idempotent_replay": True,
+            "payment_id": core_tx.id,
+            "receipt_no": core_tx.receipt_no,
+        }
+
+    sim_trx_id = payload.get("provider_transaction_id") or f"SANDBOX-{core_tx.provider or 'BKASH'}-{core_tx.id}"
+    core_tx.provider_transaction_id = sim_trx_id
+    if not core_tx.transaction_ref:
+        core_tx.transaction_ref = sim_trx_id
+    transition_payment_status(core_tx, "PAID")
+    ensure_receipt_metadata(core_tx)
+    activate_membership_from_payment(db, core_tx)
+
+    webhook_log = PaymentWebhook(
+        provider=PaymentProviderType.BKASH,
+        payload={"sandbox_simulation": True, "payment_id": core_tx.id, "trxID": sim_trx_id},
+        is_processed=True,
+    )
+    db.add(webhook_log)
+    db.commit()
+    db.refresh(core_tx)
+
+    member = db.get(Member, core_tx.member_id) if core_tx.member_id else None
+    log_audit_action(
+        db,
+        request,
+        action="SANDBOX_PAYMENT_SIMULATED",
+        entity="PAYMENT",
+        entity_id=str(core_tx.id),
+        user=user,
+        new_value={"trx_id": sim_trx_id, "amount": float(core_tx.amount), "receipt_no": core_tx.receipt_no},
+    )
+    return {
+        "status": "success",
+        "payment_mode": settings.payment_mode,
+        "payment_id": core_tx.id,
+        "payment_status": core_tx.status,
+        "receipt_no": core_tx.receipt_no,
+        "member_status": member.status if member else None,
+        "membership_id": member.membership_id if member else None,
+    }
+
