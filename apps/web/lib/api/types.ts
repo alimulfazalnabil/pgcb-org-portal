@@ -115,3 +115,124 @@ export interface ApplicationTrackResult {
   timeline: TimelineStep[];
   membership_id: string | null;
 }
+
+export interface NewsArticle {
+  id: number;
+  slug: string;
+  title_bn: string;
+  title_en?: string;
+  summary_bn?: string;
+  summary_en?: string;
+  content_bn?: string;
+  content_en?: string;
+  body_bn?: string;
+  body_en?: string;
+  category: string;
+  tags: string[];
+  cover_image_url?: string;
+  gallery_urls?: string[];
+  author_name?: string;
+  is_featured: boolean;
+  is_published: boolean;
+  workflow_status?: string;
+  scheduled_at?: string;
+  published_at?: string;
+  view_count: number;
+  structured_data?: Record<string, any>;
+  seo?: {
+    meta_title: string;
+    meta_description: string;
+    og_image_url?: string;
+    canonical_url: string;
+    json_ld: Record<string, any>;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export type NewsItem = NewsArticle;
+
+export interface CertificateWalletItem {
+  id: number;
+  certificate_no: string;
+  certificate_number: string;
+  certificate_type: string;
+  title_bn: string;
+  title_en?: string;
+  recipient_name: string;
+  issuer: string;
+  issue_date: string;
+  status: 'ISSUED' | 'REVOKED' | 'ACTIVE';
+  revoked: boolean;
+  revocation_reason?: string;
+  verification_token: string;
+  view_url: string;
+  download_url: string;
+  png_url: string;
+  verify_url: string;
+  qr_verify_url: string;
+}
+
+export interface DigitalCardDetails {
+  membership_id: string;
+  name_bn: string;
+  name_en?: string;
+  designation_bn?: string;
+  designation_en?: string;
+  circle_name_bn?: string;
+  circle_name_en?: string;
+  employee_id?: string;
+  blood_group?: string;
+  organization: string;
+  status: 'ACTIVE' | 'EXPIRED' | 'REVOKED' | 'PENDING';
+  issued_at?: string;
+  expires_at?: string;
+  offline_cacheable: boolean;
+  verify_url: string;
+  qr_verify_url: string;
+  card_png_url: string;
+  card_back_png_url: string;
+  card_pdf_url: string;
+}
+
+export interface RenewalOptionItem {
+  code: string;
+  plan_id?: string;
+  label_en: string;
+  label_bn: string;
+  years: number;
+  fee: number;
+  amount_bdt?: number;
+  currency: string;
+}
+
+export interface NotificationPreferences {
+  in_app_enabled?: boolean;
+  email_enabled: boolean;
+  sms_enabled: boolean;
+  push_enabled?: boolean;
+}
+
+export interface MemberDashboardData {
+  greeting?: string;
+  hero_card?: Record<string, any>;
+  membership?: {
+    member_id: string;
+    status: string;
+    valid_until?: string;
+    valid_until_formatted?: string;
+    days_remaining?: number | null;
+    circle_name_bn?: string;
+    designation_bn?: string;
+  };
+  quick_actions?: Array<Record<string, any>>;
+  quick_stats?: Record<string, any>;
+  recent_activity?: Array<{
+    title?: string;
+    title_bn?: string;
+    status?: string;
+    timestamp?: string;
+  }>;
+}
+
+

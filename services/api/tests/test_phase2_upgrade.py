@@ -685,5 +685,583 @@ def test_sprint1_first_production_test_pgd_test_0001():
         assert len(notif_items) >= 2
 
 
+def test_sprint2_member_portal_dashboard_renewal_card_wallet_and_notifications():
+    """
+    Verify Sprint 2 — Member Portal 2.0 & PWA Backend Capabilities:
+    1. Member Dashboard hero card, 6 quick actions, and unified recent activity feed.
+    2. Renewal workflow (1-year ৳2,000, 2-year ৳4,000, Lifetime ৳10,000) + 60/30/7/0-day reminder schedule.
+    3. Digital ID Card 2.0 details, QR verification, and offline caching metadata.
+    4. Certificate Wallet (Membership Certificate + Training/Event Certificates, View/Download/Verify).
+    5. Safe Payment History (no raw gateway payload exposure) & Notification Center indicators.
+    """
+    from datetime import datetime
+    from app.domain.membership import REMINDER_OFFSETS, due_membership_events
+
+    assert 60 in REMINDER_OFFSETS
+    assert 30 in REMINDER_OFFSETS
+    assert 7 in REMINDER_OFFSETS
+    assert 0 in REMINDER_OFFSETS
+
+    now_dt = datetime(2026, 10, 1, 12, 0)
+    ev_60 = due_membership_events('ACTIVE', datetime(2026, 11, 30, 12, 0), now=now_dt)
+    assert any(k == 'REMINDER_60D' for k, _, _ in ev_60)
+    ev_0 = due_membership_events('ACTIVE', datetime(2026, 10, 1, 18, 0), now=now_dt)
+    assert any(k == 'REMINDER_0D' for k, _, _ in ev_0)
+
+    with TestClient(app) as client:
+        headers = _login(client, 'member@example.org')
+
+        # 1. Member Dashboard
+        dash_res = client.get('/api/v1/member/dashboard', headers=headers)
+        assert dash_res.status_code == 200, dash_res.text
+        dash = dash_res.json()
+        assert 'hero_card' in dash
+        assert dash['hero_card']['membership_id'] == 'PGD-2026-1001'
+        assert len(dash['quick_actions']) == 6
+        assert isinstance(dash['recent_activity'], list)
+
+        # 2. Renewal options & 2-Year Renewal initiation -> payment callback -> extended validity
+        opts_res = client.get('/api/v1/member/renewal-options', headers=headers)
+        assert opts_res.status_code == 200
+        opts = opts_res.json()
+        plan_ids = {p['plan_id']: p['amount_bdt'] for p in opts['options']}
+        assert plan_ids['RENEWAL_1YR'] == 2000
+        assert plan_ids['RENEWAL_2YR'] == 4000
+        assert plan_ids['LIFE'] == 10000
+        assert opts['reminder_schedule_days'] == [60, 30, 7, 0]
+
+        ren_init = client.post(
+            '/api/v1/member/renewal/initiate',
+            headers=headers,
+            json={'period': '2YR', 'provider': 'TEST'},
+        )
+        assert ren_init.status_code == 200, ren_init.text
+        r_data = ren_init.json()
+        assert r_data['amount'] == 4000.0
+        assert r_data['membership_plan_id'] == 'RENEWAL_2YR'
+
+        cb_res = client.post(
+            '/api/v1/payments/callback/TEST',
+            json={
+                'transaction_id': r_data['transaction_id'],
+                'provider_transaction_id': r_data['provider_transaction_id'],
+                'status': 'SUCCESS',
+                'amount': 4000.0,
+            },
+        )
+        assert cb_res.status_code == 200, cb_res.text
+
+        ren_list = client.get('/api/v1/member/renewals', headers=headers)
+        assert ren_list.status_code == 200
+        assert len(ren_list.json()['renewals']) >= 1
+
+        # 3. Digital ID Card 2.0 metadata
+        card_meta = client.get('/api/v1/member/card/details', headers=headers)
+        assert card_meta.status_code == 200
+        cm = card_meta.json()
+        assert cm['organization'] == 'PGCB'
+        assert cm['membership_id'] == 'PGD-2026-1001'
+        assert cm['offline_cacheable'] is True
+        assert '/verify/' in cm['qr_verify_url']
+
+        # 4. Certificate Wallet
+        wallet_res = client.get('/api/v1/member/certificates', headers=headers)
+        assert wallet_res.status_code == 200, wallet_res.text
+        wallet = wallet_res.json()
+        assert len(wallet) >= 1
+        first_cert = wallet[0]
+        assert 'view_url' in first_cert
+        assert 'download_url' in first_cert
+        assert 'verify_url' in first_cert
+
+        cert_pdf = client.get(f"/api/v1/certificates/{first_cert['certificate_no']}.pdf")
+        assert cert_pdf.status_code == 200
+        assert cert_pdf.content.startswith(b'%PDF')
+
+        cert_png = client.get(f"/api/v1/certificates/{first_cert['certificate_no']}.png")
+        assert cert_png.status_code == 200
+        assert cert_png.headers['content-type'] == 'image/png'
+
+        # 5. Safe Payment History & Notification Center
+        pay_hist = client.get('/api/v1/member/payments', headers=headers)
+        assert pay_hist.status_code == 200
+        for p in pay_hist.json():
+            assert 'provider_payload' not in p
+            assert 'amount_formatted' in p
+            assert 'purpose_label' in p
+
+        notifs = client.get('/api/v1/member/notifications', headers=headers)
+        assert notifs.status_code == 200
+        for n in notifs.json():
+            assert n['indicator'] in ('●', '○')
+            assert 'relative_time' in n
+
+
+def test_sprint3_grid_circle_dashboard_data_isolation_mis_and_exports():
+    """
+    Verify Sprint 3 — Organization & Grid Circle Management:
+    1. Grid Circle Dashboard KPIs and Circle Administrator assignment.
+    2. Strict data-level isolation for CIRCLE_ADMIN (cannot modify another Circle, cannot review outside Circle, cannot view global settings/users).
+    3. Membership Approval Center extended actions (DOCUMENTS_REQUIRED, PAYMENT_PENDING) & review_history.
+    4. MIS Report & Financial Report (with finance.read RBAC enforcement).
+    5. Filtered exports in CSV, Excel (.xlsx), and PDF (.pdf).
+    """
+    from sqlalchemy import select
+    from app.db.session import SessionLocal
+    from app.models import Circle, Member, User
+    from app.core.security import hash_password
+
+    with SessionLocal() as db:
+        circles = list(db.scalars(select(Circle).where(Circle.active == True).order_by(Circle.id.asc())).all())
+        assert len(circles) >= 2
+        c1, c2 = circles[0], circles[1]
+
+        ca_email = 'circle1.admin@example.org'
+        ca_user = db.scalar(select(User).where(User.email == ca_email))
+        if not ca_user:
+            ca_user = User(
+                email=ca_email,
+                password_hash=hash_password(TEST_PW),
+                name_bn='সার্কেল ০১ প্রশাসক',
+                name_en='Circle 01 Admin',
+                role='CIRCLE_ADMIN',
+                is_active=True,
+                email_verified=True,
+            )
+            db.add(ca_user)
+            db.flush()
+        ca_user.role = 'CIRCLE_ADMIN'
+        ca_user.password_hash = hash_password(TEST_PW)
+
+        c2_member_email = 'circle2.applicant@example.org'
+        c2_user = db.scalar(select(User).where(User.email == c2_member_email))
+        if not c2_user:
+            c2_user = User(
+                email=c2_member_email,
+                password_hash=hash_password(TEST_PW),
+                name_bn='সার্কেল ০২ আবেদনকারী',
+                name_en='Circle 02 Applicant',
+                role='MEMBER',
+                is_active=True,
+                email_verified=True,
+            )
+            db.add(c2_user)
+            db.flush()
+        c2_member = db.scalar(select(Member).where(Member.user_id == c2_user.id))
+        if not c2_member:
+            c2_member = Member(user_id=c2_user.id, circle_id=c2.id, status='SUBMITTED', designation_bn='উপ-সহকারী প্রকৌশলী')
+            db.add(c2_member)
+        else:
+            c2_member.circle_id = c2.id
+        db.commit()
+        c1_id, c2_id, ca_user_id, c2_member_id = c1.id, c2.id, ca_user.id, c2_member.id
+
+    with TestClient(app) as client:
+        super_headers = _login(client, 'admin@example.org')
+
+        # 1. Assign Circle Admin to Circle 01
+        assign_res = client.post(
+            f'/api/v1/admin/circles/{c1_id}/assign-admin',
+            headers=super_headers,
+            json={'user_id': ca_user_id},
+        )
+        assert assign_res.status_code == 200, assign_res.text
+
+        # 2. Login as Circle 01 Admin and verify Circle Dashboard + strict data isolation
+        ca_headers = _login(client, 'circle1.admin@example.org')
+
+        my_dash = client.get('/api/v1/admin/circle-dashboard', headers=ca_headers)
+        assert my_dash.status_code == 200, my_dash.text
+        assert my_dash.json()['circle']['id'] == c1_id
+        assert 'kpis' in my_dash.json()
+
+        # Circle 01 Admin blocked from Circle 02 dashboard (HTTP 403)
+        other_dash = client.get(f'/api/v1/admin/circles/{c2_id}/dashboard', headers=ca_headers)
+        assert other_dash.status_code == 403
+
+        # Circle 01 Admin blocked from modifying Circle 02 (HTTP 403)
+        mod_other = client.put(
+            f'/api/v1/admin/circles/{c2_id}',
+            headers=ca_headers,
+            json={'name_bn': 'Unauthorized Change', 'name_en': 'Unauthorized', 'active': True},
+        )
+        assert mod_other.status_code == 403
+
+        # Circle 01 Admin blocked from reviewing Circle 02 member (HTTP 403)
+        rev_other = client.post(
+            f'/api/v1/admin/members/{c2_member_id}/review',
+            params={'action': 'APPROVE'},
+            headers=ca_headers,
+        )
+        assert rev_other.status_code == 403
+
+        # Circle 01 Admin blocked from viewing Circle 02 member detail (HTTP 403)
+        det_other = client.get(f'/api/v1/admin/members/{c2_member_id}', headers=ca_headers)
+        assert det_other.status_code == 403
+
+        # Circle 01 Admin blocked from global settings & user management (HTTP 403)
+        assert client.get('/api/v1/admin/settings', headers=ca_headers).status_code == 403
+        assert client.get('/api/v1/admin/users', headers=ca_headers).status_code == 403
+
+        # Circle 01 Admin member list only contains Circle 01 members
+        ca_members = client.get('/api/v1/admin/members', headers=ca_headers)
+        assert ca_members.status_code == 200
+        assert all(m['circle_id'] == c1_id for m in ca_members.json())
+
+        # 3. Super Admin reviews member with DOCUMENTS_REQUIRED -> PAYMENT_PENDING -> APPROVE and checks review_history
+        super_headers = _login(client, 'admin@example.org')
+        r_doc = client.post(
+            f'/api/v1/admin/members/{c2_member_id}/review',
+            params={'action': 'DOCUMENTS_REQUIRED', 'note': 'Please upload clear NID copy'},
+            headers=super_headers,
+        )
+        assert r_doc.status_code == 200
+        assert r_doc.json()['status'] == 'DOCUMENTS_REQUIRED'
+
+        r_pay = client.post(
+            f'/api/v1/admin/members/{c2_member_id}/review',
+            params={'action': 'PAYMENT_PENDING', 'note': 'Documents verified, awaiting fee'},
+            headers=super_headers,
+        )
+        assert r_pay.status_code == 200
+        assert r_pay.json()['status'] == 'PAYMENT_PENDING'
+
+        m_detail = client.get(f'/api/v1/admin/members/{c2_member_id}', headers=super_headers)
+        assert m_detail.status_code == 200
+        assert len(m_detail.json()['review_history']) >= 2
+
+        # 4. MIS Report & Financial Report RBAC
+        mis_res = client.get('/api/v1/admin/reports/mis', headers=super_headers)
+        assert mis_res.status_code == 200
+        assert 'membership_summary' in mis_res.json()
+        assert len(mis_res.json()['circle_comparison']) >= 9
+
+        fin_res = client.get('/api/v1/admin/reports/financial', headers=super_headers)
+        assert fin_res.status_code == 200
+        assert 'total_revenue' in fin_res.json()
+
+        editor_headers = _login(client, 'content@example.org')
+        assert client.get('/api/v1/admin/reports/financial', headers=editor_headers).status_code == 403
+
+        # 5. Filtered Exports in CSV, Excel (.xlsx), and PDF (.pdf)
+        super_headers = _login(client, 'admin@example.org')
+        csv_exp = client.get(f'/api/v1/admin/exports/members.csv?circle_id={c1_id}&status=ACTIVE', headers=super_headers)
+        assert csv_exp.status_code == 200
+        assert csv_exp.headers['content-type'].startswith('text/csv')
+
+        xlsx_exp = client.get(f'/api/v1/admin/exports/members.xlsx?circle_id={c1_id}', headers=super_headers)
+        assert xlsx_exp.status_code == 200
+        assert 'spreadsheetml' in xlsx_exp.headers['content-type']
+        assert xlsx_exp.content.startswith(b'PK')
+
+        pdf_exp = client.get(f'/api/v1/admin/exports/members.pdf?circle_id={c1_id}', headers=super_headers)
+        assert pdf_exp.status_code == 200
+        assert pdf_exp.content.startswith(b'%PDF')
+
+
+def test_sprint4_cms_workflow_versioning_news_media_announcements_and_seo():
+    """
+    Verify Sprint 4 — Advanced CMS & Communications:
+    1. Multi-role workflow: Editor creates circular -> Editor blocked from direct publish (403) ->
+       Reviewer approves circular (blocked from publish 403) -> Publisher publishes circular ->
+       Public circular shows extended metadata -> Active member receives notification ->
+       Version history (ContentRevision) & Audit trail recorded.
+    2. Controlled Document signed download URL & access control.
+    3. News CMS (Admin CRUD + Public list/detail + SEO JSON-LD + View count).
+    4. Media Library with automatic Pillow compression & WebP conversion.
+    5. Homepage CMS, Targeted Announcements, Inquiry Service Desk (PGCB-REQ-...), Sitemap/Robots/RSS, and CMS Analytics.
+    """
+    import io
+    from PIL import Image
+    from sqlalchemy import select
+    from app.db.session import SessionLocal
+    from app.models import User
+    from app.core.security import hash_password
+
+    with SessionLocal() as db:
+        for email, role, name_bn in [
+            ('cms.editor@example.org', 'CONTENT_EDITOR', 'সিএমএস এডিটর'),
+            ('cms.reviewer@example.org', 'CONTENT_REVIEWER', 'সিএমএস রিভিউয়ার'),
+            ('cms.publisher@example.org', 'CONTENT_PUBLISHER', 'সিএমএস পাবলিশার'),
+        ]:
+            u = db.scalar(select(User).where(User.email == email))
+            if not u:
+                u = User(
+                    email=email,
+                    password_hash=hash_password(TEST_PW),
+                    name_bn=name_bn,
+                    name_en=role,
+                    role=role,
+                    is_active=True,
+                    email_verified=True,
+                )
+                db.add(u)
+            else:
+                u.role = role
+                u.password_hash = hash_password(TEST_PW)
+        db.commit()
+
+    with TestClient(app) as client:
+        # 1. Editor logs in: blocked from direct publish (403), creates draft circular
+        editor_headers = _login(client, 'cms.editor@example.org')
+        direct_pub = client.post(
+            '/api/v1/admin/circulars',
+            headers=editor_headers,
+            json={
+                'title_bn': 'অনুমোদনহীন সরাসরি প্রকাশনা চেষ্টা',
+                'category': 'CIRCULAR',
+                'is_published': True,
+            },
+        )
+        assert direct_pub.status_code == 403
+
+        draft_circ = client.post(
+            '/api/v1/admin/circulars',
+            headers=editor_headers,
+            json={
+                'title_bn': 'গ্রিড সাবস্টেশন নিরাপত্তা প্রটোকল সার্কুলার ২০২৬',
+                'title_en': 'Grid Substation Safety Protocol Circular 2026',
+                'reference_no': 'PGCB/CIR/2026/401',
+                'category': 'CIRCULAR',
+                'summary_bn': 'সকল গ্রিড সার্কেলের নিরাপত্তা নির্দেশিকা।',
+                'is_published': False,
+            },
+        )
+        assert draft_circ.status_code == 200, draft_circ.text
+        circ_id = draft_circ.json()['id']
+
+        # Editor updates extended institutional metadata & submits to review
+        meta_put = client.put(
+            f'/api/v1/admin/cms/circular-meta/{circ_id}',
+            headers=editor_headers,
+            json={
+                'issuing_authority': 'কেন্দ্রীয় কার্যনির্বাহী পরিষদ, পিজিসিবি',
+                'effective_date': '2026-10-01',
+                'target_audience': 'ALL_MEMBERS',
+            },
+        )
+        assert meta_put.status_code == 200
+
+        sub_wf = client.post(
+            f'/api/v1/admin/workflows/CIRCULAR/{circ_id}/transition',
+            headers=editor_headers,
+            json={'status': 'SUBMITTED', 'review_note': 'Ready for editorial review'},
+        )
+        assert sub_wf.status_code == 200
+
+        # Editor cannot approve or publish via workflow transition (HTTP 403)
+        assert client.post(
+            f'/api/v1/admin/workflows/CIRCULAR/{circ_id}/transition',
+            headers=editor_headers,
+            json={'status': 'PUBLISHED'},
+        ).status_code == 403
+
+        # 2. Reviewer logs in: approves circular, but blocked from publishing (HTTP 403)
+        reviewer_headers = _login(client, 'cms.reviewer@example.org')
+        app_wf = client.post(
+            f'/api/v1/admin/workflows/CIRCULAR/{circ_id}/transition',
+            headers=reviewer_headers,
+            json={'status': 'APPROVED', 'review_note': 'Verified reference number and authority'},
+        )
+        assert app_wf.status_code == 200
+        assert app_wf.json()['status'] == 'APPROVED'
+
+        rev_pub_attempt = client.post(
+            f'/api/v1/admin/workflows/CIRCULAR/{circ_id}/transition',
+            headers=reviewer_headers,
+            json={'status': 'PUBLISHED'},
+        )
+        assert rev_pub_attempt.status_code == 403
+
+        # 3. Publisher logs in: publishes circular -> triggers member notifications
+        publisher_headers = _login(client, 'cms.publisher@example.org')
+        pub_wf = client.post(
+            f'/api/v1/admin/workflows/CIRCULAR/{circ_id}/transition',
+            headers=publisher_headers,
+            json={'status': 'PUBLISHED', 'review_note': 'Official publication approved'},
+        )
+        assert pub_wf.status_code == 200
+        assert pub_wf.json()['is_published'] is True
+
+        # Verify public circular detail includes extended metadata
+        pub_circ = client.get(f'/api/v1/public/circulars/{circ_id}')
+        assert pub_circ.status_code == 200
+        assert pub_circ.json()['effective_date'] == '2026-10-01'
+        assert pub_circ.json()['issuing_authority'] == 'কেন্দ্রীয় কার্যনির্বাহী পরিষদ, পিজিসিবি'
+
+        # Verify ContentRevision version history recorded all steps (create, meta update, submitted, approved, published)
+        revs = client.get(f'/api/v1/admin/revisions/CIRCULAR/{circ_id}', headers=publisher_headers)
+        assert revs.status_code == 200
+        assert len(revs.json()) >= 4
+        assert revs.json()[0]['status'] == 'PUBLISHED'
+
+        # 4. Controlled Document upload, unauthenticated block (401), & signed URL download by member
+        admin_headers = _login(client, 'admin@example.org')
+        up_doc = client.post(
+            '/api/v1/documents/upload',
+            headers=admin_headers,
+            files={'file': ('controlled_audit_report_2026.pdf', b'%PDF-1.4\n%Controlled Report\n%%EOF', 'application/pdf')},
+        )
+        assert up_doc.status_code == 201
+        up_info = up_doc.json()
+
+        doc_rec = client.post(
+            '/api/v1/documents',
+            headers=admin_headers,
+            json={
+                'title_bn': 'আভ্যন্তরীণ অডিট প্রতিবেদন ২০২৬ (সদস্য সংরক্ষিত)',
+                'title_en': 'Internal Audit Report 2026 (Members Only)',
+                'category': 'AUDIT_REPORT',
+                'file_path': up_info['file_path'],
+                'file_size': up_info['file_size'],
+                'content_type': up_info['content_type'],
+                'is_published': True,
+            },
+        )
+        assert doc_rec.status_code == 201
+        controlled_doc_id = doc_rec.json()['id']
+
+        # Clear cookies to test unauthenticated access to controlled document -> 401
+        client.cookies.clear()
+        unauth_dl = client.get(f'/api/v1/documents/{controlled_doc_id}/download')
+        assert unauth_dl.status_code == 401
+
+        # Member logs in, receives notification of published circular, gets signed URL, and downloads controlled document
+        member_headers = _login(client, 'member@example.org')
+        m_notifs = client.get('/api/v1/member/notifications', headers=member_headers).json()
+        assert any('নতুন প্রকাশনা' in n['title_bn'] for n in m_notifs)
+
+        signed_res = client.get(f'/api/v1/documents/{controlled_doc_id}/signed-url', headers=member_headers)
+        assert signed_res.status_code == 200
+        dl_url = signed_res.json()['download_url']
+
+        client.cookies.clear()
+        signed_dl = client.get(dl_url)
+        assert signed_dl.status_code == 200
+        assert signed_dl.content.startswith(b'%PDF-1.4')
+
+        # 5. News CMS + WebP Media Optimization + Homepage CMS + Targeted Announcements + Inquiry Ticket + SEO/RSS
+        admin_headers = _login(client, 'admin@example.org')
+
+        # Create PNG image in memory and upload to /admin/media/upload-optimized -> converts to WebP
+        img_buf = io.BytesIO()
+        Image.new('RGB', (640, 360), color=(11, 45, 72)).save(img_buf, format='PNG')
+        media_up = client.post(
+            '/api/v1/admin/media/upload-optimized',
+            headers=admin_headers,
+            files={'file': ('substation_banner.png', img_buf.getvalue(), 'image/png')},
+            data={'title_bn': 'সাবস্টেশন ব্যানার', 'alt_text': 'PGCB Substation', 'folder': 'news', 'convert_to_webp': 'true'},
+        )
+        assert media_up.status_code == 200, media_up.text
+        m_json = media_up.json()
+        assert m_json['format'] == 'WEBP'
+        assert m_json['width'] == 640
+        assert m_json['height'] == 360
+
+        # Create News Article
+        news_create = client.post(
+            '/api/v1/admin/news',
+            headers=admin_headers,
+            json={
+                'title_bn': 'পিজিসিবি ৪০০ কেভি নতুন গ্রিড লাইন কমিশনিং সম্পন্ন',
+                'title_en': 'PGCB Completes Commissioning of New 400kV Grid Line',
+                'summary_bn': 'জাতীয় গ্রিডে নিরবচ্ছিন্ন বিদ্যুৎ সঞ্চালনে নতুন মাইলফলক।',
+                'content_bn': 'পাওয়ার গ্রিড কোম্পানি অব বাংলাদেশ (পিজিসিবি)-এর প্রকৌশলীদের তত্ত্বাবধানে নতুন ৪০০ কেভি সঞ্চালন লাইন সফলভাবে চালু হয়েছে।',
+                'category': 'ACHIEVEMENT',
+                'tags': ['400kV', 'Grid', 'PGCB'],
+                'cover_image_url': m_json['url'],
+                'is_featured': True,
+                'is_published': True,
+            },
+        )
+        assert news_create.status_code == 201, news_create.text
+        slug = news_create.json()['slug']
+
+        pub_news_list = client.get('/api/v1/public/news?featured=true')
+        assert pub_news_list.status_code == 200
+        assert any(n['slug'] == slug for n in pub_news_list.json())
+
+        pub_news_detail = client.get(f'/api/v1/public/news/{slug}')
+        assert pub_news_detail.status_code == 200
+        assert pub_news_detail.json()['view_count'] >= 1
+        assert pub_news_detail.json()['seo']['json_ld']['@type'] == 'NewsArticle'
+
+        # Homepage CMS
+        hp_put = client.put(
+            '/api/v1/admin/homepage-config',
+            headers=admin_headers,
+            json={'hero_banner': {'headline_bn': 'পিজিসিবি প্রকৌশলী পোর্টাল ২.০ — স্মার্ট গ্রিড ও ডিজিটাল সেবা'}},
+        )
+        assert hp_put.status_code == 200
+        hp_get = client.get('/api/v1/public/homepage-config')
+        assert hp_get.status_code == 200
+        assert 'পোর্টাল ২.০' in hp_get.json()['hero_banner']['headline_bn']
+
+        # Targeted Announcement
+        ann_res = client.post(
+            '/api/v1/admin/announcements',
+            headers=admin_headers,
+            json={
+                'title_bn': 'সকল সক্রিয় সদস্যের জন্য জরুরি বার্তা',
+                'body_bn': 'আগামী সপ্তাহের মধ্যে প্রোফাইল তথ্য হালনাগাদ করার অনুরোধ।',
+                'target_scope': 'STATUS',
+                'target_status': 'ACTIVE',
+                'channels': 'IN_APP,EMAIL',
+                'priority': 'IMPORTANT',
+                'is_banner': True,
+                'is_published': True,
+            },
+        )
+        assert ann_res.status_code == 201
+        assert ann_res.json()['recipients_count'] >= 1
+
+        # Contact & Inquiry Service Desk
+        contact_res = client.post(
+            '/api/v1/public/contact',
+            json={
+                'name': 'প্রকৌ. তানভীর আহমেদ',
+                'email': 'tanvir@example.org',
+                'phone': '01712345678',
+                'subject': 'সদস্যপদ কার্ড সংশোধন',
+                'message': 'আমার পদবী সহকারী প্রকৌশলী হিসেবে হালনাগাদ করার অনুরোধ।',
+            },
+        )
+        assert contact_res.status_code == 200
+        c_data = contact_res.json()
+        assert c_data['ticket_no'].startswith('PGCB-REQ-')
+
+        msg_patch = client.patch(
+            f"/api/v1/admin/messages/{c_data['message_id']}",
+            headers=admin_headers,
+            json={
+                'status': 'RESOLVED',
+                'assigned_to': 'Membership Desk',
+                'response_text': 'আপনার পদবী সফলভাবে হালনাগাদ করা হয়েছে।',
+            },
+        )
+        assert msg_patch.status_code == 200
+        assert msg_patch.json()['status'] == 'RESOLVED'
+
+        # Sitemap, Robots.txt, RSS Feed, and CMS Analytics
+        sitemap = client.get('/api/v1/public/sitemap.xml')
+        assert sitemap.status_code == 200
+        assert '<urlset' in sitemap.text
+        assert f'/news/{slug}' in sitemap.text
+
+        robots = client.get('/api/v1/public/robots.txt')
+        assert robots.status_code == 200
+        assert 'Sitemap:' in robots.text
+
+        rss = client.get('/api/v1/public/rss.xml')
+        assert rss.status_code == 200
+        assert '<rss' in rss.text
+
+        cms_analytics = client.get('/api/v1/admin/analytics/cms', headers=admin_headers)
+        assert cms_analytics.status_code == 200
+        assert 'most_viewed_news' in cms_analytics.json()
+        assert 'announcement_reach' in cms_analytics.json()
+
+
+
 
 

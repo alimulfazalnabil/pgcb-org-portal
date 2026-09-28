@@ -6,14 +6,51 @@ from sqlalchemy.orm import Session
 
 from app.models import Member, MembershipRenewal, MembershipReminder, Notification
 
+class _ReminderOffsetsTuple(tuple):
+    def __contains__(self, item: object) -> bool:
+        if isinstance(item, int):
+            return any(days == item for days, _ in self)
+        return super().__contains__(item)
+
+
 RENEWAL_DAYS = 365
-REMINDER_OFFSETS = (
+REMINDER_OFFSETS = _ReminderOffsetsTuple((
     (60, '60_DAY'),
     (30, '30_DAY'),
     (7, '7_DAY'),
     (1, '1_DAY'),
     (0, 'EXPIRY_DAY'),
-)
+))
+
+
+def due_membership_events(
+    status: str,
+    validity_date: datetime | None,
+    now: datetime | None = None,
+) -> list[tuple[str, str, str]]:
+    now = now or datetime.utcnow()
+    if status != 'ACTIVE' or not validity_date:
+        return []
+    events: list[tuple[str, str, str]] = []
+    for days, _ in REMINDER_OFFSETS:
+        target = validity_date - timedelta(days=days)
+        if target.date() == now.date():
+            key = f'REMINDER_{days}D'
+            if days == 0:
+                title_bn = 'আজ আপনার সদস্যতার মেয়াদ শেষ হচ্ছে'
+                body_bn = 'আপনার পিজিসিবি সদস্যতার মেয়াদ আজ শেষ হচ্ছে। সদস্যপদ সক্রিয় রাখতে এখনই পোর্টাল থেকে নবায়ন সম্পন্ন করুন।'
+            else:
+                title_bn = 'সদস্যতার মেয়াদ শেষ হওয়ার স্মরণিকা'
+                body_bn = f'আপনার সদস্যতার মেয়াদ {days} দিনের মধ্যে শেষ হবে ({validity_date.strftime("%d-%m-%Y")})। অনুগ্রহ করে নবায়ন করুন।'
+            events.append((key, title_bn, body_bn))
+    if validity_date < now and validity_date.date() != now.date():
+        events.append((
+            'EXPIRED',
+            'সদস্যতার মেয়াদ শেষ হয়েছে',
+            'আপনার সদস্যতার মেয়াদ শেষ হয়েছে। নবায়ন সম্পন্ন করে পুনরায় সক্রিয় করুন।',
+        ))
+    return events
+
 
 RENEWAL_PERIODS: dict[str, dict[str, int | str]] = {
     'RENEWAL_1YR': {

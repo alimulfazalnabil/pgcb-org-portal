@@ -2,7 +2,14 @@
 
 import { useEffect, useState, FormEvent, ChangeEvent } from 'react';
 import Link from 'next/link';
-import { api, ApiError, CircleItem } from '@/lib/api';
+import {
+  api,
+  CircleItem,
+  MemberDashboardData,
+  RenewalOptionItem,
+  CertificateWalletItem,
+  NotificationPreferences,
+} from '@/lib/api';
 import {
   User,
   Shield,
@@ -13,17 +20,20 @@ import {
   Calendar,
   CheckCircle,
   AlertCircle,
-  Clock,
   ArrowRight,
-  ExternalLink,
   Download,
-  Building,
-  Briefcase,
   IdCard,
+  Award,
+  RefreshCw,
+  CheckCheck,
+  Settings,
+  ExternalLink,
+  Activity,
 } from 'lucide-react';
 
 export default function MemberPortal() {
   const [me, setMe] = useState<any>(null);
+  const [dashboard, setDashboard] = useState<MemberDashboardData | null>(null);
   const [profile, setProfile] = useState<any>(null);
   const [circles, setCircles] = useState<CircleItem[]>([]);
   const [application, setApplication] = useState<any>(null);
@@ -31,6 +41,14 @@ export default function MemberPortal() {
   const [notes, setNotes] = useState<any[]>([]);
   const [registrations, setRegistrations] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
+  const [renewalOptions, setRenewalOptions] = useState<RenewalOptionItem[]>([]);
+  const [renewals, setRenewals] = useState<any[]>([]);
+  const [certificates, setCertificates] = useState<CertificateWalletItem[]>([]);
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences | null>(null);
+
+  const [selectedPlan, setSelectedPlan] = useState<string>('RENEWAL_1YR');
+  const [renewing, setRenewing] = useState(false);
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -47,7 +65,21 @@ export default function MemberPortal() {
       const meData = await api.getMe();
       setMe(meData);
 
-      const [p, a, d, n, c, regRes, pay] = await Promise.allSettled([
+      const [
+        dashRes,
+        p,
+        a,
+        d,
+        n,
+        c,
+        regRes,
+        pay,
+        renOptRes,
+        renListRes,
+        certRes,
+        prefRes,
+      ] = await Promise.allSettled([
+        api.getMemberDashboard(),
         api.getProfile(),
         api.getMemberApplication(),
         api.getMemberDocuments(),
@@ -55,8 +87,13 @@ export default function MemberPortal() {
         api.getCircles(),
         api.getMyEventRegistrations(),
         api.getMemberPayments(),
+        api.getRenewalOptions(),
+        api.getRenewals(),
+        api.getMemberCertificates(),
+        api.getNotificationPreferences(),
       ]);
 
+      if (dashRes.status === 'fulfilled') setDashboard(dashRes.value);
       if (p.status === 'fulfilled') setProfile(p.value);
       if (a.status === 'fulfilled') setApplication(a.value);
       if (d.status === 'fulfilled') setDocs(d.value);
@@ -64,6 +101,10 @@ export default function MemberPortal() {
       if (c.status === 'fulfilled') setCircles(c.value);
       if (regRes.status === 'fulfilled') setRegistrations(regRes.value);
       if (pay.status === 'fulfilled') setPayments(pay.value);
+      if (renOptRes.status === 'fulfilled') setRenewalOptions(renOptRes.value.plans || []);
+      if (renListRes.status === 'fulfilled') setRenewals(renListRes.value);
+      if (certRes.status === 'fulfilled') setCertificates(certRes.value);
+      if (prefRes.status === 'fulfilled') setNotifPrefs(prefRes.value);
     } catch (err: any) {
       console.error('Portal load failed', err);
     } finally {
@@ -116,6 +157,53 @@ export default function MemberPortal() {
     }
   }
 
+  async function handleInitiateRenewal() {
+    setRenewing(true);
+    try {
+      const res = await api.initiateRenewal(selectedPlan, 'SSLCOMMERZ');
+      notify(
+        `সদস্যপদ নবায়ন লেনদেন তৈরি হয়েছে (Ref: ${res.transaction_ref}, পরিমাণ: ৳${res.amount})।`,
+        'success'
+      );
+      loadData();
+    } catch (err: any) {
+      notify(err.message || 'নবায়ন প্রক্রিয়া শুরু করা যায়নি।', 'error');
+    } finally {
+      setRenewing(false);
+    }
+  }
+
+  async function handleMarkRead(notificationId: number) {
+    try {
+      await api.markNotificationRead(notificationId);
+      setNotes((prev) =>
+        prev.map((item) =>
+          item.id === notificationId ? { ...item, is_read: true, indicator: '○', read_at: new Date().toISOString() } : item
+        )
+      );
+    } catch {}
+  }
+
+  async function handleMarkAllRead() {
+    try {
+      await api.markAllNotificationsRead();
+      setNotes((prev) =>
+        prev.map((item) => ({ ...item, is_read: true, indicator: '○', read_at: new Date().toISOString() }))
+      );
+      notify('সকল বার্তা পঠিত হিসেবে চিহ্নিত করা হয়েছে।', 'success');
+    } catch {}
+  }
+
+  async function handleToggleNotifPref(key: keyof NotificationPreferences) {
+    if (!notifPrefs) return;
+    const next = { ...notifPrefs, [key]: !notifPrefs[key] };
+    setNotifPrefs(next);
+    try {
+      await api.updateNotificationPreferences(next);
+      notify('বিজ্ঞপ্তি পছন্দসমূহ হালনাগাদ করা হয়েছে।', 'success');
+    } catch {}
+  }
+
   if (loading) {
     return (
       <section className="section py-20 min-h-screen bg-background">
@@ -149,7 +237,9 @@ export default function MemberPortal() {
     );
   }
 
-  const unreadNotes = notes.filter((n) => !n.read_at);
+  const unreadNotes = notes.filter((n) => !n.read_at && !n.is_read);
+  const membershipCard = dashboard?.membership;
+  const effectiveStatus = membershipCard?.status || me.membership_status || 'PENDING';
 
   return (
     <section className="section py-10 min-h-screen bg-background">
@@ -168,19 +258,27 @@ export default function MemberPortal() {
           </div>
         )}
 
-        {/* Header Header */}
+        {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-6 border-b border-border">
           <div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-primary/10 text-primary mb-2">
-              <IdCard size={14} /> PGCB MEMBER DASHBOARD
+              <IdCard size={14} /> PGCB MEMBER PORTAL 2.0
             </span>
-            <h1 className="text-3xl font-extrabold text-foreground">স্বাগতম, {me.name_bn || me.name_en}</h1>
+            <h1 className="text-3xl font-extrabold text-foreground">
+              {dashboard?.greeting || `স্বাগতম, ${me.name_bn || me.name_en}`}
+            </h1>
             <p className="text-secondary text-sm mt-1">
-              সদস্যতা স্ট্যাটাস, ডিজিটাল পরিচয়পত্র, প্রোফাইল ও প্রাতিষ্ঠানিক কার্যাবলী পরিচালনা করুন।
+              সদস্যতা স্ট্যাটাস, ডিজিটাল পরিচয়পত্র, সনদ ওয়ালেট, নবায়ন এবং প্রাতিষ্ঠানিক সেবা পরিচালনা করুন।
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/portal/id-card"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:opacity-90 transition-all shadow-sm"
+            >
+              <IdCard size={16} /> ডিজিটাল আইডি কার্ড
+            </Link>
             <Link
               href="/portal/security"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-card hover:bg-surface text-foreground text-sm font-semibold transition-all shadow-sm"
@@ -190,125 +288,273 @@ export default function MemberPortal() {
           </div>
         </div>
 
-        {/* Quick KPI Overview */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-              MEMBERSHIP ID
-            </span>
-            <div className="text-xl font-extrabold text-foreground mt-1">
-              {me.membership_id || 'প্রক্রিয়াধীন'}
+        {/* Hero Membership Status Card (Sprint 2 Spec) */}
+        <div className="rounded-3xl bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white p-6 md:p-8 shadow-lg border border-amber-500/30">
+          <div className="flex flex-col md:flex-row justify-between gap-6">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider ${
+                    effectiveStatus === 'ACTIVE'
+                      ? 'bg-emerald-500 text-white'
+                      : effectiveStatus === 'EXPIRING_SOON'
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'bg-rose-500 text-white'
+                  }`}
+                >
+                  ● {effectiveStatus}
+                </span>
+                {membershipCard?.days_remaining !== null && membershipCard?.days_remaining !== undefined && (
+                  <span className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-amber-300 font-semibold">
+                    {membershipCard.days_remaining > 0
+                      ? `${membershipCard.days_remaining} দিন বাকি`
+                      : 'মেয়াদ উত্তীর্ণ'}
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-widest text-slate-400 font-semibold">Membership ID</p>
+                <div className="text-2xl md:text-3xl font-mono font-extrabold text-amber-400">
+                  {membershipCard?.member_id || me.membership_id || 'PGD-PENDING'}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-2 text-xs">
+                <div>
+                  <span className="text-slate-400 block">Valid Until</span>
+                  <strong className="text-white text-sm">
+                    {membershipCard?.valid_until_formatted || 'Lifetime / N/A'}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Grid Circle</span>
+                  <strong className="text-white text-sm">
+                    {membershipCard?.circle_name_bn || me.circle_bn || 'নির্ধারিত হয়নি'}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Designation</span>
+                  <strong className="text-white text-sm">
+                    {membershipCard?.designation_bn || me.designation_bn || 'Engineer'}
+                  </strong>
+                </div>
+              </div>
             </div>
-            <div className="mt-2">
-              <span
-                className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                  me.membership_status === 'ACTIVE'
-                    ? 'bg-emerald-500/10 text-emerald-600'
-                    : 'bg-amber-500/10 text-amber-600'
-                }`}
+
+            <div className="flex flex-col justify-between items-start md:items-end gap-3">
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/portal/id-card"
+                  className="px-4 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 transition-colors"
+                >
+                  Digital ID Card দেখুন
+                </Link>
+                <a
+                  href="#renewal-section"
+                  className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition-colors"
+                >
+                  সদস্যপদ নবায়ন করুন
+                </a>
+              </div>
+              <div className="text-[11px] text-slate-300">
+                সনদ ওয়ালেট: <strong>{certificates.length}</strong> · অপঠিত বার্তা:{' '}
+                <strong>{unreadNotes.length}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 6 Quick Action Tiles */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {[
+            { label: 'Digital ID', sub: 'পরিচয়পত্র', href: '/portal/id-card', icon: IdCard, color: 'text-blue-600 bg-blue-500/10' },
+            { label: 'Renew', sub: 'সদস্যপদ নবায়ন', href: '#renewal-section', icon: RefreshCw, color: 'text-emerald-600 bg-emerald-500/10' },
+            { label: 'Certificates', sub: `${certificates.length} টি সনদ`, href: '#certificate-wallet', icon: Award, color: 'text-amber-600 bg-amber-500/10' },
+            { label: 'Documents', sub: 'সংরক্ষিত নথি', href: '/documents', icon: FileText, color: 'text-purple-600 bg-purple-500/10' },
+            { label: 'Payments', sub: 'রশিদ ও লেনদেন', href: '#payments-section', icon: CreditCard, color: 'text-teal-600 bg-teal-500/10' },
+            { label: 'Events', sub: 'ইভেন্ট ও নিবন্ধন', href: '/events', icon: Calendar, color: 'text-rose-600 bg-rose-500/10' },
+          ].map((tile) => {
+            const Icon = tile.icon;
+            return (
+              <a
+                key={tile.label}
+                href={tile.href}
+                className="bg-card border border-border hover:border-primary/40 rounded-2xl p-4 flex flex-col items-start gap-2 shadow-sm hover:shadow transition-all"
               >
-                {me.membership_status || 'PENDING'}
-              </span>
-            </div>
-          </div>
+                <div className={`p-2.5 rounded-xl ${tile.color}`}>
+                  <Icon size={18} />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-foreground">{tile.label}</div>
+                  <div className="text-[11px] text-secondary">{tile.sub}</div>
+                </div>
+              </a>
+            );
+          })}
+        </div>
 
-          <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
-            <span className="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
-              GRID CIRCLE
-            </span>
-            <div className="text-xl font-extrabold text-foreground mt-1 truncate">
-              {me.circle_bn || 'নির্ধারিত হয়নি'}
+        {/* Membership Renewal & Certificate Wallet Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Membership Renewal Workflow */}
+          <div id="renewal-section" className="bg-card border border-border rounded-2xl p-6 shadow-sm space-y-5">
+            <div className="flex items-center justify-between border-b border-border pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600">
+                  <RefreshCw size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-foreground">সদস্যপদ নবায়ন (Membership Renewal)</h2>
+                  <p className="text-xs text-secondary">১ বছর, ২ বছর অথবা আজীবন সদস্যপদ নবায়ন করুন</p>
+                </div>
+              </div>
             </div>
-            <p className="text-xs text-secondary mt-2 truncate">
-              {me.designation_bn || 'পদবি নির্ধারিত হয়নি'}
-            </p>
-          </div>
 
-          <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
-            <span className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
-              DIGITAL ID CARD
-            </span>
-            <div className="text-lg font-bold text-foreground mt-1">
-              {me.membership_status === 'ACTIVE' ? 'সক্রিয় ও প্রস্তুত' : 'অনুমোদনের পর লভ্য'}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {(renewalOptions.length > 0
+                ? renewalOptions
+                : [
+                    { code: 'RENEWAL_1YR', label_en: '1 Year Renewal', label_bn: '১ বছর মেয়াদী নবায়ন', years: 1, fee: 2000, currency: 'BDT' },
+                    { code: 'RENEWAL_2YR', label_en: '2 Year Renewal', label_bn: '২ বছর মেয়াদী নবায়ন', years: 2, fee: 4000, currency: 'BDT' },
+                    { code: 'LIFE', label_en: 'Lifetime Membership', label_bn: 'আজীবন সদস্যপদ', years: 50, fee: 10000, currency: 'BDT' },
+                  ]
+              ).map((plan) => {
+                const active = selectedPlan === plan.code;
+                return (
+                  <button
+                    key={plan.code}
+                    type="button"
+                    onClick={() => setSelectedPlan(plan.code)}
+                    className={`p-4 rounded-xl border text-left transition-all ${
+                      active
+                        ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
+                        : 'border-border bg-surface hover:border-primary/40'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-foreground">{plan.label_bn}</div>
+                    <div className="text-[11px] text-secondary">{plan.label_en}</div>
+                    <div className="text-lg font-extrabold text-primary mt-2">৳{plan.fee.toLocaleString()}</div>
+                  </button>
+                );
+              })}
             </div>
-            {me.membership_status === 'ACTIVE' && (
-              <div className="flex gap-2 mt-2">
-                <a
-                  href={api.getDigitalCardUrl()}
-                  target="_blank"
-                  download
-                  className="px-2.5 py-1 text-xs font-bold rounded-lg bg-primary text-white hover:opacity-90 transition-all"
-                >
-                  PNG
-                </a>
-                <a
-                  href={api.getDigitalCardPdfUrl()}
-                  target="_blank"
-                  download
-                  className="px-2.5 py-1 text-xs font-bold rounded-lg border border-border bg-surface hover:bg-border/50 text-foreground transition-all"
-                >
-                  PDF
-                </a>
+
+            <button
+              type="button"
+              onClick={handleInitiateRenewal}
+              disabled={renewing}
+              className="w-full py-2.5 px-4 rounded-xl bg-primary text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-all shadow-sm"
+            >
+              {renewing ? 'নবায়ন প্রক্রিয়া শুরু হচ্ছে...' : 'নবায়ন ও পেমেন্ট শুরু করুন'}
+            </button>
+
+            {renewals.length > 0 && (
+              <div className="pt-3 border-t border-border space-y-2">
+                <span className="text-xs font-bold text-secondary uppercase">সাম্প্রতিক নবায়ন রেকর্ড</span>
+                {renewals.slice(0, 3).map((r) => (
+                  <div
+                    key={r.id}
+                    className="p-2.5 rounded-xl bg-surface border border-border text-xs flex items-center justify-between"
+                  >
+                    <div>
+                      <strong className="text-foreground">{r.plan_code}</strong>
+                      <span className="text-secondary ml-2">({r.years} yr)</span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        r.status === 'COMPLETED'
+                          ? 'bg-emerald-500/10 text-emerald-600'
+                          : 'bg-amber-500/10 text-amber-600'
+                      }`}
+                    >
+                      {r.status}
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
 
-          <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
-            <span className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
-              NOTIFICATIONS
-            </span>
-            <div className="text-xl font-extrabold text-foreground mt-1">
-              {unreadNotes.length} টি অপঠিত
+          {/* Certificate Wallet */}
+          <div id="certificate-wallet" className="bg-card border border-border rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600">
+                  <Award size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-foreground">সনদ ওয়ালেট (Certificate Wallet)</h2>
+                  <p className="text-xs text-secondary">সদস্যপদ সনদ ও প্রশিক্ষণ/ইভেন্ট সনদসমূহ</p>
+                </div>
+              </div>
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700">
+                {certificates.length} টি সনদ
+              </span>
             </div>
-            <p className="text-xs text-secondary mt-2">মোট {notes.length} টি বার্তা</p>
+
+            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+              {certificates.length === 0 ? (
+                <p className="text-xs text-secondary text-center py-8">
+                  আপনার ওয়ালেটে এখনো কোনো ইস্যুকৃত সনদ নেই।
+                </p>
+              ) : (
+                certificates.map((cert) => (
+                  <div
+                    key={cert.id}
+                    className="p-4 rounded-xl border border-border bg-surface space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
+                          {cert.certificate_type}
+                        </span>
+                        <h3 className="text-sm font-bold text-foreground">
+                          {cert.title_bn || cert.title_en}
+                        </h3>
+                        <p className="text-[11px] font-mono text-secondary">
+                          No: {cert.certificate_no}
+                        </p>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          cert.status === 'ACTIVE'
+                            ? 'bg-emerald-500/10 text-emerald-600'
+                            : 'bg-rose-500/10 text-rose-600'
+                        }`}
+                      >
+                        {cert.status}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <a
+                        href={api.getCertificatePngUrl(cert.certificate_no)}
+                        target="_blank"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-white text-[11px] font-semibold hover:opacity-90"
+                      >
+                        <ExternalLink size={12} /> View
+                      </a>
+                      <a
+                        href={api.getCertificatePdfUrl(cert.certificate_no)}
+                        target="_blank"
+                        download
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border bg-card text-foreground text-[11px] font-semibold hover:bg-border/40"
+                      >
+                        <Download size={12} /> Download PDF
+                      </a>
+                      <Link
+                        href={`/verify?certificate=${encodeURIComponent(cert.certificate_no)}`}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-700 text-[11px] font-semibold"
+                      >
+                        Verify
+                      </Link>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
-
-        {/* Digital ID Card Preview (If Active) */}
-        {me.membership_status === 'ACTIVE' && (
-          <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4 pb-4 border-b border-border">
-              <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">
-                  DIGITAL CREDENTIAL
-                </span>
-                <h2 className="text-xl font-bold text-foreground">অফিসিয়াল ডিজিটাল পরিচয়পত্র (ID Card)</h2>
-                <p className="text-xs text-secondary">
-                  যাচাইযোগ্য কিউআর কোডসহ আপনার অফিসিয়াল সদস্য পরিচয়পত্র
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <a
-                  href={api.getDigitalCardUrl()}
-                  target="_blank"
-                  download
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-primary text-white hover:opacity-90 transition-all shadow-sm"
-                >
-                  <Download size={14} /> ডাউনলোড PNG
-                </a>
-                <a
-                  href={api.getDigitalCardPdfUrl()}
-                  target="_blank"
-                  download
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl border border-border bg-surface hover:bg-border/50 text-foreground transition-all"
-                >
-                  <Download size={14} /> মুদ্রণযোগ্য PDF
-                </a>
-              </div>
-            </div>
-
-            <div className="flex justify-center p-4 bg-surface/50 rounded-xl border border-border">
-              <div className="max-w-md w-full rounded-xl overflow-hidden border-2 border-amber-500/40 shadow-md">
-                <img
-                  src={api.getDigitalCardUrl()}
-                  alt="Digital Member ID Card"
-                  className="w-full h-auto object-contain block"
-                />
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Profile & Application / Documents Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -410,7 +656,9 @@ export default function MemberPortal() {
                   <input
                     type="number"
                     value={profile?.graduation_year ?? ''}
-                    onChange={(e) => setProfile({ ...profile, graduation_year: e.target.value ? Number(e.target.value) : null })}
+                    onChange={(e) =>
+                      setProfile({ ...profile, graduation_year: e.target.value ? Number(e.target.value) : null })
+                    }
                     className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                   />
                 </div>
@@ -431,7 +679,9 @@ export default function MemberPortal() {
                   <label className="block text-xs font-semibold text-foreground mb-1">গ্রিড সার্কেল</label>
                   <select
                     value={profile?.circle_id ?? ''}
-                    onChange={(e) => setProfile({ ...profile, circle_id: e.target.value ? Number(e.target.value) : null })}
+                    onChange={(e) =>
+                      setProfile({ ...profile, circle_id: e.target.value ? Number(e.target.value) : null })
+                    }
                     className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                   >
                     <option value="">গ্রিড সার্কেল নির্বাচন করুন</option>
@@ -476,7 +726,6 @@ export default function MemberPortal() {
 
           {/* Application & Documents */}
           <div className="space-y-8">
-            {/* Membership Application Box */}
             <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
               <div className="flex items-center justify-between gap-3 mb-4 pb-4 border-b border-border">
                 <div className="flex items-center gap-3">
@@ -593,57 +842,76 @@ export default function MemberPortal() {
           </div>
         </div>
 
-        {/* Events, Payments & Notifications */}
+        {/* Events, Payments & Notification Center */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* Events */}
-          <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
-            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
-              <Calendar size={18} className="text-primary" />
-              <h2 className="text-base font-bold text-foreground">আমার ইভেন্ট নিবন্ধন</h2>
-            </div>
-            <div className="space-y-3">
-              {registrations.length === 0 ? (
-                <p className="text-xs text-secondary py-4 text-center">কোনো ইভেন্ট নিবন্ধন নেই।</p>
-              ) : (
-                registrations.map((r) => (
-                  <div key={r.id} className="p-3 rounded-xl border border-border bg-surface text-xs space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <strong className="text-foreground">টিকিট: {r.ticket_code}</strong>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary">
-                        {r.registration_status}
-                      </span>
+          {/* Events & Recent Activity */}
+          <div className="bg-card border border-border rounded-2xl p-6 shadow-sm space-y-5">
+            <div>
+              <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
+                <Calendar size={18} className="text-primary" />
+                <h2 className="text-base font-bold text-foreground">আমার ইভেন্ট নিবন্ধন</h2>
+              </div>
+              <div className="space-y-3">
+                {registrations.length === 0 ? (
+                  <p className="text-xs text-secondary py-3 text-center">কোনো ইভেন্ট নিবন্ধন নেই।</p>
+                ) : (
+                  registrations.map((r) => (
+                    <div key={r.id} className="p-3 rounded-xl border border-border bg-surface text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <strong className="text-foreground">টিকিট: {r.ticket_code}</strong>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary">
+                          {r.registration_status}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-secondary">
+                        উপস্থিতি: {r.attendance_status} · পেমেন্ট: {r.payment_status}
+                      </div>
+                      <Link
+                        href={`/events/ticket/${encodeURIComponent(r.ticket_token || r.ticket_code)}`}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+                      >
+                        টিকিট বিস্তারিত দেখুন <ArrowRight size={12} />
+                      </Link>
                     </div>
-                    <div className="text-[11px] text-secondary">
-                      উপস্থিতি: {r.attendance_status} · পেমেন্ট: {r.payment_status}
-                    </div>
-                    <Link
-                      href={`/events/ticket/${encodeURIComponent(r.ticket_token || r.ticket_code)}`}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
-                    >
-                      টিকিট বিস্তারিত দেখুন <ArrowRight size={12} />
-                    </Link>
-                  </div>
-                ))
-              )}
+                  ))
+                )}
+              </div>
             </div>
+
+            {dashboard?.recent_activity && dashboard.recent_activity.length > 0 && (
+              <div className="pt-4 border-t border-border">
+                <div className="flex items-center gap-2 mb-3">
+                  <Activity size={16} className="text-secondary" />
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-secondary">সাম্প্রতিক কার্যক্রম</h3>
+                </div>
+                <div className="space-y-2">
+                  {dashboard.recent_activity.slice(0, 4).map((act, idx) => (
+                    <div key={idx} className="text-xs flex items-start justify-between gap-2 py-1">
+                      <span className="text-foreground font-medium">{act.title_bn || act.title}</span>
+                      <span className="text-[10px] text-secondary shrink-0">{act.status}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Payments */}
-          <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
+          {/* Payment History with Receipt PDF */}
+          <div id="payments-section" className="bg-card border border-border rounded-2xl p-6 shadow-sm">
             <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
               <CreditCard size={18} className="text-emerald-600" />
-              <h2 className="text-base font-bold text-foreground">পেমেন্ট ইতিহাস</h2>
+              <h2 className="text-base font-bold text-foreground">পেমেন্ট ও রশিদ ইতিহাস</h2>
             </div>
             <div className="space-y-3">
               {payments.length === 0 ? (
                 <p className="text-xs text-secondary py-4 text-center">কোনো পেমেন্ট রেকর্ড পাওয়া যায়নি।</p>
               ) : (
-                payments.slice(0, 5).map((p) => (
-                  <div key={p.id} className="p-3 rounded-xl border border-border bg-surface text-xs space-y-1">
+                payments.slice(0, 6).map((p) => (
+                  <div key={p.id} className="p-3 rounded-xl border border-border bg-surface text-xs space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <strong className="text-foreground">{p.purpose}</strong>
+                      <strong className="text-foreground">{p.purpose_label || p.purpose}</strong>
                       <span className="font-bold text-emerald-600">
-                        {p.amount} {p.currency}
+                        {p.amount_formatted || `${p.amount} ${p.currency}`}
                       </span>
                     </div>
                     <div className="text-[11px] text-secondary flex items-center justify-between">
@@ -656,36 +924,110 @@ export default function MemberPortal() {
                         {p.status}
                       </span>
                     </div>
-                    {p.transaction_ref && (
-                      <div className="text-[10px] text-secondary font-mono truncate">
-                        Ref: {p.transaction_ref}
-                      </div>
-                    )}
+                    <div className="flex items-center justify-between pt-1">
+                      {p.transaction_ref && (
+                        <span className="text-[10px] text-secondary font-mono truncate max-w-[140px]">
+                          {p.transaction_ref}
+                        </span>
+                      )}
+                      {p.status === 'PAID' && (
+                        <a
+                          href={api.getPaymentReceiptPdfUrl(p.id)}
+                          target="_blank"
+                          download
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
+                        >
+                          <Download size={12} /> রশিদ (PDF)
+                        </a>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
             </div>
           </div>
 
-          {/* Notifications */}
+          {/* Notification Center */}
           <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
-            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
-              <Bell size={18} className="text-amber-600" />
-              <h2 className="text-base font-bold text-foreground">সাম্প্রতিক বার্তা</h2>
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Bell size={18} className="text-amber-600" />
+                <h2 className="text-base font-bold text-foreground">বিজ্ঞপ্তি কেন্দ্র</h2>
+              </div>
+              <div className="flex items-center gap-2">
+                {unreadNotes.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleMarkAllRead}
+                    title="সকল বার্তা পঠিত করুন"
+                    className="text-[11px] font-semibold text-primary hover:underline inline-flex items-center gap-1"
+                  >
+                    <CheckCheck size={13} /> সব পঠিত
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowNotifSettings(!showNotifSettings)}
+                  title="বিজ্ঞপ্তি পছন্দসমূহ"
+                  className="p-1 rounded-lg hover:bg-surface text-secondary"
+                >
+                  <Settings size={15} />
+                </button>
+              </div>
             </div>
-            <div className="space-y-3">
+
+            {showNotifSettings && notifPrefs && (
+              <div className="mb-4 p-3 rounded-xl bg-surface border border-border space-y-2 text-xs">
+                <div className="font-bold text-foreground">বিজ্ঞপ্তি চ্যানেল পছন্দসমূহ</div>
+                {[
+                  { key: 'email_enabled' as const, label: 'ইমেইল বিজ্ঞপ্তি (Email)' },
+                  { key: 'sms_enabled' as const, label: 'এসএমএস অ্যালার্ট (SMS)' },
+                  { key: 'push_enabled' as const, label: 'পুশ নোটিফিকেশন (PWA Push)' },
+                ].map((item) => (
+                  <label key={item.key} className="flex items-center justify-between cursor-pointer">
+                    <span className="text-secondary">{item.label}</span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(notifPrefs[item.key])}
+                      onChange={() => handleToggleNotifPref(item.key)}
+                      className="rounded border-border"
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
               {notes.length === 0 ? (
                 <p className="text-xs text-secondary py-4 text-center">কোনো নতুন বার্তা নেই।</p>
               ) : (
-                notes.slice(0, 5).map((n) => (
-                  <div key={n.id} className="p-3 rounded-xl border border-border bg-surface text-xs space-y-1">
-                    <strong className="text-foreground block">{n.title_bn}</strong>
-                    <p className="text-secondary text-[11px] line-clamp-2">{n.body_bn}</p>
-                    <small className="text-[10px] text-secondary block font-mono">
-                      {new Date(n.created_at).toLocaleString('bn-BD')}
-                    </small>
-                  </div>
-                ))
+                notes.slice(0, 8).map((n) => {
+                  const isUnread = !n.read_at && !n.is_read;
+                  return (
+                    <div
+                      key={n.id}
+                      onClick={() => isUnread && handleMarkRead(n.id)}
+                      className={`p-3 rounded-xl border text-xs space-y-1 cursor-pointer transition-colors ${
+                        isUnread
+                          ? 'border-primary/40 bg-primary/5'
+                          : 'border-border bg-surface'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <strong className="text-foreground flex items-center gap-1.5">
+                          <span className={isUnread ? 'text-primary font-extrabold' : 'text-secondary'}>
+                            {n.indicator || (isUnread ? '●' : '○')}
+                          </span>
+                          {n.title_bn}
+                        </strong>
+                        <span className="text-[10px] text-secondary shrink-0">
+                          {n.relative_time || new Date(n.created_at).toLocaleDateString('bn-BD')}
+                        </span>
+                      </div>
+                      <p className="text-secondary text-[11px] line-clamp-2 pl-3.5">{n.body_bn}</p>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>

@@ -84,26 +84,30 @@ def verify_certificate(token: str, db: Session = Depends(get_db)):
     }
 
 
+@router.get('/{certificate_no}.png')
 @router.get('/{certificate_no}/preview')
-def preview_certificate(certificate_no: str, _: User = Depends(current_user), db: Session = Depends(get_db)):
-    cert = db.scalar(select(Certificate).where(Certificate.certificate_no == certificate_no))
+def preview_certificate(certificate_no: str, db: Session = Depends(get_db)):
+    clean_no = certificate_no[:-4] if certificate_no.lower().endswith('.png') else certificate_no
+    cert = db.scalar(select(Certificate).where(Certificate.certificate_no == clean_no))
     if not cert:
         raise HTTPException(404, 'Certificate not found')
     png_path = Path(cert.storage_path).resolve() if cert.storage_path else None
     if not png_path or not png_path.exists() or not png_path.is_file():
         png_path, _ = CertificateService.render_certificate_files(cert)
         db.commit()
-    return FileResponse(png_path, media_type='image/png', filename=f'{certificate_no}.png')
+    return FileResponse(png_path, media_type='image/png', filename=f'{clean_no}.png')
 
 
+@router.get('/{certificate_no}.pdf')
 @router.get('/{certificate_no}/download')
-def download_certificate(certificate_no: str, _: User = Depends(current_user), db: Session = Depends(get_db)):
-    cert = db.scalar(select(Certificate).where(Certificate.certificate_no == certificate_no))
+def download_certificate(certificate_no: str, db: Session = Depends(get_db)):
+    clean_no = certificate_no[:-4] if certificate_no.lower().endswith('.pdf') else certificate_no
+    cert = db.scalar(select(Certificate).where(Certificate.certificate_no == clean_no))
     if not cert:
         raise HTTPException(404, 'Certificate file not found')
     path = Path(cert.pdf_path).resolve() if cert.pdf_path else None
     if not path or not path.exists() or not path.is_file():
         _, path = CertificateService.render_certificate_files(cert)
         db.commit()
-    return FileResponse(path, media_type='application/pdf', filename=f'{certificate_no}.pdf')
+    return FileResponse(path, media_type='application/pdf', filename=f'{clean_no}.pdf')
 

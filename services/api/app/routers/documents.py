@@ -39,7 +39,7 @@ def _verify_doc_token(doc_id: int, token: str | None) -> bool:
 
 
 def _is_private_doc(db: Session, doc: Document) -> bool:
-    if (doc.category or "").upper() in ("PRIVATE", "INTERNAL", "CONFIDENTIAL", "MEMBER_ONLY"):
+    if (doc.category or "").upper() in ("PRIVATE", "INTERNAL", "CONFIDENTIAL", "MEMBER_ONLY", "AUDIT_REPORT", "MEETINGS"):
         return True
     flag = db.scalar(select(SiteSetting).where(SiteSetting.key == f"doc_private:{doc.id}"))
     return bool(flag and flag.value == "true")
@@ -108,7 +108,7 @@ def create_signed_download_url(
 
 
 @router.get("/{document_id}/download")
-def download_document(
+async def download_document(
     document_id: int,
     request: Request,
     token: str | None = None,
@@ -121,13 +121,13 @@ def download_document(
     is_private = _is_private_doc(db, doc) or not doc.is_published
     actor_user: User | None = None
     try:
-        actor_user = current_user(request, db)
+        actor_user = await current_user(request, db, bearer_token=None)
     except Exception:
         actor_user = None
 
     if is_private and not actor_user and not _verify_doc_token(doc.id, token):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Controlled document requires authentication or a valid temporary download token",
         )
 

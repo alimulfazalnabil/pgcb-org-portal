@@ -1,33 +1,37 @@
-const CACHE_NAME = 'pgcb-portal-v2-cache-v1';
-const OFFLINE_URL = '/offline';
-const PRECACHE_URLS = [
+const CACHE_NAME = 'pgcb-portal-pwa-v2';
+const OFFLINE_URLS = [
   '/',
-  '/offline',
+  '/portal',
+  '/portal/id-card',
   '/notices',
   '/events',
-  '/circulars',
   '/verify',
-  '/verify-certificate',
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS)).then(() => self.skipWaiting())
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => cache.addAll(OFFLINE_URLS).catch(() => {}))
+      .then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-          return null;
-        })
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys.map((key) => {
+            if (key !== CACHE_NAME) {
+              return caches.delete(key);
+            }
+            return Promise.resolve();
+          })
+        )
       )
-    ).then(() => self.clients.claim())
+      .then(() => self.clients.claim())
   );
 });
 
@@ -36,16 +40,17 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  // Cache member digital ID card images and public notices/events for offline resilience
-  if (
-    url.pathname.includes('/api/v1/member/card') ||
-    url.pathname.includes('/api/v1/public/notices') ||
-    url.pathname.includes('/api/v1/public/events')
-  ) {
+
+  // Cache-first with network update for Digital ID Card endpoints and static assets
+  const isCardResource =
+    url.pathname.includes('/member/card') ||
+    url.pathname.includes('/portal/id-card');
+
+  if (isCardResource) {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.ok) {
+          if (response && response.status === 200) {
             const copy = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
           }
@@ -56,19 +61,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Network-first with cache fallback for navigation requests
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          if (response && response.status === 200) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          }
           return response;
         })
-        .catch(async () => {
-          const cached = await caches.match(request);
-          if (cached) return cached;
-          return caches.match(OFFLINE_URL);
-        })
+        .catch(() => caches.match(request).then((res) => res || caches.match('/portal')))
     );
   }
 });

@@ -106,6 +106,7 @@ export function Header() {
           <Link href="/about" className="hover:text-success transition-colors">আমাদের সম্পর্কে</Link>
           <Link href="/leadership" className="hover:text-success transition-colors">নেতৃত্ব</Link>
           <Link href="/members" className="hover:text-success transition-colors">সদস্যবৃন্দ</Link>
+          <Link href="/news" className="hover:text-success transition-colors">সংবাদ</Link>
           <Link href="/notices" className="hover:text-success transition-colors">নোটিশ বোর্ড</Link>
           <Link href="/circulars" className="hover:text-success transition-colors">সার্কুলার</Link>
           <Link href="/documents" className="hover:text-success transition-colors">ডকুমেন্টস</Link>
@@ -142,6 +143,7 @@ export function Header() {
             <Link href="/about" onClick={() => setIsMobileMenuOpen(false)} className="border-b border-border/60 pb-2">আমাদের সম্পর্কে</Link>
             <Link href="/leadership" onClick={() => setIsMobileMenuOpen(false)} className="border-b border-border/60 pb-2">নেতৃত্ব ও কমিটি</Link>
             <Link href="/members" onClick={() => setIsMobileMenuOpen(false)} className="border-b border-border/60 pb-2">সদস্যবৃন্দ</Link>
+            <Link href="/news" onClick={() => setIsMobileMenuOpen(false)} className="border-b border-border/60 pb-2">সংবাদ ও প্রেস বিজ্ঞপ্তি</Link>
             <Link href="/notices" onClick={() => setIsMobileMenuOpen(false)} className="border-b border-border/60 pb-2">নোটিশ বোর্ড</Link>
             <Link href="/circulars" onClick={() => setIsMobileMenuOpen(false)} className="border-b border-border/60 pb-2">সার্কুলার</Link>
             <Link href="/documents" onClick={() => setIsMobileMenuOpen(false)} className="border-b border-border/60 pb-2">ডকুমেন্টস ও ফরম</Link>

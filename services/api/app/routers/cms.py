@@ -37,15 +37,11 @@ from app.models import (
     SiteSetting,
     User,
 )
+from app.domain.notifications import queue_delivery
+from app.integrations.notifications import DeliveryResult, create_in_app, record_delivery
 from app.models.core import News
-from app.services import (
-    DeliveryResult,
-    audit,
-    create_in_app,
-    queue_delivery,
-    record_delivery,
-    save_bytes,
-)
+from app.services import audit
+from app.utils.storage import save_bytes
 
 router = APIRouter(tags=['cms'])
 

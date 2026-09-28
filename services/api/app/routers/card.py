@@ -332,6 +332,8 @@ def digital_card_details(user: User = Depends(current_user), db: Session = Depen
         qr_data_url = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
 
     return {
+        'organization': 'PGCB',
+        'organization_bn': 'পাওয়ার গ্রিড কোম্পানি অব বাংলাদেশ (পিজিসিবি)',
         'member_id': m.id,
         'membership_id': m.membership_id,
         'membership_type': m.membership_type or 'GENERAL',
@@ -355,7 +357,9 @@ def digital_card_details(user: User = Depends(current_user), db: Session = Depen
         'valid_years': f'{iss_year}–{val_year}' if m.membership_id else None,
         'verification_token': token,
         'verification_url': verify_url,
+        'qr_verify_url': f"{settings.frontend_url.rstrip('/')}/verify/{m.membership_id}" if m.membership_id else verify_url,
         'qr_data_url': qr_data_url,
+        'offline_cacheable': True,
         'front_png_url': '/api/v1/member/card?side=front' if m.membership_id and status == 'ACTIVE' else None,
         'back_png_url': '/api/v1/member/card?side=back' if m.membership_id and status == 'ACTIVE' else None,
         'pdf_url': '/api/v1/member/card/pdf' if m.membership_id and status == 'ACTIVE' else None,

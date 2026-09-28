@@ -217,12 +217,14 @@ def export_members_xlsx(
     admin: User = Depends(require_permission('member.read')),
     db: Session = Depends(get_db),
 ):
+    from xml.sax.saxutils import escape as _xml_escape
+    import zipfile
+
     rows = _query_filtered_members(db, admin, circle_id, status, designation, membership_year, registration_date)
-    out = StringIO()
-    writer = csv.writer(out, delimiter='\t')
-    writer.writerow(['membership_id', 'name_bn', 'name_en', 'email', 'phone', 'designation_bn', 'circle', 'status', 'issue_date', 'validity_date'])
+    headers = ['membership_id', 'name_bn', 'name_en', 'email', 'phone', 'designation_bn', 'circle', 'status', 'issue_date', 'validity_date']
+    all_rows = [headers]
     for m in rows:
-        writer.writerow([
+        all_rows.append([
             m.membership_id or '',
             m.user.name_bn if m.user else '',
             (m.user.name_en or '') if m.user else '',
@@ -230,15 +232,70 @@ def export_members_xlsx(
             (m.user.phone or '') if m.user else '',
             m.designation_bn or '',
             m.circle.name_bn if m.circle else '',
-            m.status,
+            m.status or '',
             m.issue_date.strftime('%Y-%m-%d') if m.issue_date else '',
             m.validity_date.strftime('%Y-%m-%d') if m.validity_date else '',
         ])
+
+    col_letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
+    sheet_rows_xml = []
+    for r_idx, row_vals in enumerate(all_rows, start=1):
+        cells_xml = []
+        for c_idx, val in enumerate(row_vals):
+            cell_ref = f'{col_letters[c_idx]}{r_idx}'
+            safe_val = _xml_escape(str(val or ''))
+            cells_xml.append(f'<c r="{cell_ref}" t="inlineStr"><is><t>{safe_val}</t></is></c>')
+        sheet_rows_xml.append(f'<row r="{r_idx}">{"".join(cells_xml)}</row>')
+
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheetData>{"".join(sheet_rows_xml)}</sheetData>'
+        '</worksheet>'
+    )
+    content_types_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '</Types>'
+    )
+    rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        '</Relationships>'
+    )
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="PGCB Members" sheetId="1" r:id="rId1"/></sheets>'
+        '</workbook>'
+    )
+    workbook_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        '</Relationships>'
+    )
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('[Content_Types].xml', content_types_xml)
+        zf.writestr('_rels/.rels', rels_xml)
+        zf.writestr('xl/workbook.xml', workbook_xml)
+        zf.writestr('xl/_rels/workbook.xml.rels', workbook_rels_xml)
+        zf.writestr('xl/worksheets/sheet1.xml', sheet_xml)
+
     return Response(
-        content=out.getvalue().encode('utf-8-sig'),
+        content=buf.getvalue(),
         media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         headers={'Content-Disposition': 'attachment; filename="pgcb-members.xlsx"'},
     )
+
 
 
 @router.get('/exports/members.pdf')
@@ -476,6 +533,7 @@ def reports_mis(
 
     return {
         'generated_at': now.isoformat(),
+        'membership_summary': membership_report,
         'membership_report': membership_report,
         'circle_comparison': circle_comparison,
     }
@@ -1201,7 +1259,7 @@ def update_message(message_id: int, payload: MessageStatusUpdate, request: Reque
     item.status = payload.status
     meta.status = payload.status
     if payload.assigned_to is not None:
-        meta.assigned_to = payload.assigned_to
+        meta.assigned_to = str(payload.assigned_to)
     if payload.response_text is not None:
         meta.response_text = payload.response_text
         meta.responded_by = admin.id

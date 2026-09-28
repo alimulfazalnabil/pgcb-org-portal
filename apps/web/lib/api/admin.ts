@@ -12,8 +12,63 @@ export const adminApi = {
     if (params?.offset) query.set('offset', params.offset.toString());
     return request<any[]>(`/admin/members?${query.toString()}`);
   },
-  reviewMember: (memberId: number, action: 'APPROVE' | 'REJECT' | 'REVIEW' | 'SUSPEND' | 'REACTIVATE') =>
-    request<any>(`/admin/members/${memberId}/review?action=${action}`, { method: 'POST' }),
+  reviewMember: (
+    memberId: number,
+    action: 'APPROVE' | 'REJECT' | 'REVIEW' | 'DOCUMENTS_REQUIRED' | 'PAYMENT_PENDING' | 'SUSPEND' | 'REACTIVATE',
+    note?: string
+  ) =>
+    request<any>(
+      `/admin/members/${memberId}/review?action=${action}${note ? `&note=${encodeURIComponent(note)}` : ''}`,
+      { method: 'POST' }
+    ),
+  getMemberDetail: (memberId: number) => request<any>(`/admin/members/${memberId}`),
+  getCircleDashboard: (circleId?: number) =>
+    request<any>(`/admin/circle-dashboard${circleId ? `?circle_id=${circleId}` : ''}`),
+  getMisReport: () => request<any>('/admin/reports/mis'),
+  getFinancialReport: () => request<any>('/admin/reports/financial'),
+  getCmsAnalytics: () => request<any>('/admin/analytics/cms'),
+  getAdminNews: (params?: { category?: string; q?: string; status?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.category) query.set('category', params.category);
+    if (params?.q) query.set('q', params.q);
+    if (params?.status) query.set('status', params.status);
+    return request<any[]>(`/admin/news?${query.toString()}`);
+  },
+  adminListNews: (params?: { category?: string; q?: string; status?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.category) query.set('category', params.category);
+    if (params?.q) query.set('q', params.q);
+    if (params?.status) query.set('status', params.status);
+    return request<any[]>(`/admin/news?${query.toString()}`);
+  },
+  createAdminNews: (data: any) =>
+    request<any>('/admin/news', { method: 'POST', body: JSON.stringify(data) }),
+  adminCreateNews: (data: any) =>
+    request<any>('/admin/news', { method: 'POST', body: JSON.stringify(data) }),
+  updateAdminNews: (newsId: number, data: any) =>
+    request<any>(`/admin/news/${newsId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAdminNews: (newsId: number) =>
+    request<any>(`/admin/news/${newsId}`, { method: 'DELETE' }),
+  adminDeleteNews: (newsId: number) =>
+    request<any>(`/admin/news/${newsId}`, { method: 'DELETE' }),
+  adminTransitionWorkflow: (entityType: string, entityId: number, status: string, note?: string) =>
+    request<any>(`/admin/workflow/${encodeURIComponent(entityType)}/${entityId}`, {
+      method: 'POST',
+      body: JSON.stringify({ status, note }),
+    }),
+  getContentRevisions: (entityType: string, entityId: number) =>
+    request<any[]>(`/admin/revisions/${encodeURIComponent(entityType)}/${entityId}`),
+  getAdminAnnouncements: () => request<any[]>('/admin/announcements'),
+  createAdminAnnouncement: (data: any) =>
+    request<any>('/admin/announcements', { method: 'POST', body: JSON.stringify(data) }),
+  uploadOptimizedMedia: (file: File, options?: { title_bn?: string; alt_text?: string; folder?: string }) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (options?.title_bn) formData.append('title_bn', options.title_bn);
+    if (options?.alt_text) formData.append('alt_text', options.alt_text);
+    if (options?.folder) formData.append('folder', options.folder);
+    return request<any>('/admin/media/upload-optimized', { method: 'POST', body: formData });
+  },
   previewMemberImport: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);

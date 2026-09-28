@@ -477,6 +477,41 @@ def main(synthetic_count: int = 0, production_only: bool = False) -> None:
                 ),
             ])
 
+        from app.models.core import News
+        if db.scalar(select(News)) is None:
+            db.add_all([
+                News(
+                    slug='pgcb-grid-automation-conference-2026',
+                    title_bn='জাতীয় পাওয়ার গ্রিড আধুনিকীকরণ ও ডিপ্লোমা প্রকৌশলীদের কারিগরি সম্মেলন অনুষ্ঠিত',
+                    title_en='National Power Grid Modernization & Diploma Engineers Technical Conference Held',
+                    summary_bn='৪০০ কেভি ও ২৩০ কেভি গ্রিড সাবস্টেশনের আধুনিক অটোমেশন ও সুরক্ষা ব্যবস্থাপনা বিষয়ে বিশেষ কর্মশালা।',
+                    summary_en='Special technical conference on 400kV and 230kV grid substation automation and protection.',
+                    content_bn='পাওয়ার গ্রিড কোম্পানি অব বাংলাদেশ (পিজিসিবি)-এর ডিপ্লোমা প্রকৌশলীদের উদ্যোগে জাতীয় পাওয়ার গ্রিড আধুনিকীকরণ ও রিলে প্রোটেকশন বিষয়ে দিনব্যাপী কারিগরি সম্মেলন অনুষ্ঠিত হয়েছে।',
+                    content_en='A day-long technical conference on national power grid modernization and relay protection was organized by PGCB Diploma Engineers.',
+                    category='INSTITUTIONAL',
+                    tags='গ্রিড,সম্মেলন,পিজিসিবি,অটোমেশন',
+                    author_name='পিজিসিবি সম্পাদকীয় ডেস্ক',
+                    is_featured=True,
+                    is_published=True,
+                    published_at=datetime(2026, 7, 24),
+                ),
+                News(
+                    slug='pgcb-digital-portal-and-smart-id-launch',
+                    title_bn='পিজিসিবি প্রকৌশলী সমিতির ডিজিটাল মেম্বার পোর্টাল ও কিউআর স্মার্ট আইডি কার্ড উদ্বোধন',
+                    title_en='PGCB Engineers Association Launches Digital Member Portal & QR Smart ID Card',
+                    summary_bn='৯টি গ্রিড সার্কেলের ১,৫০০+ প্রকৌশলীর জন্য সমন্বিত ডিজিটাল সদস্য সেবা ও তাৎক্ষণিক ভেরিফিকেশন সুবিধা চালু।',
+                    summary_en='Integrated digital member services and instant QR verification launched for 1,500+ engineers across 9 Grid Circles.',
+                    content_bn='সকল গ্রিড সার্কেলের সদস্যদের সদস্যপদ নবায়ন, ডিজিটাল সনদপত্র ও স্মার্ট আইডি কার্ড সেবা এক প্ল্যাটফর্মে নিশ্চিত করতে আধুনিক পোর্টাল চালু করা হয়েছে।',
+                    content_en='The modern institutional portal has been launched to provide membership renewal, digital certificates, and smart ID cards on a unified platform.',
+                    category='PRESS_RELEASE',
+                    tags='ডিজিটাল পোর্টাল,স্মার্ট আইডি,সদস্য সেবা',
+                    author_name='কেন্দ্রীয় কার্যনির্বাহী পরিষদ',
+                    is_featured=True,
+                    is_published=True,
+                    published_at=datetime(2026, 7, 20),
+                ),
+            ])
+
         db.commit()
 
         if synthetic_count > 0:

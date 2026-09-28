@@ -23,6 +23,7 @@ class AdminUserUpdate(BaseModel):
 
 class MessageStatusUpdate(BaseModel):
     status: str = Field(pattern='^(NEW|ASSIGNED|IN_PROGRESS|WAITING|RESOLVED|CLOSED|ARCHIVED)$')
-    assigned_to: int | None = None
+    assigned_to: str | int | None = None
     response_text: str | None = None
+
 

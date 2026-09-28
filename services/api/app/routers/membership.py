@@ -239,6 +239,29 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
 
     activities.sort(key=lambda item: item.get('timestamp') or '', reverse=True)
 
+    membership_info = {
+        'id': m.id,
+        'membership_id': m.membership_id,
+        'membership_type': m.membership_type or 'GENERAL',
+        'status': m.status,
+        'designation_bn': m.designation_bn,
+        'designation_en': m.designation_en,
+        'circle_id': m.circle_id,
+        'circle_bn': m.circle.name_bn if m.circle else None,
+        'circle_en': m.circle.name_en if m.circle else None,
+        'issue_date': m.issue_date,
+        'validity_date': m.validity_date,
+        **exp,
+    }
+    quick_actions = [
+        {'id': 'DIGITAL_ID', 'label_bn': 'ডিজিটাল আইডি', 'label_en': 'Digital ID', 'href': '/portal/id-card'},
+        {'id': 'RENEW_MEMBERSHIP', 'label_bn': 'সদস্যপদ নবায়ন', 'label_en': 'Renew Membership', 'href': '/portal?tab=renewal'},
+        {'id': 'CERTIFICATES', 'label_bn': 'সনদপত্র ওয়ালেট', 'label_en': 'Certificates', 'href': '/portal?tab=certificates'},
+        {'id': 'DOCUMENTS', 'label_bn': 'ডকুমেন্টস', 'label_en': 'Documents', 'href': '/portal?tab=documents'},
+        {'id': 'PAYMENTS', 'label_bn': 'পেমেন্ট ও রসিদ', 'label_en': 'Payments', 'href': '/portal?tab=payments'},
+        {'id': 'EVENTS', 'label_bn': 'ইভেন্ট নিবন্ধন', 'label_en': 'Events', 'href': '/events'},
+    ]
+
     return {
         'user': {
             'id': user.id,
@@ -248,20 +271,9 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
             'phone': user.phone,
             'role': user.role,
         },
-        'membership': {
-            'id': m.id,
-            'membership_id': m.membership_id,
-            'membership_type': m.membership_type or 'GENERAL',
-            'status': m.status,
-            'designation_bn': m.designation_bn,
-            'designation_en': m.designation_en,
-            'circle_id': m.circle_id,
-            'circle_bn': m.circle.name_bn if m.circle else None,
-            'circle_en': m.circle.name_en if m.circle else None,
-            'issue_date': m.issue_date,
-            'validity_date': m.validity_date,
-            **exp,
-        },
+        'hero_card': membership_info,
+        'membership': membership_info,
+        'quick_actions': quick_actions,
         'quick_stats': {
             'unread_notifications': unread_count,
             'certificates_count': certs_count,
@@ -287,36 +299,45 @@ def get_renewal_options(user: User = Depends(current_user), db: Session = Depend
 
     periods = [
         {
+            'plan_id': 'RENEWAL_1YR',
             'code': 'RENEWAL_1YR',
+            'period': '1YR',
             'title_bn': '১ বছর মেয়াদী বার্ষিক নবায়ন',
             'title_en': '1 Year Annual Membership Renewal',
             'years': 1,
             'days': 365,
             'amount': annual_fee,
+            'amount_bdt': annual_fee,
             'amount_formatted': f'৳{annual_fee:,}',
             'currency': 'BDT',
             'projected_validity_date': (base_date + timedelta(days=365)).strftime('%Y-%m-%d'),
             'projected_validity_formatted': (base_date + timedelta(days=365)).strftime('%d %b %Y'),
         },
         {
+            'plan_id': 'RENEWAL_2YR',
             'code': 'RENEWAL_2YR',
+            'period': '2YR',
             'title_bn': '২ বছর মেয়াদী বর্ধিত নবায়ন',
             'title_en': '2 Years Extended Membership Renewal',
             'years': 2,
             'days': 730,
             'amount': annual_fee * 2,
+            'amount_bdt': annual_fee * 2,
             'amount_formatted': f'৳{annual_fee * 2:,}',
             'currency': 'BDT',
             'projected_validity_date': (base_date + timedelta(days=730)).strftime('%Y-%m-%d'),
             'projected_validity_formatted': (base_date + timedelta(days=730)).strftime('%d %b %Y'),
         },
         {
+            'plan_id': 'LIFE',
             'code': 'LIFE',
+            'period': 'LIFE',
             'title_bn': 'আজীবন সদস্যপদ আপগ্রেড',
             'title_en': 'Lifetime Membership Upgrade',
             'years': 50,
             'days': 18250,
             'amount': life_fee,
+            'amount_bdt': life_fee,
             'amount_formatted': f'৳{life_fee:,}',
             'currency': 'BDT',
             'projected_validity_date': (base_date + timedelta(days=18250)).strftime('%Y-%m-%d'),
@@ -331,6 +352,7 @@ def get_renewal_options(user: User = Depends(current_user), db: Session = Depend
         'current_validity_date': m.validity_date,
         **exp,
         'reminder_schedule_days': [60, 30, 7, 0],
+        'options': periods,
         'periods': periods,
     }
 
@@ -361,7 +383,7 @@ def list_member_renewals(user: User = Depends(current_user), db: Session = Depen
             'receipt_pdf_url': f'/api/v1/member/payments/{payment.id}/receipt.pdf' if payment else None,
             'created_at': r.created_at,
         })
-    return result
+    return {'renewals': result, 'items': result, 'count': len(result)}
 
 
 @router.post('/renewal/initiate')
@@ -378,13 +400,25 @@ def initiate_membership_renewal(
     Callback verification -> Membership renewed -> New expiry date -> Receipt.
     """
     m = get_member(user, db)
-    period_code = (
+    raw_period = (
         payload.get('period_code')
         or payload.get('membership_plan_id')
+        or payload.get('period')
         or 'RENEWAL_1YR'
     ).strip().upper()
+    period_alias_map = {
+        '1YR': 'RENEWAL_1YR',
+        '1_YEAR': 'RENEWAL_1YR',
+        'RENEWAL_1YR': 'RENEWAL_1YR',
+        '2YR': 'RENEWAL_2YR',
+        '2_YEAR': 'RENEWAL_2YR',
+        'RENEWAL_2YR': 'RENEWAL_2YR',
+        'LIFE': 'LIFE',
+        'LIFETIME': 'LIFE',
+    }
+    period_code = period_alias_map.get(raw_period, raw_period)
     if period_code not in RENEWAL_PERIODS:
-        raise HTTPException(400, f'Unsupported renewal period: {period_code}')
+        raise HTTPException(400, f'Unsupported renewal period: {raw_period}')
 
     try:
         provider = normalize_provider(payload.get('provider') or 'SSLCOMMERZ')
@@ -583,7 +617,9 @@ def notifications(user: User = Depends(current_user), db: Session = Depends(get_
             'type': n.notification_type,
             'read_at': n.read_at,
             'is_read': bool(n.read_at),
+            'indicator': '○' if n.read_at else '●',
             'created_at': n.created_at,
+            'relative_time': _relative_time(n.created_at, now)[0],
             'relative_time_en': _relative_time(n.created_at, now)[0],
             'relative_time_bn': _relative_time(n.created_at, now)[1],
         }

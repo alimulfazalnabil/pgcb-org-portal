@@ -253,6 +253,7 @@ class CertificateService:
             'revocation_reason': rev_reason,
             'event_registration_id': cert.event_registration_id,
             'member_id': cert.member_id,
+            'view_url': f'/api/v1/certificates/{cert.certificate_no}.png',
             'preview_url': f'/api/v1/certificates/{cert.certificate_no}/preview',
             'download_url': f'/api/v1/certificates/{cert.certificate_no}/download',
             'verify_url': f'/certificates/verify?cert={cert.certificate_no}',

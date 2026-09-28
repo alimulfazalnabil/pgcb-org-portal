@@ -19,6 +19,7 @@ from app.routers.certificates import router as certificates_router
 from app.routers.workflows import router as workflows_router
 from app.routers.secretariat import router as secretariat_router
 from app.routers.helpdesk import router as helpdesk_router
+from app.routers.cms import router as cms_router
 
 from app.storage import get_storage
 
@@ -32,6 +33,11 @@ async def lifespan(app: FastAPI):
         f"[STARTUP] PGCB Portal API v1.0.0-rc1 | Env: {settings.app_env} | "
         f"Storage: {settings.storage_backend} ({settings.storage_root}) | DB Host: {db_target}"
     )
+    if settings.database_url.startswith("sqlite"):
+        try:
+            Base.metadata.create_all(bind=engine, checkfirst=True)
+        except Exception as exc:
+            logger.debug("SQLite table initialization notice: %s", exc)
     # Ensure storage root and subdirectories are created on persistent disk
     try:
         get_storage().ensure_root_exists()
@@ -98,9 +104,9 @@ app.add_middleware(
     allow_headers=['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID'],
 )
 
-# Only in isolated test runs with sqlite, provision tables automatically;
+# In local/test runs with sqlite, provision tables automatically;
 # Staging and production strictly use Alembic migrations (alembic upgrade head).
-if settings.app_env.lower() == 'test' and settings.database_url.startswith('sqlite'):
+if settings.database_url.startswith('sqlite'):
     try:
         Base.metadata.create_all(bind=engine, checkfirst=True)
     except Exception as exc:
@@ -122,6 +128,7 @@ app.include_router(certificates_router, prefix='/api/v1')
 app.include_router(workflows_router, prefix='/api/v1')
 app.include_router(notices.router, prefix='/api/v1')
 app.include_router(documents.router, prefix='/api/v1')
+app.include_router(cms_router, prefix='/api/v1')
 
 
 @app.get('/')
