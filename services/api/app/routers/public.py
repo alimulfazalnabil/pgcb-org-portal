@@ -315,6 +315,33 @@ def circulars(q: str | None = Query(default=None, max_length=100), category: str
     return [{'id': x.id, 'category': x.category, 'reference_no': x.reference_no, 'title_bn': x.title_bn, 'title_en': x.title_en, 'summary_bn': x.summary_bn, 'document_url': x.document_url, 'published_at': x.published_at, 'priority': x.priority} for x in rows]
 
 
+@router.get('/notices')
+def public_notices(category: str | None = None, priority: str | None = None, limit: int = 20, db: Session = Depends(get_db)):
+    limit = max(1, min(limit, 100))
+    stmt = select(Notice).where(Notice.is_published == True).order_by(Notice.is_pinned.desc(), Notice.published_at.desc(), Notice.created_at.desc()).limit(limit)
+    if category:
+        stmt = stmt.where(Notice.category == category.upper())
+    if priority:
+        stmt = stmt.where(Notice.priority == priority.upper())
+    rows = db.scalars(stmt).all()
+    return [
+        {
+            'id': n.id,
+            'title_bn': n.title_bn,
+            'title_en': n.title_en,
+            'content_bn': n.content_bn,
+            'content_en': n.content_en,
+            'priority': n.priority,
+            'category': n.category,
+            'attachment_url': n.attachment_url,
+            'is_pinned': n.is_pinned,
+            'is_published': n.is_published,
+            'published_at': n.published_at,
+        }
+        for n in rows
+    ]
+
+
 @router.get('/journals')
 def journals(q: str | None = Query(default=None, max_length=100), limit: int = 50, offset: int = 0, db: Session = Depends(get_db)):
     limit = max(1, min(limit, 100)); offset = max(offset, 0)
