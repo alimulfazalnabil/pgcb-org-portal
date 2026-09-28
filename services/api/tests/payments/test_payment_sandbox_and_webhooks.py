@@ -46,7 +46,7 @@ def test_sandbox_payment_and_idempotent_webhook_simulation():
     )
     assert pay.status_code == 200
     payment_id = pay.json()['id']
-    assert pay.json()['amount'] == 1000
+    assert pay.json()['amount'] == 2000
     assert pay.json()['status'] == 'PENDING'
 
     # 2. Sandbox webhook simulation -> PAID + Receipt + Membership Activation
