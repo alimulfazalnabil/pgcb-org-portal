@@ -696,7 +696,11 @@ def review_member(
     admin: User = Depends(require_permission('member.review')),
     db: Session = Depends(get_db),
 ):
-    allowed_actions = {'APPROVE', 'REJECT', 'REVIEW', 'DOCUMENTS_REQUIRED', 'PAYMENT_PENDING', 'SUSPEND', 'REACTIVATE'}
+    allowed_actions = {
+        'APPROVE', 'REJECT', 'REVIEW', 'DOCUMENTS_REQUIRED',
+        'REQUEST_CORRECTION', 'CORRECTION_REQUIRED',
+        'PAYMENT_PENDING', 'SUSPEND', 'REACTIVATE',
+    }
     if action not in allowed_actions:
         raise HTTPException(400, 'Invalid member action')
     m = db.scalar(select(Member).options(selectinload(Member.user), selectinload(Member.circle)).where(Member.id == member_id))
@@ -710,8 +714,8 @@ def review_member(
     prev_status = m.status
     if action == 'REVIEW':
         m.status, resolved_note = 'UNDER_REVIEW', note or 'Application moved to review.'
-    elif action == 'DOCUMENTS_REQUIRED':
-        m.status, resolved_note = 'DOCUMENTS_REQUIRED', note or 'Additional verification documents requested.'
+    elif action in ('DOCUMENTS_REQUIRED', 'REQUEST_CORRECTION', 'CORRECTION_REQUIRED'):
+        m.status, resolved_note = 'DOCUMENTS_REQUIRED', note or 'Additional verification documents or correction requested.'
     elif action == 'PAYMENT_PENDING':
         m.status, resolved_note = 'PAYMENT_PENDING', note or 'Application verified; awaiting membership fee payment.'
     elif action == 'REJECT':
