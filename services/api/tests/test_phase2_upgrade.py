@@ -1267,12 +1267,38 @@ def test_sprint5_institutional_intelligence_and_ai_assistant():
     Public/Member/Admin AI assistant modes, RBAC-aware retrieval, source citations,
     No-Answer fallback, Smart FAQ approval workflow, Content Assist, Prompt-Injection protection,
     and AI Usage Analytics."""
+    import io
     import zipfile
+    from sqlalchemy import select
+    from app.db.session import SessionLocal
+    from app.models import Circle, User
+    from app.core.security import hash_password
+
+    with SessionLocal() as db:
+        circles_db = db.scalars(select(Circle).order_by(Circle.id.asc()).limit(2)).all()
+        circle1_id = circles_db[0].id
+        circle2_id = circles_db[1].id
+        c2_email = 'circle2.ai.admin@example.org'
+        c2_user = db.scalar(select(User).where(User.email == c2_email))
+        if not c2_user:
+            c2_user = User(
+                email=c2_email,
+                password_hash=hash_password(TEST_PW),
+                name_bn='সার্কেল ০২ এআই অ্যাডমিন',
+                name_en='Circle 02 AI Admin',
+                role='CIRCLE_ADMIN',
+                is_active=True,
+                email_verified=True,
+            )
+            db.add(c2_user)
+            db.flush()
+        else:
+            c2_user.role = 'CIRCLE_ADMIN'
+            c2_user.password_hash = hash_password(TEST_PW)
+        c2_user_id = c2_user.id
+        db.commit()
 
     with TestClient(app) as client:
-        admin_headers = _login(client, 'admin@example.org')
-        member_headers = _login(client, 'member@example.org')
-
         # 1. Semantic Search & Version Control (2025 superseded vs 2026 current)
         client.cookies.clear()
         sem_res = client.get(
@@ -1298,7 +1324,8 @@ def test_sprint5_institutional_intelligence_and_ai_assistant():
         assert hist_res.status_code == 200
         assert any(r['is_current'] is False for r in hist_res.json()['results'])
 
-        # 2. PDF & DOCX Knowledge Ingestion
+        # 2. PDF & DOCX Knowledge Ingestion (as Admin)
+        admin_headers = _login(client, 'admin@example.org')
         pdf_bytes = b'%PDF-1.4\n([Page 3] Section 5.1: Emergency Welfare Grant provides 50,000 BDT medical assistance to active members.) Tj\n%%EOF'
         pdf_ingest = client.post(
             '/api/v1/admin/knowledge/ingest-file',
@@ -1360,10 +1387,12 @@ def test_sprint5_institutional_intelligence_and_ai_assistant():
         assert unauth_src.status_code == 401
 
         # Member access to internal source endpoint -> 403
+        member_headers = _login(client, 'member@example.org')
         mem_src = client.get(f'/api/v1/knowledge/documents/{internal_doc_id}/source', headers=member_headers)
         assert mem_src.status_code == 403
 
         # Admin access to internal source endpoint -> 200
+        admin_headers = _login(client, 'admin@example.org')
         adm_src = client.get(f'/api/v1/knowledge/documents/{internal_doc_id}/source', headers=admin_headers)
         assert adm_src.status_code == 200
         assert adm_src.json()['sections'][0]['page'] == 7
@@ -1413,6 +1442,7 @@ def test_sprint5_institutional_intelligence_and_ai_assistant():
         )
         assert unauth_mem_ai.status_code == 401
 
+        member_headers = _login(client, 'member@example.org')
         mem_ai = client.post(
             '/api/v1/ai/ask',
             headers=member_headers,
@@ -1431,6 +1461,7 @@ def test_sprint5_institutional_intelligence_and_ai_assistant():
         assert mem_admin_try.status_code == 403
 
         # 7. Admin AI Assistant & Controlled Tools + Circle Isolation
+        admin_headers = _login(client, 'admin@example.org')
         adm_ai_stats = client.post(
             '/api/v1/ai/ask',
             headers=admin_headers,
@@ -1448,23 +1479,7 @@ def test_sprint5_institutional_intelligence_and_ai_assistant():
         assert adm_ai_ranking.status_code == 200
         assert any(t['tool_name'] == 'circles_pending_ranking' for t in adm_ai_ranking.json()['tools_used'])
 
-        # Circle Admin Isolation check in Admin AI Assistant
-        circles_list = client.get('/api/v1/public/circles').json()
-        circle1_id = circles_list[0]['id']
-        circle2_id = circles_list[1]['id']
-        c2_email = f'c2_ai_admin_{int(datetime.utcnow().timestamp())}@example.org'
-        c2_user_res = client.post(
-            '/api/v1/admin/users',
-            headers=admin_headers,
-            json={
-                'email': c2_email,
-                'password': 'Password123!',
-                'role': 'CIRCLE_ADMIN',
-                'is_active': True,
-            },
-        )
-        assert c2_user_res.status_code in (200, 201), c2_user_res.text
-        c2_user_id = c2_user_res.json()['id']
+        # Assign Circle 2 Admin and verify Circle Isolation in Admin AI Assistant
         client.post(
             f'/api/v1/admin/circles/{circle2_id}/assign-admin',
             headers=admin_headers,
@@ -1483,6 +1498,8 @@ def test_sprint5_institutional_intelligence_and_ai_assistant():
         )
         assert c2_cross_circle.status_code == 403
 
+        # Switch back to Super Admin for steps 8-11
+        admin_headers = _login(client, 'admin@example.org')
         # 8. Prompt-Injection Protection & Security Audit
         inj_res = client.post(
             '/api/v1/ai/ask',
