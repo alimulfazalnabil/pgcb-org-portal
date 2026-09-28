@@ -665,6 +665,39 @@ class Role(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
 
+class Permission(Base, TimestampMixin):
+    __tablename__ = 'permissions'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    module: Mapped[str] = mapped_column(String(60), default='CORE', index=True)
+    description_en: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    description_bn: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class GridCircle(Base, TimestampMixin):
+    __tablename__ = 'grid_circles'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    name_bn: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    name_en: Mapped[str] = mapped_column(String(120), index=True)
+    region: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+
+class Membership(Base, TimestampMixin):
+    __tablename__ = 'memberships'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey('members.id', ondelete='CASCADE'), index=True)
+    membership_id: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    membership_type: Mapped[str] = mapped_column(String(50), default='GENERAL', index=True)
+    status: Mapped[str] = mapped_column(String(30), default='ACTIVE', index=True)
+    issue_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    validity_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+
 class MembershipApplication(Base, TimestampMixin):
     __tablename__ = 'membership_applications'
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -676,3 +709,60 @@ class MembershipApplication(Base, TimestampMixin):
     reviewer_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+
+class ApplicationReview(Base, TimestampMixin):
+    __tablename__ = 'application_reviews'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_id: Mapped[int | None] = mapped_column(ForeignKey('membership_applications.id', ondelete='CASCADE'), nullable=True, index=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey('members.id', ondelete='CASCADE'), index=True)
+    reviewer_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(40), index=True)
+    previous_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    new_status: Mapped[str] = mapped_column(String(30), index=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Payment(Base, TimestampMixin):
+    __tablename__ = 'payments'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
+    member_id: Mapped[int | None] = mapped_column(ForeignKey('members.id', ondelete='SET NULL'), nullable=True, index=True)
+    transaction_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    receipt_no: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(40), default='BKASH', index=True)
+    purpose: Mapped[str] = mapped_column(String(50), default='MEMBERSHIP', index=True)
+    amount: Mapped[int] = mapped_column(Integer, default=0)
+    currency: Mapped[str] = mapped_column(String(10), default='BDT')
+    status: Mapped[str] = mapped_column(String(30), default='PENDING', index=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+
+class NewsEntry(Base, TimestampMixin):
+    __tablename__ = 'news'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    slug: Mapped[str] = mapped_column(String(240), unique=True, index=True)
+    title_bn: Mapped[str] = mapped_column(String(500), index=True)
+    title_en: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    summary_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_bn: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(80), default='GENERAL', index=True)
+    status: Mapped[str] = mapped_column(String(30), default='PUBLISHED', index=True)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow, nullable=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+
+class NotificationTemplate(Base, TimestampMixin):
+    __tablename__ = 'notification_templates'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    channel: Mapped[str] = mapped_column(String(30), default='EMAIL', index=True)
+    subject_bn: Mapped[str] = mapped_column(String(300))
+    subject_en: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    body_bn: Mapped[str] = mapped_column(Text)
+    body_en: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
