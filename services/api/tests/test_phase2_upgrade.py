@@ -1581,6 +1581,126 @@ def test_sprint5_institutional_intelligence_and_ai_assistant():
         assert 'circles_by_pending_applications' in intel_data
 
 
+def test_sprint6_security_performance_and_production_engineering():
+    """Sprint 6: Security hardening, 12 production DB indexes, 1,500-member realistic dataset load benchmark,
+    50/100/250 concurrent user tests, selective TTL caching + sensitive route bypass, EICAR/script upload blocking,
+    WebP image resize/optimization, full DR drill (RPO/RTO), Admin System Health, Controlled Error IDs
+    (PGCB-YYYY-MMDD-XXXX), and 13-point First Production Smoke Test."""
+    import io
+    import re
+    from PIL import Image
+    from app.utils.storage import EICAR_SIGNATURE, optimize_image_to_webp
+    from scripts.backup_pgcb import DR_POLICY, run_disaster_recovery_drill
+    from scripts.load_test_pgcb import run_concurrency_tiers, run_realistic_db_benchmark
+
+    # 1. Realistic 1,500-Member Dataset & Expensive Query Benchmark
+    bench = run_realistic_db_benchmark(scale=1.0)
+    assert bench['dataset_counts']['members'] == 1500
+    assert bench['dataset_counts']['applications'] >= 300
+    assert bench['dataset_counts']['payments'] >= 1000
+    assert bench['dataset_counts']['notifications'] >= 5000
+    assert bench['dataset_counts']['documents'] >= 1000
+    assert bench['dataset_counts']['events'] >= 100
+    assert bench['slow_queries_count'] == 0
+
+    # 2. Image Resize & WebP Optimization (Original -> Resize -> WebP -> Metadata)
+    large_img_buf = io.BytesIO()
+    Image.new('RGB', (2000, 1200), color=(14, 74, 122)).save(large_img_buf, format='PNG')
+    webp_bytes, webp_meta = optimize_image_to_webp(large_img_buf.getvalue(), max_width=1600, max_height=1600)
+    assert webp_meta['format'] == 'WEBP'
+    assert webp_meta['width'] == 1600
+    assert webp_meta['height'] == 960
+    assert webp_bytes[:4] == b'RIFF' and webp_bytes[8:12] == b'WEBP'
+
+    # 3. Backup & Disaster Recovery Drill (DB failure -> Restore -> Migrations/Schema -> Verify)
+    with tempfile.TemporaryDirectory() as tmp_dr:
+        dr_report = run_disaster_recovery_drill(
+            settings.database_url,
+            Path(settings.storage_root),
+            Path(tmp_dr),
+        )
+        assert dr_report['drill_status'] == 'PASSED'
+        assert dr_report['rpo_hours'] == DR_POLICY['rpo_hours'] == 24
+        assert dr_report['rto_minutes'] == DR_POLICY['rto_minutes'] == 30
+        assert len(dr_report['steps']) == 5
+        assert all(s['status'] == 'PASSED' for s in dr_report['steps'])
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        # 4. Selective Caching for Public Endpoints vs Never-Cached Sensitive Endpoints
+        from app.core.cache import portal_cache
+        portal_cache.invalidate_prefix('')
+
+        r_miss = client.get('/api/v1/public/notices')
+        assert r_miss.status_code == 200
+        assert r_miss.headers.get('X-Cache') == 'MISS'
+
+        r_hit = client.get('/api/v1/public/notices')
+        assert r_hit.status_code == 200
+        assert r_hit.headers.get('X-Cache') == 'HIT'
+
+        # Sensitive routes NEVER cached (X-Cache: BYPASS, Cache-Control: no-store)
+        admin_headers = _login(client, 'admin@example.org')
+        r_admin = client.get('/api/v1/admin/stats', headers=admin_headers)
+        assert r_admin.status_code == 200
+        assert r_admin.headers.get('X-Cache') == 'BYPASS'
+        assert 'no-store' in r_admin.headers.get('Cache-Control', '')
+
+        # 5. File Upload Security Scan (EICAR virus signature & PDF /JavaScript payload blocked)
+        eicar_pdf = b'%PDF-1.4\n' + EICAR_SIGNATURE + b'\n%%EOF'
+        up_eicar = client.post(
+            '/api/v1/documents/upload',
+            headers=admin_headers,
+            files={'file': ('eicar_test.pdf', eicar_pdf, 'application/pdf')},
+        )
+        assert up_eicar.status_code == 400
+        assert 'Security scan failed' in up_eicar.text
+
+        js_pdf = b'%PDF-1.4\n<< /Type /Action /S /JavaScript /JS (app.alert(1)) >>\n%%EOF'
+        up_jspdf = client.post(
+            '/api/v1/documents/upload',
+            headers=admin_headers,
+            files={'file': ('malicious_js.pdf', js_pdf, 'application/pdf')},
+        )
+        assert up_jspdf.status_code == 400
+        assert 'Security scan failed' in up_jspdf.text
+
+        # 6. Controlled Production Error Handling (ERROR-ID: PGCB-YYYY-MMDD-XXXX)
+        err_res = client.get('/api/v1/admin/system/simulate-500', headers=admin_headers)
+        assert err_res.status_code == 500
+        err_json = err_res.json()
+        assert err_json['detail'] == 'Something went wrong. Please try again or contact the Secretariat.'
+        assert re.match(r'^PGCB-\d{4}-\d{4}-[0-9A-F]{4}$', err_json['error_id'])
+        assert 'RuntimeError' not in err_res.text
+        assert 'Simulated internal failure' not in err_res.text
+
+        # 7. Admin System Health & 12 Production Database Indexes Verification
+        health_res = client.get('/api/v1/admin/system/health', headers=admin_headers)
+        assert health_res.status_code == 200
+        h_data = health_res.json()
+        assert h_data['status'] == 'Operational'
+        for comp in ('website', 'api', 'database', 'storage', 'email', 'payments'):
+            assert h_data['components'][comp]['indicator'] == '● Operational'
+        assert h_data['last_backup'] == '02:00 AM'
+        assert h_data['components']['database']['indexes_verified'] == 12
+        assert any(e['error_id'] == err_json['error_id'] for e in h_data['observability']['recent_errors'])
+
+        # 8. First Production Smoke Test (13-Point Verification)
+        smoke_res = client.post('/api/v1/admin/system/smoke-test', headers=admin_headers)
+        assert smoke_res.status_code == 200
+        smoke_data = smoke_res.json()
+        assert smoke_data['status'] == 'PASSED'
+        assert smoke_data['passed_count'] == 13
+        assert smoke_data['total_count'] == 13
+
+        # 9. Concurrency Load Testing (50, 100, 250 Concurrent Users)
+        client.cookies.clear()
+        concurrency_report = run_concurrency_tiers(client, concurrency_tiers=(50, 100, 250))
+        for tier_key in ('50_concurrent_users', '100_concurrent_users', '250_concurrent_users'):
+            assert concurrency_report[tier_key]['error_rate'] == 0.0
+            assert concurrency_report[tier_key]['requests_completed'] in (50, 100, 250)
+
+
+
 
 
 
