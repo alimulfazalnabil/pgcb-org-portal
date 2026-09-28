@@ -764,10 +764,39 @@ def simulate_sandbox_payment_webhook(
         is_processed=True,
     )
     db.add(webhook_log)
+
+    from app.models import Membership, Payment as CanonicalPayment
+    if not db.scalar(select(CanonicalPayment).where(CanonicalPayment.transaction_id == sim_trx_id)):
+        db.add(
+            CanonicalPayment(
+                user_id=core_tx.user_id,
+                member_id=core_tx.member_id,
+                transaction_id=sim_trx_id,
+                receipt_no=core_tx.receipt_no,
+                provider=core_tx.provider or "BKASH",
+                purpose=core_tx.purpose or "MEMBERSHIP",
+                amount=int(core_tx.amount),
+                currency=core_tx.currency or "BDT",
+                status="PAID",
+                paid_at=datetime.utcnow(),
+            )
+        )
+    member = db.get(Member, core_tx.member_id) if core_tx.member_id else None
+    if member and member.membership_id:
+        if not db.scalar(select(Membership).where(Membership.membership_id == member.membership_id)):
+            db.add(
+                Membership(
+                    member_id=member.id,
+                    membership_id=member.membership_id,
+                    membership_type=member.membership_type or "GENERAL",
+                    status=member.status or "ACTIVE",
+                    issue_date=member.issue_date or datetime.utcnow(),
+                    validity_date=member.validity_date,
+                )
+            )
+
     db.commit()
     db.refresh(core_tx)
-
-    member = db.get(Member, core_tx.member_id) if core_tx.member_id else None
     log_audit_action(
         db,
         request,

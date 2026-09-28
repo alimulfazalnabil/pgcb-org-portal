@@ -20,6 +20,12 @@ def test_6_role_rbac_permission_matrix():
     assert has_permission('CIRCLE_ADMIN', 'member.review') is True
     assert has_permission('CIRCLE_ADMIN', 'finance.write') is False
 
+    # 2b. Membership Admin
+    assert has_permission('MEMBERSHIP_ADMIN', 'member.read') is True
+    assert has_permission('MEMBERSHIP_ADMIN', 'member.review') is True
+    assert has_permission('MEMBERSHIP_ADMIN', 'document.review') is True
+    assert has_permission('MEMBERSHIP_ADMIN', 'finance.write') is False
+
     # 3. Finance Admin
     assert has_permission('FINANCE_ADMIN', 'finance.read') is True
     assert has_permission('FINANCE_ADMIN', 'finance.write') is True
