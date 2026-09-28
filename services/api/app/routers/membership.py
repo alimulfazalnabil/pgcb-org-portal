@@ -524,13 +524,35 @@ def update_profile(payload: MemberProfileUpdate, request: Request, user: User = 
 @router.post('/application', response_model=ApplicationResponse)
 @router.post('/apply', response_model=ApplicationResponse)
 def submit_application(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.models import MembershipApplication
     m = get_member(user, db)
     if m.status == 'ACTIVE':
         raise HTTPException(409, 'Membership is already active')
     m.status = 'SUBMITTED'
+    if not m.application_no:
+        m.application_no = f'PGCB-APP-{datetime.utcnow().year}-{m.id:04d}'
     m.application_note = 'Application submitted by member.'
+    app_row = db.scalar(select(MembershipApplication).where(MembershipApplication.member_id == m.id))
+    if not app_row:
+        db.add(
+            MembershipApplication(
+                member_id=m.id,
+                application_no=m.application_no,
+                membership_type=m.membership_type or 'GENERAL',
+                circle_id=m.circle_id,
+                status='SUBMITTED',
+            )
+        )
+    else:
+        app_row.status = 'SUBMITTED'
+        app_row.circle_id = m.circle_id
     audit(db, user, 'SUBMIT_APPLICATION', 'MEMBER', m.id, request.client.host if request.client else None)
-    officers = db.scalars(select(User).where(User.role.in_(['MEMBERSHIP_OFFICER', 'SUPER_ADMIN']), User.is_active == True)).all()
+    officers = db.scalars(
+        select(User).where(
+            User.role.in_(['MEMBERSHIP_OFFICER', 'CIRCLE_ADMIN', 'CENTRAL_ADMIN', 'SUPER_ADMIN']),
+            User.is_active == True,
+        )
+    ).all()
     for officer in officers:
         notify(db, officer.id, 'নতুন সদস্য আবেদন', f'{user.name_bn}-এর সদস্য আবেদন পর্যালোচনার জন্য জমা হয়েছে।', 'MEMBERSHIP')
     db.commit(); db.refresh(m)

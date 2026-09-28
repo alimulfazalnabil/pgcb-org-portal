@@ -189,6 +189,26 @@ def main(synthetic_count: int = 0, production_only: bool = False) -> None:
 
     db = SessionLocal()
     try:
+        from app.models import Role
+        from app.core.rbac import ROLE_PERMISSIONS
+        import json as _json
+        canonical_roles = [
+            ('MEMBER', 'সাধারণ সদস্য', 'Member'),
+            ('CIRCLE_ADMIN', 'সার্কেল প্রশাসক', 'Circle Admin'),
+            ('FINANCE_ADMIN', 'অর্থ প্রশাসক', 'Finance Admin'),
+            ('CONTENT_ADMIN', 'কনটেন্ট প্রশাসক', 'Content Admin'),
+            ('CENTRAL_ADMIN', 'কেন্দ্রীয় প্রশাসক', 'Central Admin'),
+            ('SUPER_ADMIN', 'সুপার অ্যাডমিন', 'Super Admin'),
+        ]
+        for r_code, r_bn, r_en in canonical_roles:
+            existing_role = db.scalar(select(Role).where(Role.code == r_code))
+            perms_list = sorted(ROLE_PERMISSIONS.get(r_code, set()))
+            if not existing_role:
+                db.add(Role(code=r_code, name_bn=r_bn, name_en=r_en, permissions_json=_json.dumps(perms_list), is_active=True))
+            else:
+                existing_role.permissions_json = _json.dumps(perms_list)
+        db.commit()
+
         for bn, en in OFFICIAL_CIRCLES:
             existing_circle = db.scalar(select(Circle).where(Circle.name_bn == bn))
             if not existing_circle:
