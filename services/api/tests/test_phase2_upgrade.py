@@ -1453,16 +1453,22 @@ def test_sprint5_institutional_intelligence_and_ai_assistant():
         circle1_id = circles_list[0]['id']
         circle2_id = circles_list[1]['id']
         c2_email = f'c2_ai_admin_{int(datetime.utcnow().timestamp())}@example.org'
-        client.post(
+        c2_user_res = client.post(
             '/api/v1/admin/users',
             headers=admin_headers,
             json={
                 'email': c2_email,
                 'password': 'Password123!',
                 'role': 'CIRCLE_ADMIN',
-                'circle_id': circle2_id,
                 'is_active': True,
             },
+        )
+        assert c2_user_res.status_code in (200, 201), c2_user_res.text
+        c2_user_id = c2_user_res.json()['id']
+        client.post(
+            f'/api/v1/admin/circles/{circle2_id}/assign-admin',
+            headers=admin_headers,
+            json={'user_id': c2_user_id},
         )
         c2_headers = _login(client, c2_email)
         # Circle 2 Admin asking for Circle 1 pending applications -> 403
