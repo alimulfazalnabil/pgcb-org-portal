@@ -188,15 +188,13 @@ class CertificateService:
             }
 
         is_revoked = (
-            cert.id in cls._revocations
-            or str(cert.id) in cls._revocations
-            or cert.certificate_no in cls._revocations
+            cert.certificate_no in cls._revocations
+            or (cert.verification_token_hash and cert.verification_token_hash in cls._revocations)
         )
         if is_revoked:
             reason = (
                 cls._revocations.get(cert.certificate_no)
-                or cls._revocations.get(str(cert.id))
-                or cls._revocations.get(cert.id)  # type: ignore[arg-type]
+                or (cls._revocations.get(cert.verification_token_hash) if cert.verification_token_hash else None)
                 or 'সনদপত্রটি প্রাতিষ্ঠানিক সিদ্ধান্তে প্রত্যাহার করা হয়েছে।'
             )
             return {
@@ -228,8 +226,7 @@ class CertificateService:
     def serialize_certificate(cls, cert: Certificate) -> dict:
         rev_reason = (
             cls._revocations.get(cert.certificate_no)
-            or cls._revocations.get(str(cert.id))
-            or cls._revocations.get(cert.id)  # type: ignore[arg-type]
+            or (cls._revocations.get(cert.verification_token_hash) if cert.verification_token_hash else None)
         )
         is_revoked = bool(rev_reason) or getattr(cert, '_transient_status', None) == 'REVOKED'
         is_membership = 'MEMBERSHIP' in (cert.title_bn or '').upper() and not cert.event_registration_id
@@ -328,12 +325,12 @@ class CertificateService:
 
         audit(db, admin_user, 'REVOKE_CERTIFICATE', 'CERTIFICATE', cert.id, ip)
 
-        cls._revocations[cert.id] = reason  # type: ignore[index]
-        cls._revocations[str(cert.id)] = reason
         cls._revocations[cert.certificate_no] = reason
+        if cert.verification_token_hash:
+            cls._revocations[cert.verification_token_hash] = reason
         if hasattr(cert, '_raw_token') and cert._raw_token:
             cls._revocations[cert._raw_token] = reason
-        if isinstance(cert_id_or_token, str):
+        if isinstance(cert_id_or_token, str) and not cert_id_or_token.strip().isdigit():
             cls._revocations[cert_id_or_token.strip()] = reason
 
         notify_user_id = None
