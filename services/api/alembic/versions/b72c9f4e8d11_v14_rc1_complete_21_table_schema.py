@@ -20,6 +20,11 @@ def upgrade():
     inspector = sa.inspect(bind)
     existing_tables = set(inspector.get_table_names())
 
+    if 'membership_applications' in existing_tables:
+        cols = {c['name'] for c in inspector.get_columns('membership_applications')}
+        if 'deleted_at' not in cols:
+            op.add_column('membership_applications', sa.Column('deleted_at', sa.DateTime(), nullable=True))
+
     if 'permissions' not in existing_tables:
         op.create_table(
             'permissions',

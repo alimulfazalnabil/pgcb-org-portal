@@ -47,6 +47,7 @@ def upgrade():
             sa.Column('reviewer_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
             sa.Column('review_note', sa.Text(), nullable=True),
             sa.Column('reviewed_at', sa.DateTime(), nullable=True),
+            sa.Column('deleted_at', sa.DateTime(), nullable=True),
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.Column('updated_at', sa.DateTime(), nullable=False),
         )
