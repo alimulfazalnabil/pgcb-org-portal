@@ -213,7 +213,7 @@ def run_realistic_db_benchmark(scale: float = 1.0) -> dict[str, Any]:
 
             audit_rows = [
                 (i, 1, 'MEMBER_REVIEW', 'MEMBER', now_iso)
-                for i in range(1, 501)
+                for i in range(1, n_audits + 1)
             ]
             cur.executemany('INSERT INTO audit_logs VALUES (?, ?, ?, ?, ?)', audit_rows)
             conn.commit()
@@ -270,6 +270,7 @@ def run_realistic_db_benchmark(scale: float = 1.0) -> dict[str, Any]:
             'notifications': n_notifs,
             'documents': n_docs,
             'events': n_events,
+            'audit_logs': n_audits,
         },
         'query_timings_ms': query_timings_ms,
         'slow_queries_count': slow_queries,
