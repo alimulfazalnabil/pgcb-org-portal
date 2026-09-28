@@ -2,9 +2,9 @@ name: PGCB Portal CI
 
 on:
   push:
-    branches: [ main, develop/hostseba-production, phase-2-upgrade ]
+    branches: [ main, develop/hostseba-production, phase-2-upgrade, 'release/**' ]
   pull_request:
-    branches: [ main, develop/hostseba-production, phase-2-upgrade ]
+    branches: [ main, develop/hostseba-production, phase-2-upgrade, 'release/**' ]
 
 jobs:
   validate-and-test:
