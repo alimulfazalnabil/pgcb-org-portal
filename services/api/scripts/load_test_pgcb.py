@@ -257,6 +257,9 @@ def run_realistic_db_benchmark(scale: float = 1.0) -> dict[str, Any]:
         finally:
             conn.close()
 
+        disk_bytes = sum(f.stat().st_size for f in Path(tmpdir).glob('*') if f.is_file())
+        disk_usage_mb = round(disk_bytes / (1024 * 1024), 2)
+
     _, peak_mem_bytes = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     cpu_ms = round((time.process_time() - cpu_start) * 1000.0, 2)
@@ -265,6 +268,7 @@ def run_realistic_db_benchmark(scale: float = 1.0) -> dict[str, Any]:
     return {
         'dataset_counts': {
             'members': n_members,
+            'membership_records': n_members,
             'applications': n_apps,
             'payments': n_payments,
             'notifications': n_notifs,
@@ -277,6 +281,7 @@ def run_realistic_db_benchmark(scale: float = 1.0) -> dict[str, Any]:
         'database_cpu_ms': cpu_ms,
         'seed_and_query_wall_ms': wall_ms,
         'peak_memory_mb': round(peak_mem_bytes / (1024 * 1024), 2),
+        'disk_usage_mb': disk_usage_mb,
     }
 
 
