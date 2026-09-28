@@ -458,7 +458,7 @@ def _execute_admin_tools(
             c_names = [
                 (c.name_en or '').lower(),
                 (c.name_bn or '').lower(),
-                (c.code or '').lower(),
+                (getattr(c, 'circle_code', None) or '').lower(),
                 f'circle {c.id:02d}',
                 f'circle {c.id}',
             ]
@@ -495,7 +495,7 @@ def _execute_admin_tools(
             ranking.append(
                 {
                     'circle_id': c.id,
-                    'circle_code': c.code or f'CIRCLE-{c.id:02d}',
+                    'circle_code': getattr(c, 'circle_code', None) or f'CIRCLE-{c.id:02d}',
                     'circle_name_en': c.name_en or c.name_bn,
                     'circle_name_bn': c.name_bn,
                     'pending_applications': int(pending_cnt),
@@ -1191,7 +1191,7 @@ def get_admin_intelligence_dashboard(
         circles_by_pending.append(
             {
                 'circle_id': c.id,
-                'circle_code': c.code or f'CIRCLE-{c.id:02d}',
+                'circle_code': getattr(c, 'circle_code', None) or f'CIRCLE-{c.id:02d}',
                 'circle_name_en': c.name_en or c.name_bn,
                 'circle_name_bn': c.name_bn,
                 'pending_applications': p_cnt,
