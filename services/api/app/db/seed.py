@@ -281,6 +281,10 @@ def main(synthetic_count: int = 0, production_only: bool = False, import_officia
             member = Member(user_id=user.id)
             db.add(member)
             db.flush()
+        other_1001 = db.scalar(select(Member).where(Member.membership_id == 'PGD-2026-1001', Member.id != member.id))
+        if other_1001:
+            other_1001.membership_id = f'PGD-2026-OFF-{other_1001.id}'
+            db.flush()
         member.membership_id = 'PGD-2026-1001'
         member.employee_id = 'PGCB-EMP-1001'
         member.designation_bn = 'ডিপ্লোমা প্রকৌশলী'
@@ -296,6 +300,10 @@ def main(synthetic_count: int = 0, production_only: bool = False, import_officia
         if not member_b:
             member_b = Member(user_id=user_b.id)
             db.add(member_b)
+            db.flush()
+        other_1002 = db.scalar(select(Member).where(Member.membership_id == 'PGD-2026-1002', Member.id != member_b.id))
+        if other_1002:
+            other_1002.membership_id = f'PGD-2026-OFF-{other_1002.id}'
             db.flush()
         member_b.membership_id = 'PGD-2026-1002'
         member_b.employee_id = 'PGCB-EMP-1002'
