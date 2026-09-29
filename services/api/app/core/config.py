@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     sslcommerz_store_id: str | None = None
     sslcommerz_store_password: str | None = None
     payment_webhook_secret: str | None = None
+    ai_provider: str = 'openai'
+    ai_model: str = 'gpt-4o-mini'
+    ai_api_key: str | None = None
+    ai_max_tokens: int = 600
+    ai_temperature: float = 0.2
+    ai_local_url: str | None = None
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 
     @property

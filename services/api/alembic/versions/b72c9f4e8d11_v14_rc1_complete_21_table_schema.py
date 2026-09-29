@@ -149,6 +149,40 @@ def upgrade():
         )
         op.create_index('ix_notification_templates_code', 'notification_templates', ['code'], unique=True)
 
+    if 'ai_conversations' not in existing_tables:
+        op.create_table(
+            'ai_conversations',
+            sa.Column('id', sa.Integer(), primary_key=True, nullable=False),
+            sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
+            sa.Column('session_id', sa.String(length=120), nullable=False, server_default=''),
+            sa.Column('title', sa.String(length=300), nullable=True),
+            sa.Column('mode', sa.String(length=30), nullable=False, server_default='PUBLIC'),
+            sa.Column('language', sa.String(length=10), nullable=False, server_default='bn'),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.Column('updated_at', sa.DateTime(), nullable=False),
+        )
+        op.create_index('ix_ai_conversations_user_id', 'ai_conversations', ['user_id'], unique=False)
+        op.create_index('ix_ai_conversations_session_id', 'ai_conversations', ['session_id'], unique=False)
+
+    if 'ai_messages' not in existing_tables:
+        op.create_table(
+            'ai_messages',
+            sa.Column('id', sa.Integer(), primary_key=True, nullable=False),
+            sa.Column('conversation_id', sa.Integer(), sa.ForeignKey('ai_conversations.id', ondelete='CASCADE'), nullable=False),
+            sa.Column('role', sa.String(length=20), nullable=False, server_default='user'),
+            sa.Column('content', sa.Text(), nullable=False),
+            sa.Column('content_bn', sa.Text(), nullable=True),
+            sa.Column('content_en', sa.Text(), nullable=True),
+            sa.Column('intent', sa.String(length=80), nullable=True),
+            sa.Column('confidence', sa.Float(), nullable=True),
+            sa.Column('confidence_state', sa.String(length=20), nullable=True),
+            sa.Column('sources', sa.Text(), nullable=True),
+            sa.Column('tools_used', sa.Text(), nullable=True),
+            sa.Column('actions', sa.Text(), nullable=True),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+        )
+        op.create_index('ix_ai_messages_conversation_id', 'ai_messages', ['conversation_id'], unique=False)
+
 
 def downgrade():
     bind = op.get_bind()
@@ -156,6 +190,8 @@ def downgrade():
     existing_tables = set(inspector.get_table_names())
 
     for tbl in (
+        'ai_messages',
+        'ai_conversations',
         'notification_templates',
         'news',
         'payments',

@@ -643,7 +643,7 @@ class AIQueryLog(Base):
     question: Mapped[str] = mapped_column(Text)
     question_category: Mapped[str] = mapped_column(String(80), default='GENERAL', index=True)
     answer_preview: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    confidence: Mapped[float] = mapped_column( default=0.0)
+    confidence: Mapped[float] = mapped_column(default=0.0)
     unanswered: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     security_flagged: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     documents_searched: Mapped[int] = mapped_column(Integer, default=0)
@@ -653,6 +653,64 @@ class AIQueryLog(Base):
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     estimated_cost_usd: Mapped[float] = mapped_column(default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    @property
+    def mode(self) -> str:
+        return self.assistant_mode
+
+    @property
+    def intent(self) -> str:
+        return self.question_category
+
+    @property
+    def tools_used(self) -> str | None:
+        return self.tools_called
+
+    @property
+    def documents_used(self) -> str | None:
+        return self.sources_cited
+
+    @property
+    def response(self) -> str | None:
+        return self.answer_preview
+
+    @property
+    def blocked(self) -> bool:
+        return self.security_flagged
+
+    @property
+    def latency(self) -> int:
+        return self.response_time_ms
+
+
+class AIConversation(Base):
+    __tablename__ = 'ai_conversations'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True)
+    session_id: Mapped[str] = mapped_column(String(120), default='', index=True)
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    mode: Mapped[str] = mapped_column(String(30), default='PUBLIC', index=True)
+    language: Mapped[str] = mapped_column(String(10), default='bn')
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AIMessage(Base):
+    __tablename__ = 'ai_messages'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey('ai_conversations.id', ondelete='CASCADE'), index=True)
+    role: Mapped[str] = mapped_column(String(20), default='user', index=True)  # user, assistant
+    content: Mapped[str] = mapped_column(Text)
+    content_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_en: Mapped[str | None] = mapped_column(Text, nullable=True)
+    intent: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    confidence_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    sources: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tools_used: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
 
 
 class Role(Base, TimestampMixin):
