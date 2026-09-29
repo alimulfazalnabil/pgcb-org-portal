@@ -3,7 +3,7 @@
 **Date:** September 29, 2026  
 **Repository:** `alimulfazalnabil/pgcb-org-portal`  
 **Branches:** `production-completion` & `main`  
-**Release Status:** **PRODUCTION READY (`100%` RC1/Production Completion Criteria Met)**
+**Release Status:** **APPLICATION FEATURE COMPLETE / STAGING & LIVE DEPLOYMENT READY**
 
 ---
 
@@ -22,13 +22,13 @@ The **PGCB Diploma Engineers Organization Portal (ডিপ্রকৌস — �
 | **Phase 2** | Route & Page Inventory ([ROUTE_MATRIX.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/ROUTE_MATRIX.md)) | **COMPLETE** (71 routes mapped across Public, Auth, Member, Admin) |
 | **Phase 3** | Database & Migration Audit ([DATABASE_AUDIT.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/DATABASE_AUDIT.md)) | **COMPLETE** (47 SQLAlchemy tables & 13 Alembic revisions verified) |
 | **Phase 4** | Backend API Audit ([API_AUDIT.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/API_AUDIT.md)) | **COMPLETE** (213 OpenAPI paths, 0 duplicate operation ID warnings) |
-| **Phase 5** | Visual Parity & UI Modernization ([VISUAL_PARITY_REPORT.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/VISUAL_PARITY_REPORT.md)) | **COMPLETE** (14 legacy routes upgraded to modern Tailwind institutional UI) |
-| **Phase 6** | Demo Content Cleanup & Official Data Seeding ([DATA_CLEANUP_REPORT.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/DATA_CLEANUP_REPORT.md)) | **COMPLETE** (All fake names/addresses removed; 1,457 official members & 20 circles seeded) |
-| **Phase 7** | Security Hardening ([SECURITY_HARDENING.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/SECURITY_HARDENING.md)) | **COMPLETE** (RBAC, Circle isolation, BOLA/IDOR, magic-byte upload checks, PII redaction) |
+| **Phase 5** | Visual Parity & UI Modernization ([VISUAL_PARITY_REPORT.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/VISUAL_PARITY_REPORT.md)) | **COMPLETE** (15 legacy routes upgraded to modern Tailwind institutional UI) |
+| **Phase 6** | Demo Content Cleanup & Official Data Seeding ([DATA_CLEANUP_REPORT.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/DATA_CLEANUP_REPORT.md)) | **COMPLETE** (All fake names/addresses & demo fallbacks removed; 1,457 official members & 20 circles seeded) |
+| **Phase 7** | Security Hardening ([SECURITY_HARDENING.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/SECURITY_HARDENING.md)) | **COMPLETE** (Argon2 hashing, RBAC, Circle isolation, BOLA/IDOR, magic-byte upload checks, PII redaction) |
 | **Phase 8** | Core Business Workflow E2E ([test_critical_member_workflow_e2e.py](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/services/api/tests/e2e/test_critical_member_workflow_e2e.py)) | **COMPLETE** (Registration → Approval → Sandbox Payment → Activation → Digital ID → QR Verify) |
 | **Phase 9** | Responsive & Mobile Verification ([RESPONSIVE_REPORT.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/RESPONSIVE_REPORT.md)) | **COMPLETE** (`360px`, `390px`, `768px`, `1024px`, `1440px` verified) |
-| **Phase 10–11** | Automated Tests & Capacity Benchmark ([TESTING_REPORT.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/TESTING_REPORT.md)) | **COMPLETE** (`13/13` backend test suites passed; 1,500-member / 250-concurrent-user load test passed) |
-| **Phase 12** | Deployment Readiness ([render.yaml](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/render.yaml), [DEPLOYMENT_RUNBOOK.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/DEPLOYMENT_RUNBOOK.md)) | **COMPLETE** (Render Blueprint + Docker Compose + HostSeba VPS runbooks ready) |
+| **Phase 10–11** | Automated Tests & Capacity Benchmark ([TESTING_REPORT.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/TESTING_REPORT.md)) | **COMPLETE** (`100` backend tests passed; 1,500-member / 250-concurrent-user load test passed) |
+| **Phase 12** | Deployment Readiness ([render.yaml](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/render.yaml), [DEPLOYMENT_RUNBOOK.md](file:///c:/Users/aflna/Downloads/pgcb-org-portal-v1.0/docs/DEPLOYMENT_RUNBOOK.md)) | **COMPLETE** (Render Blueprint + Docker Compose + HostSeba VPS runbooks aligned with `config.py`) |
 
 ---
 
@@ -37,6 +37,6 @@ The **PGCB Diploma Engineers Organization Portal (ডিপ্রকৌস — �
 All application code, database migrations, official member data, and deployment blueprints are complete in the repository. When switching from `SANDBOX` to live external gateways in production, supply the following environment variables in your hosting environment:
 
 1. **PostgreSQL Connection**: `DATABASE_URL` (automatically injected on Render via `render.yaml`).
-2. **Production Secrets**: `SECRET_KEY`, `MFA_ENCRYPTION_KEY`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
-3. **Live Payment Credentials** (when changing `PAYMENT_MODE=live`): `SSLCOMMERZ_STORE_ID`, `SSLCOMMERZ_STORE_PASS`, `BKASH_APP_KEY`, `BKASH_APP_SECRET`, `NAGAD_MERCHANT_ID`.
-4. **Live SMTP / Transactional Email**: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_FROM`.
+2. **Production Secrets & Storage**: `JWT_SECRET`, `MFA_ENCRYPTION_KEY`, `STORAGE_BACKEND` (`persistent_disk` or `local`), `STORAGE_ROOT` (`/var/data/uploads`), `ALLOWED_ORIGINS`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
+3. **Live Payment Credentials** (when changing `PAYMENT_MODE=live`): `SSLCOMMERZ_STORE_ID`, `SSLCOMMERZ_STORE_PASSWORD`, `BKASH_APP_KEY`, `BKASH_APP_SECRET`, `NAGAD_MERCHANT_ID`, `PAYMENT_WEBHOOK_SECRET`.
+4. **Live SMTP / Transactional Email**: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`.

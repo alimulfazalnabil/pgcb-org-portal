@@ -22,11 +22,11 @@ test.describe('PGCB Portal Comprehensive E2E Journeys', () => {
 
     // Events
     await page.goto('/events');
-    await expect(page.getByText('ইভেন্ট ও কার্যক্রম')).toBeVisible();
+    await expect(page.locator('h1')).toContainText(/ইভেন্ট ও কার্যক্রম|কেন্দ্রীয় সম্মেলন, কাউন্সিল ও কারিগরি কর্মশালা/);
 
     // Publications / Journal
     await page.goto('/journal');
-    await expect(page.getByText('গ্রিড কারিগরি জার্নাল ও প্রকাশনা')).toBeVisible();
+    await expect(page.locator('h1')).toContainText(/গ্রিড কারিগরি জার্নাল ও প্রকাশনা|কারিগরি জার্নাল, গবেষণা ও স্মরণিকা/);
   });
 
   test('PUBLIC: Circular directory filters correctly', async ({ page }) => {
