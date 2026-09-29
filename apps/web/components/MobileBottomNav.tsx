@@ -4,17 +4,19 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect } from 'react';
 import { Home, IdCard, Calendar, Bell, User } from 'lucide-react';
+import { useLanguage } from '../lib/i18n';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Home', labelBn: 'হোম', icon: Home },
-  { href: '/portal/id-card', label: 'ID', labelBn: 'আইডি কার্ড', icon: IdCard },
+  { href: '/portal/id-card', label: 'ID Card', labelBn: 'আইডি কার্ড', icon: IdCard },
   { href: '/events', label: 'Events', labelBn: 'ইভেন্ট', icon: Calendar },
   { href: '/notices', label: 'Notices', labelBn: 'নোটিশ', icon: Bell },
-  { href: '/portal', label: 'Profile', labelBn: 'পোর্টাল', icon: User },
+  { href: '/portal', label: 'Portal', labelBn: 'পোর্টাল', icon: User },
 ];
 
 export function MobileBottomNav() {
   const pathname = usePathname();
+  const { language } = useLanguage();
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
@@ -44,7 +46,7 @@ export function MobileBottomNav() {
               }`}
             >
               <Icon size={19} className={isActive ? 'text-primary stroke-[2.5]' : ''} />
-              <span>{item.labelBn}</span>
+              <span>{language === 'en' ? item.label : item.labelBn}</span>
             </Link>
           );
         })}
