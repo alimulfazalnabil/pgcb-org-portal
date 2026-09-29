@@ -439,7 +439,8 @@ def test_rc1_all_16_failure_paths_and_idor_bola_security():
     - Circle Admin A (Circle 1) tries to access Circle B (Circle 2) application -> 403 DENIED
     """
     from datetime import timedelta
-    from app.models import Session as AuthSession
+    from app.core.security import hash_session_token
+    from app.models.core import UserSession
     from app.services import CertificateService
 
     ts = int(datetime.utcnow().timestamp() * 1000) + 505
@@ -520,7 +521,7 @@ def test_rc1_all_16_failure_paths_and_idor_bola_security():
     exp_login = client.post('/api/v1/auth/login', json={'email': member_a_email, 'password': password})
     exp_token = exp_login.cookies.get('pgcb_access_token') or exp_login.json().get('access_token')
     with SessionLocal() as db:
-        sess = db.scalar(select(AuthSession).where(AuthSession.jwt_token == exp_token))
+        sess = db.scalar(select(UserSession).where(UserSession.token_hash == hash_session_token(exp_token)))
         assert sess is not None
         sess.expires_at = datetime.utcnow() - timedelta(hours=2)
         db.commit()

@@ -111,6 +111,7 @@ def update_notice(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notice not found")
 
+    was_published = bool(item.is_published)
     update_dict = data.model_dump(exclude_unset=True)
     if update_dict.get("is_published") and not has_permission(user.role, "content.publish"):
         raise HTTPException(
@@ -119,6 +120,9 @@ def update_notice(
         )
     for field, val in update_dict.items():
         setattr(item, field, val)
+
+    if not was_published and item.is_published and not item.published_at:
+        item.published_at = datetime.utcnow()
 
     item.updated_at = datetime.utcnow()
     record_content_revision(
@@ -133,6 +137,8 @@ def update_notice(
         published_by=user.id if item.is_published else None,
         change_note="Updated notice",
     )
+    if not was_published and item.is_published:
+        notify_members_of_publication(db, "NOTICE", item.id, item.title_bn, item.content_bn)
     audit(db, user, "UPDATE_NOTICE", "notice", item.id)
     db.commit()
     db.refresh(item)
