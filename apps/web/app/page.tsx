@@ -61,41 +61,41 @@ export default function HomePage() {
   return (
     <div className="flex flex-col min-h-screen">
       {/* Hero Section */}
-      <section className="relative bg-primary text-white overflow-hidden py-16 md:py-24">
+      <section className="relative bg-primary text-white overflow-hidden py-12 md:py-16">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px]"></div>
         <div className="absolute -top-24 -right-24 w-96 h-96 bg-accent opacity-20 rounded-full blur-3xl pointer-events-none"></div>
 
         <div className="relative max-w-7xl mx-auto px-6 flex flex-col items-start">
-          <span className="inline-flex items-center gap-1.5 py-1 px-3.5 rounded-full bg-secondary/50 border border-secondary text-accent text-xs font-semibold tracking-wider mb-6">
+          <span className="inline-flex items-center gap-1.5 py-1 px-3.5 rounded-full bg-secondary/50 border border-secondary text-accent text-xs font-semibold tracking-wider mb-5">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
             {t('অফিসিয়াল ডিজিটাল পোর্টাল · PGCB', 'Official Digital Portal · PGCB')}
           </span>
-          <h1 className="text-3xl md:text-5xl lg:text-6xl font-bold leading-tight mb-6 max-w-3xl">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold leading-snug mb-4 max-w-3xl">
             {t('পাওয়ার গ্রিড প্রকৌশলী সমিতি, বাংলাদেশ', 'Power Grid Engineers Association, Bangladesh')}
           </h1>
-          <p className="text-base md:text-lg text-slate-200 mb-10 max-w-2xl leading-relaxed">
+          <p className="text-sm sm:text-base md:text-lg text-slate-200 mb-8 max-w-2xl leading-relaxed">
             {t(
               'জাতীয় বিদ্যুৎ গ্রিড সঞ্চালন খাতের প্রকৌশলীদের পেশাগত মানোন্নয়ন, সাংগঠনিক ঐক্য ও কল্যাণমূলক কর্মকাণ্ডের একমাত্র সার্বজনীন প্ল্যাটফর্ম।',
               'The official institutional platform for professional excellence, organizational unity, and welfare of engineers across the national power grid of Bangladesh.'
             )}
           </p>
 
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap gap-3">
             <Link
               href="/membership/apply"
-              className="px-8 py-3.5 bg-success text-white font-medium rounded-lg hover:bg-emerald-600 transition-all shadow-lg shadow-success/20 flex items-center gap-2"
+              className="px-6 py-3 bg-success text-white text-sm font-medium rounded-lg hover:bg-emerald-600 transition-all shadow-lg shadow-success/20 flex items-center gap-2"
             >
               {t('সদস্যপদের আবেদন', 'Apply for Membership')} <ArrowRight size={16} />
             </Link>
             <Link
               href="/verify"
-              className="px-8 py-3.5 bg-white/10 border border-white/20 text-white font-medium rounded-lg hover:bg-white/20 transition-all"
+              className="px-6 py-3 bg-white/10 border border-white/20 text-white text-sm font-medium rounded-lg hover:bg-white/20 transition-all"
             >
               {t('সদস্য ভেরিফিকেশন', 'Member Verification')}
             </Link>
             <Link
               href="/membership/track"
-              className="px-8 py-3.5 bg-transparent border border-white/30 text-slate-200 font-medium rounded-lg hover:bg-white/10 transition-all"
+              className="px-6 py-3 bg-transparent border border-white/30 text-slate-200 text-sm font-medium rounded-lg hover:bg-white/10 transition-all"
             >
               {t('আবেদন ট্র্যাকিং', 'Track Application')}
             </Link>

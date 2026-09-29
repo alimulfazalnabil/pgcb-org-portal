@@ -91,24 +91,24 @@ export function Header() {
       </div>
 
       {/* Layer 3: Main Navigation */}
-      <div className="px-4 md:px-6 py-3 flex justify-between items-center max-w-7xl mx-auto">
+      <div className="px-4 md:px-6 py-3 flex justify-between items-center gap-3 max-w-7xl mx-auto">
         {/* Institutional Branding */}
-        <Link href="/" className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-primary rounded-lg shadow-md flex items-center justify-center text-accent text-xl font-bold">
+        <Link href="/" className="flex items-center gap-2.5 shrink-0">
+          <div className="w-9 h-9 bg-primary rounded-lg shadow-md flex items-center justify-center text-accent text-lg font-bold shrink-0">
             ⚡
           </div>
           <div className="flex flex-col" data-no-i18n="true">
-            <span className="text-base md:text-lg font-bold text-primary leading-tight">
+            <span className="text-sm sm:text-base font-bold text-primary leading-tight whitespace-nowrap">
               {t('পাওয়ার গ্রিড প্রকৌশলী সমিতি', 'Power Grid Engineers Association')}
             </span>
-            <span className="text-[10px] md:text-xs text-secondary font-medium">
-              {t('Power Grid Engineers Association', 'ডিপ্লোমা প্রকৌশলী সমিতি, পিজিসিবি (ডিপ্রকৌস)')}
+            <span className="text-[10px] sm:text-[11px] text-secondary font-medium whitespace-nowrap">
+              {t('ডিপ্লোমা প্রকৌশলী সমিতি, পিজিসিবি (ডিপ্রকৌস)', 'Diploma Engineers Association, PGCB (Diprokous)')}
             </span>
           </div>
         </Link>
 
         {/* Desktop Menu */}
-        <nav className="hidden lg:flex items-center gap-5 text-sm font-medium text-primary">
+        <nav className="hidden lg:flex items-center gap-3 xl:gap-4 text-[13px] xl:text-sm font-medium text-primary whitespace-nowrap">
           <Link href="/about" className="hover:text-success transition-colors">{t('আমাদের সম্পর্কে', 'About Us')}</Link>
           <Link href="/leadership" className="hover:text-success transition-colors">{t('নেতৃত্ব', 'Leadership')}</Link>
           <Link href="/members" className="hover:text-success transition-colors">{t('সদস্যবৃন্দ', 'Members')}</Link>
@@ -122,10 +122,10 @@ export function Header() {
         </nav>
 
         {/* Desktop CTA */}
-        <div className="hidden lg:flex items-center gap-3">
+        <div className="hidden lg:flex items-center gap-3 shrink-0">
           <Link
             href="/membership/apply"
-            className="bg-success text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-emerald-600 transition-colors shadow-sm"
+            className="bg-success text-white px-3.5 py-2 rounded-md text-xs xl:text-sm font-medium hover:bg-emerald-600 transition-colors shadow-sm whitespace-nowrap"
           >
             {t('সদস্য আবেদন', 'Apply for Membership')}
           </Link>
