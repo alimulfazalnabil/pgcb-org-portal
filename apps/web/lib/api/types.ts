@@ -56,7 +56,9 @@ export interface CircleItem {
   id: number;
   name_bn: string;
   name_en: string;
+  slug?: string;
   description_bn?: string;
+  active_members?: number;
 }
 
 export interface CommitteeItem {

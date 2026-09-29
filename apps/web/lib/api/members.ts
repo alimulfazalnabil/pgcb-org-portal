@@ -13,8 +13,11 @@ export const membersApi = {
     );
   },
   getCircles: () => request<CircleItem[]>('/public/circles'),
+  getCircleDetail: (circleSlugOrId: string | number) =>
+    request<any>(`/public/circles/${encodeURIComponent(String(circleSlugOrId))}`),
   getCommittee: () => request<CommitteeItem[]>('/public/committee'),
-  getCircleCommittee: (circleId: number) => request<CommitteeItem[]>(`/public/circles/${circleId}/committee`),
+  getCircleCommittee: (circleId: string | number) =>
+    request<CommitteeItem[]>(`/public/circles/${encodeURIComponent(String(circleId))}/committee`),
   verifyMember: (membershipId: string) => request<any>(`/public/verify/${encodeURIComponent(membershipId)}`),
   getProfile: () => request<any>('/member/profile'),
   updateProfile: (data: any) =>
