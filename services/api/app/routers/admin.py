@@ -634,8 +634,139 @@ def members(
     ]
 
 
+@router.get('/memberships/applications')
+def list_membership_applications(
+    status: str | None = None,
+    circle_id: int | None = None,
+    q: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    admin: User = Depends(require_permission('member.read')),
+    db: Session = Depends(get_db),
+):
+    from app.models import ApplicationReview, GridCircle, MembershipApplication
+
+    scope = get_admin_circle_scope(admin, db)
+    if scope is not None:
+        if circle_id is not None and circle_id != scope:
+            raise HTTPException(403, 'Circle Administrator can only view applications of their assigned Grid Circle')
+        circle_id = scope
+
+    base_scope_filter = [Member.circle_id == scope] if scope is not None else []
+
+    def _count_statuses(statuses: list[str]) -> int:
+        return int(
+            db.scalar(
+                select(func.count(Member.id)).where(Member.status.in_(statuses), *base_scope_filter)
+            )
+            or 0
+        )
+
+    counts = {
+        'pending': _count_statuses(['DRAFT', 'PENDING', 'SUBMITTED']),
+        'under_review': _count_statuses(['UNDER_REVIEW']),
+        'correction': _count_statuses(['CORRECTION_REQUIRED', 'DOCUMENTS_REQUIRED']),
+        'approved': _count_statuses(['APPROVED', 'PAYMENT_PENDING', 'ACTIVE']),
+        'payment_pending': _count_statuses(['PAYMENT_PENDING']),
+        'active': _count_statuses(['ACTIVE']),
+        'rejected': _count_statuses(['REJECTED']),
+        'cancelled': _count_statuses(['CANCELLED']),
+        'total': int(db.scalar(select(func.count(Member.id)).where(*base_scope_filter)) or 0),
+    }
+
+    stmt = select(Member).options(
+        selectinload(Member.user),
+        selectinload(Member.circle),
+        selectinload(Member.documents),
+    )
+    if base_scope_filter:
+        stmt = stmt.where(*base_scope_filter)
+    if circle_id is not None:
+        stmt = stmt.where(Member.circle_id == circle_id)
+
+    if status and status.upper() != 'ALL':
+        norm_st = status.strip().upper()
+        if norm_st == 'PENDING':
+            stmt = stmt.where(Member.status.in_(['PENDING', 'SUBMITTED', 'DRAFT']))
+        elif norm_st in ('CORRECTION', 'CORRECTION_REQUIRED', 'DOCUMENTS_REQUIRED'):
+            stmt = stmt.where(Member.status.in_(['CORRECTION_REQUIRED', 'DOCUMENTS_REQUIRED']))
+        elif norm_st == 'APPROVED':
+            stmt = stmt.where(Member.status.in_(['APPROVED', 'PAYMENT_PENDING', 'ACTIVE']))
+        else:
+            stmt = stmt.where(Member.status == norm_st)
+
+    if q:
+        like = f'%{q}%'
+        search_pred = (
+            (User.name_bn.like(like))
+            | (User.name_en.like(like))
+            | (User.email.like(like))
+            | (User.phone.like(like))
+            | (Member.membership_id.like(like))
+            | (Member.application_no.like(like))
+            | (Member.employee_id.like(like))
+        )
+        stmt = stmt.join(User, Member.user_id == User.id).where(search_pred)
+
+    limit = max(1, min(limit, 200))
+    rows = db.scalars(stmt.order_by(Member.created_at.desc()).limit(limit).offset(max(offset, 0))).all()
+
+    member_ids = [m.id for m in rows]
+    tx_rows = (
+        db.scalars(
+            select(PaymentTransaction)
+            .where(PaymentTransaction.member_id.in_(member_ids))
+            .order_by(PaymentTransaction.created_at.desc())
+        ).all()
+        if member_ids
+        else []
+    )
+    latest_tx_by_member: dict[int, PaymentTransaction] = {}
+    for tx in tx_rows:
+        if tx.member_id and tx.member_id not in latest_tx_by_member:
+            latest_tx_by_member[tx.member_id] = tx
+
+    circles = db.scalars(select(Circle).order_by(Circle.id.asc())).all()
+
+    items = []
+    for m in rows:
+        ltx = latest_tx_by_member.get(m.id)
+        items.append({
+            'id': m.id,
+            'user_id': m.user_id,
+            'application_no': m.application_no or f'PGCB-APP-{m.id:04d}',
+            'membership_id': m.membership_id,
+            'membership_type': m.membership_type or 'GENERAL',
+            'name_bn': m.user.name_bn if m.user else '',
+            'name_en': m.user.name_en if m.user else '',
+            'email': m.user.email if m.user else '',
+            'phone': m.user.phone if m.user else '',
+            'employee_id': m.employee_id,
+            'designation_bn': m.designation_bn,
+            'designation_en': m.designation_en,
+            'diploma_institution': m.diploma_institution,
+            'circle_id': m.circle_id,
+            'circle_bn': m.circle.name_bn if m.circle else 'অনির্ধারিত',
+            'circle_en': m.circle.name_en if m.circle else 'Unassigned',
+            'status': m.status,
+            'payment_status': ltx.status if ltx else ('PAID' if m.status == 'ACTIVE' else 'UNPAID'),
+            'documents_count': len(m.documents or []),
+            'created_at': m.created_at,
+            'validity_date': m.validity_date,
+        })
+
+    return {
+        'counts': counts,
+        'circles': [{'id': c.id, 'name_bn': c.name_bn, 'name_en': c.name_en} for c in circles],
+        'items': items,
+    }
+
+
 @router.get('/members/{member_id}')
+@router.get('/memberships/applications/{member_id}')
 def member_detail(member_id: int, admin: User = Depends(require_permission('member.read')), db: Session = Depends(get_db)):
+    from app.models import ApplicationReview, MembershipApplication, Payment
+
     m = db.scalar(select(Member).options(selectinload(Member.user), selectinload(Member.circle), selectinload(Member.documents)).where(Member.id == member_id))
     if not m:
         raise HTTPException(404, 'Member not found')
@@ -643,66 +774,208 @@ def member_detail(member_id: int, admin: User = Depends(require_permission('memb
     if scope is not None and m.circle_id != scope:
         raise HTTPException(403, 'Circle Administrator cannot view member records outside their assigned Grid Circle')
 
+    app_row = db.scalar(select(MembershipApplication).where(MembershipApplication.member_id == m.id))
+    review_rows = db.scalars(
+        select(ApplicationReview)
+        .where(ApplicationReview.member_id == m.id)
+        .order_by(ApplicationReview.created_at.desc())
+        .limit(50)
+    ).all()
+
     history_rows = db.scalars(
         select(AuditLog)
         .where(AuditLog.entity == 'MEMBER', AuditLog.entity_id == str(m.id))
         .order_by(AuditLog.created_at.desc())
-        .limit(25)
+        .limit(50)
     ).all()
-    reviewer_ids = {h.user_id for h in history_rows if h.user_id}
+    reviewer_ids = {h.user_id for h in history_rows if h.user_id} | {r.reviewer_id for r in review_rows if r.reviewer_id}
     reviewers = (
         {u.id: u for u in db.scalars(select(User).where(User.id.in_(reviewer_ids))).all()}
         if reviewer_ids else {}
     )
 
+    tx_rows = db.scalars(
+        select(PaymentTransaction)
+        .where((PaymentTransaction.member_id == m.id) | (PaymentTransaction.user_id == m.user_id))
+        .order_by(PaymentTransaction.created_at.desc())
+    ).all()
+    canonical_payments = db.scalars(
+        select(Payment)
+        .where((Payment.member_id == m.id) | (Payment.user_id == m.user_id))
+        .order_by(Payment.created_at.desc())
+    ).all()
+
+    circles = db.scalars(select(Circle).order_by(Circle.id.asc())).all()
+    available_circles = [{'id': c.id, 'name_bn': c.name_bn, 'name_en': c.name_en} for c in circles]
+
+    docs_list = [
+        {
+            'id': d.id,
+            'document_type': d.document_type,
+            'filename': d.filename,
+            'review_status': d.review_status,
+            'created_at': d.created_at,
+            'download_url': f'/api/v1/admin/documents/{d.id}/download',
+        }
+        for d in m.documents
+    ]
+
+    payments_list = [
+        {
+            'id': tx.id,
+            'transaction_ref': tx.transaction_ref,
+            'provider_transaction_id': tx.provider_transaction_id,
+            'amount': float(tx.amount),
+            'currency': tx.currency,
+            'provider': tx.provider,
+            'purpose': tx.purpose,
+            'status': tx.status,
+            'receipt_no': tx.receipt_no,
+            'invoice_number': getattr(tx, 'invoice_number', None) or tx.receipt_no,
+            'created_at': tx.created_at,
+            'updated_at': tx.updated_at,
+        }
+        for tx in tx_rows
+    ]
+    latest_payment = payments_list[0] if payments_list else None
+    payment_status = latest_payment['status'] if latest_payment else ('PAID' if m.status == 'ACTIVE' else 'UNPAID')
+
+    structured_reviews = [
+        {
+            'id': r.id,
+            'action': r.action,
+            'previous_status': r.previous_status,
+            'new_status': r.new_status,
+            'note': r.note,
+            'reviewer_id': r.reviewer_id,
+            'reviewer_name': reviewers[r.reviewer_id].name_bn if r.reviewer_id in reviewers else 'System',
+            'reviewer_role': reviewers[r.reviewer_id].role if r.reviewer_id in reviewers else 'SYSTEM',
+            'created_at': r.created_at,
+        }
+        for r in review_rows
+    ]
+
+    audit_history = [
+        {
+            'id': h.id,
+            'action': h.action,
+            'reviewer_id': h.user_id,
+            'reviewer_name': reviewers[h.user_id].name_bn if h.user_id in reviewers else 'System',
+            'reviewer_role': reviewers[h.user_id].role if h.user_id in reviewers else None,
+            'ip_address': h.ip_address,
+            'created_at': h.created_at,
+        }
+        for h in history_rows
+    ]
+
     return {
-        'id': m.id, 'user_id': m.user_id, 'membership_id': m.membership_id, 'application_no': m.application_no,
-        'status': m.status, 'application_note': m.application_note,
-        'name_bn': m.user.name_bn, 'name_en': m.user.name_en,
-        'email': m.user.email, 'phone': m.user.phone, 'designation_bn': m.designation_bn,
-        'designation_en': m.designation_en, 'employee_id': m.employee_id,
-        'diploma_institution': m.diploma_institution, 'graduation_year': m.graduation_year,
-        'nid_number': m.nid_number, 'date_of_birth': m.date_of_birth,
-        'current_address': m.current_address, 'permanent_address': m.permanent_address,
-        'circle_id': m.circle_id, 'circle_bn': m.circle.name_bn if m.circle else None,
-        'issue_date': m.issue_date, 'validity_date': m.validity_date,
-        'documents': [
-            {'id': d.id, 'document_type': d.document_type, 'filename': d.filename,
-             'review_status': d.review_status, 'created_at': d.created_at}
-            for d in m.documents
-        ],
-        'review_history': [
-            {
-                'id': h.id,
-                'action': h.action,
-                'reviewer_id': h.user_id,
-                'reviewer_name': reviewers[h.user_id].name_bn if h.user_id in reviewers else 'System',
-                'reviewer_role': reviewers[h.user_id].role if h.user_id in reviewers else None,
-                'ip_address': h.ip_address,
-                'created_at': h.created_at,
-            }
-            for h in history_rows
-        ],
+        'id': m.id,
+        'user_id': m.user_id,
+        'membership_id': m.membership_id,
+        'application_no': m.application_no or (app_row.application_no if app_row else f'PGCB-APP-{m.id:04d}'),
+        'status': m.status,
+        'application_status': app_row.status if app_row else m.status,
+        'application_note': m.application_note,
+        'membership_type': m.membership_type or 'GENERAL',
+        'name_bn': m.user.name_bn,
+        'name_en': m.user.name_en,
+        'email': m.user.email,
+        'phone': m.user.phone,
+        'designation_bn': m.designation_bn,
+        'designation_en': m.designation_en,
+        'employee_id': m.employee_id,
+        'diploma_institution': m.diploma_institution,
+        'graduation_year': m.graduation_year,
+        'nid_number': m.nid_number,
+        'date_of_birth': m.date_of_birth,
+        'current_address': m.current_address,
+        'permanent_address': m.permanent_address,
+        'circle_id': m.circle_id,
+        'circle_bn': m.circle.name_bn if m.circle else None,
+        'circle_en': m.circle.name_en if m.circle else None,
+        'issue_date': m.issue_date,
+        'validity_date': m.validity_date,
+        'personal_information': {
+            'name_bn': m.user.name_bn,
+            'name_en': m.user.name_en,
+            'email': m.user.email,
+            'phone': m.user.phone,
+            'nid_number': m.nid_number,
+            'date_of_birth': m.date_of_birth,
+            'current_address': m.current_address,
+            'permanent_address': m.permanent_address,
+            'blood_group': getattr(m, 'blood_group', None),
+        },
+        'professional_information': {
+            'employee_id': m.employee_id,
+            'designation_bn': m.designation_bn,
+            'designation_en': m.designation_en,
+            'diploma_institution': m.diploma_institution,
+            'graduation_year': m.graduation_year,
+        },
+        'grid_circle': {
+            'circle_id': m.circle_id,
+            'circle_bn': m.circle.name_bn if m.circle else None,
+            'circle_en': m.circle.name_en if m.circle else None,
+            'available_circles': available_circles,
+        },
+        'uploaded_documents': docs_list,
+        'documents': docs_list,
+        'membership_type_info': {
+            'membership_type': m.membership_type or 'GENERAL',
+            'application_no': m.application_no or (app_row.application_no if app_row else f'PGCB-APP-{m.id:04d}'),
+            'membership_id': m.membership_id,
+            'status': m.status,
+            'issue_date': m.issue_date,
+            'validity_date': m.validity_date,
+        },
+        'payment': {
+            'payment_status': payment_status,
+            'latest_payment': latest_payment,
+            'transactions': payments_list,
+            'canonical_payments_count': len(canonical_payments),
+        },
+        'payments': payments_list,
+        'application_reviews': structured_reviews,
+        'review_history': audit_history,
     }
 
 
-@router.post('/members/{member_id}/review')
-def review_member(
+def _execute_member_application_action(
+    db: Session,
+    admin: User,
     member_id: int,
     action: str,
     request: Request,
     membership_id: str | None = None,
     note: str | None = None,
-    admin: User = Depends(require_permission('member.review')),
-    db: Session = Depends(get_db),
-):
+    circle_id: int | None = None,
+    require_payment_on_approve: bool = False,
+) -> dict:
+    from app.models import ApplicationReview, Membership, MembershipApplication, Payment
+
+    norm_action = (action or '').strip().upper()
     allowed_actions = {
-        'APPROVE', 'REJECT', 'REVIEW', 'DOCUMENTS_REQUIRED',
-        'REQUEST_CORRECTION', 'CORRECTION_REQUIRED',
-        'PAYMENT_PENDING', 'SUSPEND', 'REACTIVATE',
+        'APPROVE',
+        'APPROVE_FOR_PAYMENT',
+        'REJECT',
+        'REVIEW',
+        'UNDER_REVIEW',
+        'DOCUMENTS_REQUIRED',
+        'REQUEST_CORRECTION',
+        'CORRECTION_REQUIRED',
+        'PAYMENT_PENDING',
+        'CANCEL',
+        'CANCELLED',
+        'ASSIGN_CIRCLE',
+        'ADD_NOTE',
+        'INTERNAL_NOTE',
+        'SUSPEND',
+        'REACTIVATE',
     }
-    if action not in allowed_actions:
-        raise HTTPException(400, 'Invalid member action')
+    if norm_action not in allowed_actions:
+        raise HTTPException(400, f'Invalid member action: {action}')
+
     m = db.scalar(select(Member).options(selectinload(Member.user), selectinload(Member.circle)).where(Member.id == member_id))
     if not m:
         raise HTTPException(404, 'Member not found')
@@ -711,31 +984,115 @@ def review_member(
     if scope is not None and m.circle_id != scope:
         raise HTTPException(403, 'Circle Administrator cannot review applications outside their assigned Grid Circle')
 
+    app_row = db.scalar(select(MembershipApplication).where(MembershipApplication.member_id == m.id))
     prev_status = m.status
-    if action == 'REVIEW':
+
+    if norm_action == 'ASSIGN_CIRCLE':
+        if circle_id is None:
+            raise HTTPException(400, 'circle_id is required for ASSIGN_CIRCLE action')
+        circle_obj = db.get(Circle, int(circle_id))
+        if not circle_obj:
+            raise HTTPException(404, 'Grid Circle not found')
+        m.circle_id = circle_obj.id
+        if app_row:
+            app_row.circle_id = circle_obj.id
+        resolved_note = note or f'Assigned to Grid Circle: {circle_obj.name_bn} ({circle_obj.name_en or circle_obj.id})'
+        db.add(
+            ApplicationReview(
+                application_id=app_row.id if app_row else None,
+                member_id=m.id,
+                reviewer_id=admin.id,
+                action='ASSIGN_CIRCLE',
+                previous_status=prev_status,
+                new_status=m.status,
+                note=resolved_note,
+            )
+        )
+        audit(db, admin, 'ASSIGN_CIRCLE_MEMBER', 'MEMBER', m.id, _actor_ip(request))
+        db.commit()
+        db.refresh(m)
+        return {
+            'ok': True,
+            'action': 'ASSIGN_CIRCLE',
+            'circle_id': m.circle_id,
+            'circle_bn': circle_obj.name_bn,
+            'status': m.status,
+            'application_note': resolved_note,
+        }
+
+    if norm_action in ('ADD_NOTE', 'INTERNAL_NOTE'):
+        if not note or not note.strip():
+            raise HTTPException(400, 'note is required for ADD_NOTE action')
+        resolved_note = note.strip()
+        m.application_note = resolved_note
+        if app_row:
+            app_row.review_note = resolved_note
+        db.add(
+            ApplicationReview(
+                application_id=app_row.id if app_row else None,
+                member_id=m.id,
+                reviewer_id=admin.id,
+                action='INTERNAL_NOTE',
+                previous_status=prev_status,
+                new_status=m.status,
+                note=resolved_note,
+            )
+        )
+        audit(db, admin, 'ADD_INTERNAL_NOTE_MEMBER', 'MEMBER', m.id, _actor_ip(request))
+        db.commit()
+        db.refresh(m)
+        return {
+            'ok': True,
+            'action': 'INTERNAL_NOTE',
+            'status': m.status,
+            'application_note': m.application_note,
+        }
+
+    if norm_action in ('REVIEW', 'UNDER_REVIEW'):
         m.status, resolved_note = 'UNDER_REVIEW', note or 'Application moved to review.'
-    elif action in ('DOCUMENTS_REQUIRED', 'REQUEST_CORRECTION', 'CORRECTION_REQUIRED'):
-        m.status, resolved_note = 'DOCUMENTS_REQUIRED', note or 'Additional verification documents or correction requested.'
-    elif action == 'PAYMENT_PENDING':
-        m.status, resolved_note = 'PAYMENT_PENDING', note or 'Application verified; awaiting membership fee payment.'
-    elif action == 'REJECT':
+    elif norm_action in ('DOCUMENTS_REQUIRED', 'REQUEST_CORRECTION', 'CORRECTION_REQUIRED'):
+        target_st = 'CORRECTION_REQUIRED' if (norm_action == 'CORRECTION_REQUIRED' or require_payment_on_approve) else 'DOCUMENTS_REQUIRED'
+        m.status, resolved_note = target_st, note or 'Additional verification documents or correction requested.'
+    elif norm_action in ('PAYMENT_PENDING', 'APPROVE_FOR_PAYMENT'):
+        m.status, resolved_note = 'PAYMENT_PENDING', note or 'Application approved; awaiting membership fee payment.'
+    elif norm_action == 'REJECT':
         m.status, resolved_note = 'REJECTED', note or 'Membership application rejected.'
-    elif action == 'SUSPEND':
+    elif norm_action in ('CANCEL', 'CANCELLED'):
+        m.status, resolved_note = 'CANCELLED', note or 'Membership application cancelled.'
+    elif norm_action == 'SUSPEND':
         m.status, resolved_note = 'SUSPENDED', note or 'Membership suspended by an administrator.'
-    elif action == 'REACTIVATE':
+    elif norm_action == 'REACTIVATE':
         m.status, resolved_note = 'ACTIVE', note or 'Membership reactivated.'
     else:
-        m.status = 'ACTIVE'
-        if membership_id and membership_id.strip():
-            m.membership_id = membership_id.strip()
-        elif not m.membership_id:
-            m.membership_id = next_membership_id(db)
-        m.issue_date, m.validity_date = membership_dates()
-        resolved_note = note or f'Membership approved with ID {m.membership_id}.'
+        # APPROVE action
+        has_paid = bool(
+            db.scalar(
+                select(PaymentTransaction.id).where(
+                    (PaymentTransaction.member_id == m.id) | (PaymentTransaction.user_id == m.user_id),
+                    PaymentTransaction.status.in_(['PAID', 'SUCCESS', 'COMPLETED']),
+                )
+            )
+            or db.scalar(
+                select(Payment.id).where(
+                    (Payment.member_id == m.id) | (Payment.user_id == m.user_id),
+                    Payment.status.in_(['PAID', 'SUCCESS', 'COMPLETED']),
+                )
+            )
+        )
+        if require_payment_on_approve and not has_paid:
+            m.status = 'PAYMENT_PENDING'
+            resolved_note = note or 'সদস্যপদ আবেদন অনুমোদিত হয়েছে — নির্ধারিত সদস্যপদ ফি পরিশোধের অপেক্ষায় (Payment Pending)।'
+        else:
+            m.status = 'ACTIVE'
+            if membership_id and membership_id.strip():
+                m.membership_id = membership_id.strip()
+            elif not m.membership_id:
+                m.membership_id = next_membership_id(db)
+            m.issue_date, m.validity_date = membership_dates()
+            resolved_note = note or f'Membership approved with ID {m.membership_id}.'
+
     m.application_note = resolved_note
 
-    from app.models import ApplicationReview, Membership, MembershipApplication
-    app_row = db.scalar(select(MembershipApplication).where(MembershipApplication.member_id == m.id))
     if app_row:
         app_row.status = m.status
         app_row.reviewer_id = admin.id
@@ -746,7 +1103,7 @@ def review_member(
             application_id=app_row.id if app_row else None,
             member_id=m.id,
             reviewer_id=admin.id,
-            action=action,
+            action=norm_action,
             previous_status=prev_status,
             new_status=m.status,
             note=resolved_note,
@@ -769,9 +1126,10 @@ def review_member(
             mem_rec.status = 'ACTIVE'
             mem_rec.validity_date = m.validity_date
 
-    audit(db, admin, f'{action}_MEMBER', 'MEMBER', m.id, _actor_ip(request))
+    audit(db, admin, f'{norm_action}_MEMBER', 'MEMBER', m.id, _actor_ip(request))
     notify(db, m.user_id, 'সদস্যতা আপডেট', resolved_note, 'MEMBERSHIP')
-    db.commit(); db.refresh(m)
+    db.commit()
+    db.refresh(m)
     return {
         'ok': True,
         'membership_id': m.membership_id,
@@ -780,6 +1138,64 @@ def review_member(
         'issue_date': m.issue_date,
         'validity_date': m.validity_date,
     }
+
+
+@router.post('/members/{member_id}/review')
+def review_member(
+    member_id: int,
+    action: str,
+    request: Request,
+    membership_id: str | None = None,
+    note: str | None = None,
+    circle_id: int | None = None,
+    admin: User = Depends(require_permission('member.review')),
+    db: Session = Depends(get_db),
+):
+    return _execute_member_application_action(
+        db=db,
+        admin=admin,
+        member_id=member_id,
+        action=action,
+        request=request,
+        membership_id=membership_id,
+        note=note,
+        circle_id=circle_id,
+        require_payment_on_approve=False,
+    )
+
+
+@router.post('/memberships/applications/{member_id}/action')
+async def review_membership_application_action(
+    member_id: int,
+    request: Request,
+    action: str | None = None,
+    note: str | None = None,
+    circle_id: int | None = None,
+    membership_id: str | None = None,
+    admin: User = Depends(require_permission('member.review')),
+    db: Session = Depends(get_db),
+):
+    body_data: dict = {}
+    try:
+        body_data = await request.json()
+    except Exception:
+        body_data = {}
+    resolved_action = action or body_data.get('action') or ''
+    resolved_note = note if note is not None else body_data.get('note')
+    resolved_circle = circle_id if circle_id is not None else body_data.get('circle_id')
+    resolved_mid = membership_id or body_data.get('membership_id')
+    require_payment = bool(body_data.get('require_payment', True))
+    return _execute_member_application_action(
+        db=db,
+        admin=admin,
+        member_id=member_id,
+        action=resolved_action,
+        request=request,
+        membership_id=resolved_mid,
+        note=resolved_note,
+        circle_id=int(resolved_circle) if resolved_circle is not None else None,
+        require_payment_on_approve=require_payment,
+    )
 
 
 @router.post('/documents/{document_id}/review')

@@ -4,17 +4,83 @@ export const adminApi = {
   getAdminStats: () => request<any>('/admin/stats'),
   getAdminPermissions: () => request<{ permissions: string[] }>('/admin/permissions'),
   getAdminReports: () => request<any>('/admin/reports/overview'),
-  getAdminMembers: (params?: { status?: string; q?: string; limit?: number; offset?: number }) => {
+  getAdminMembers: (params?: { status?: string; circle_id?: number; q?: string; limit?: number; offset?: number }) => {
     const query = new URLSearchParams();
     if (params?.status) query.set('status', params.status);
+    if (params?.circle_id !== undefined) query.set('circle_id', params.circle_id.toString());
     if (params?.q) query.set('q', params.q);
     if (params?.limit) query.set('limit', params.limit.toString());
     if (params?.offset) query.set('offset', params.offset.toString());
     return request<any[]>(`/admin/members?${query.toString()}`);
   },
+  getMembershipApplications: (params?: { status?: string; circle_id?: number | string; q?: string; limit?: number; offset?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.status && params.status !== 'ALL') query.set('status', params.status);
+    if (params?.circle_id !== undefined && params.circle_id !== '' && params.circle_id !== 'ALL') {
+      query.set('circle_id', String(params.circle_id));
+    }
+    if (params?.q) query.set('q', params.q);
+    if (params?.limit) query.set('limit', params.limit.toString());
+    if (params?.offset) query.set('offset', params.offset.toString());
+    return request<{
+      counts: {
+        pending: number;
+        under_review: number;
+        correction: number;
+        approved: number;
+        payment_pending: number;
+        active: number;
+        rejected: number;
+        cancelled: number;
+        total: number;
+      };
+      circles: { id: number; name_bn: string; name_en?: string }[];
+      items: any[];
+    }>(`/admin/memberships/applications?${query.toString()}`);
+  },
+  getMembershipApplicationDetail: (memberId: number) =>
+    request<any>(`/admin/memberships/applications/${memberId}`),
+  executeApplicationAction: (
+    memberId: number,
+    payload: {
+      action:
+        | 'APPROVE'
+        | 'REQUEST_CORRECTION'
+        | 'CORRECTION_REQUIRED'
+        | 'REJECT'
+        | 'UNDER_REVIEW'
+        | 'REVIEW'
+        | 'ASSIGN_CIRCLE'
+        | 'ADD_NOTE'
+        | 'INTERNAL_NOTE'
+        | 'PAYMENT_PENDING'
+        | 'CANCEL';
+      note?: string;
+      circle_id?: number;
+      require_payment?: boolean;
+    }
+  ) =>
+    request<any>(`/admin/memberships/applications/${memberId}/action`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  reviewDocument: (documentId: number, action: 'APPROVE' | 'REJECT' | 'PENDING') =>
+    request<{ ok: boolean; review_status: string }>(
+      `/admin/documents/${documentId}/review?action=${action}`,
+      { method: 'POST' }
+    ),
   reviewMember: (
     memberId: number,
-    action: 'APPROVE' | 'REJECT' | 'REVIEW' | 'DOCUMENTS_REQUIRED' | 'PAYMENT_PENDING' | 'SUSPEND' | 'REACTIVATE',
+    action:
+      | 'APPROVE'
+      | 'REJECT'
+      | 'REVIEW'
+      | 'DOCUMENTS_REQUIRED'
+      | 'REQUEST_CORRECTION'
+      | 'CORRECTION_REQUIRED'
+      | 'PAYMENT_PENDING'
+      | 'SUSPEND'
+      | 'REACTIVATE',
     note?: string
   ) =>
     request<any>(

@@ -46,7 +46,7 @@ export function AdminSidebar({ userRole = 'ADMIN', permissions = [] }: SidebarPr
     },
     {
       title: 'সদস্য আবেদন (Applications)',
-      href: '/admin/applications',
+      href: '/admin/memberships/applications',
       icon: UserCheck,
       permission: 'member.review',
     },

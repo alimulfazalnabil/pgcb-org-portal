@@ -27,6 +27,8 @@ APPLICATION_STATES: tuple[str, ...] = (
 VALID_APPLICATION_TRANSITIONS: dict[str, set[str]] = {
     'DRAFT': {'DRAFT', 'SUBMITTED', 'PENDING', 'CANCELLED'},
     'PENDING': {
+        'DRAFT',
+        'PENDING',
         'SUBMITTED',
         'UNDER_REVIEW',
         'CORRECTION_REQUIRED',

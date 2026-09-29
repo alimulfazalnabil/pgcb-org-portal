@@ -31,6 +31,29 @@ def test_server_authoritative_pricing_and_state_machines():
     assert validate_payment_transition('PAID', 'PENDING') is False
 
 
+def test_application_state_machine_transitions():
+    from app.services.membership_service import APPLICATION_STATES, validate_application_transition
+
+    assert set(APPLICATION_STATES) == {
+        'DRAFT',
+        'SUBMITTED',
+        'UNDER_REVIEW',
+        'CORRECTION_REQUIRED',
+        'APPROVED',
+        'PAYMENT_PENDING',
+        'ACTIVE',
+        'REJECTED',
+        'CANCELLED',
+    }
+    assert validate_application_transition('DRAFT', 'SUBMITTED') is True
+    assert validate_application_transition('SUBMITTED', 'UNDER_REVIEW') is True
+    assert validate_application_transition('UNDER_REVIEW', 'CORRECTION_REQUIRED') is True
+    assert validate_application_transition('CORRECTION_REQUIRED', 'SUBMITTED') is True
+    assert validate_application_transition('UNDER_REVIEW', 'PAYMENT_PENDING') is True
+    assert validate_application_transition('PAYMENT_PENDING', 'ACTIVE') is True
+    assert validate_application_transition('ACTIVE', 'DRAFT') is False
+
+
 def test_production_origin_normalization_strips_legacy_render_assumptions():
     assert settings.payment_mode in ('sandbox', 'production', 'live')
     assert '.onrender.com' not in (settings.frontend_url or '')
