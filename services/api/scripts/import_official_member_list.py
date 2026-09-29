@@ -166,6 +166,18 @@ def apply_to_database(data: dict) -> dict:
             c_id = circle_map.get(m_item["circle_name_bn"])
             note = f"ডিপ্রকৌস সদস্য নম্বর: {m_item['diprokous_member_no']} | কর্মস্থল: {m_item['workplace']}"
 
+            conflict = db.scalar(
+                select(Member).where(
+                    (Member.membership_id == m_item["membership_id"])
+                    | (Member.application_no == m_item["application_no"])
+                )
+            )
+            if conflict and conflict.user_id != user.id:
+                conflict.membership_id = f"DEMO-{conflict.id}-{conflict.membership_id}"
+                if conflict.application_no == m_item["application_no"]:
+                    conflict.application_no = f"DEMO-{conflict.id}-{conflict.application_no}"
+                db.flush()
+
             member = db.scalar(select(Member).where(Member.user_id == user.id))
             if not member:
                 member = Member(
@@ -175,7 +187,6 @@ def apply_to_database(data: dict) -> dict:
                     application_no=m_item["application_no"],
                     designation_bn=m_item["designation_bn"],
                     designation_en=m_item["designation_en"],
-                    office_name_bn=m_item["workplace"],
                     employee_id=m_item["employee_id"],
                     current_address=m_item["workplace"],
                     circle_id=c_id,
@@ -192,7 +203,6 @@ def apply_to_database(data: dict) -> dict:
                 member.application_no = m_item["application_no"]
                 member.designation_bn = m_item["designation_bn"]
                 member.designation_en = m_item["designation_en"]
-                member.office_name_bn = m_item["workplace"]
                 member.employee_id = m_item["employee_id"]
                 member.current_address = m_item["workplace"]
                 member.circle_id = c_id

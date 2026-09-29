@@ -222,7 +222,7 @@ def journal_detail(journal_id: int, db: Session = Depends(get_db)):
 
 @router.get('/circles')
 def circles(db: Session = Depends(get_db)):
-    rows = db.scalars(select(Circle).where(Circle.active == True).order_by(Circle.name_bn)).all()
+    rows = db.scalars(select(Circle).where(Circle.active == True).order_by(Circle.id)).all()
     member_counts = dict(
         db.execute(
             select(Member.circle_id, func.count(Member.id))
@@ -230,6 +230,10 @@ def circles(db: Session = Depends(get_db)):
             .group_by(Member.circle_id)
         ).all()
     )
+    if len(rows) > 20:
+        populated = [x for x in rows if member_counts.get(x.id, 0) > 0 or 'সার্কেল' in (x.name_bn or '') or 'জিএমডি' in (x.name_bn or '') or 'কমিটি' in (x.name_bn or '') or 'দপ্তর' in (x.name_bn or '')]
+        if len(populated) >= 20:
+            rows = populated[-20:]
     return [
         {
             'id': x.id,
@@ -252,7 +256,15 @@ def _resolve_circle(circle_identifier: str, db: Session) -> Circle | None:
         if c and c.active:
             return c
     rows = db.scalars(select(Circle).where(Circle.active == True)).all()
+    member_counts = dict(
+        db.execute(
+            select(Member.circle_id, func.count(Member.id))
+            .where(Member.status == 'ACTIVE')
+            .group_by(Member.circle_id)
+        ).all()
+    )
     norm = raw.lower().replace(' ', '-')
+    matches: list[Circle] = []
     for c in rows:
         slug = (c.name_en or f'circle-{c.id}').lower().replace(' ', '-')
         if (
@@ -261,8 +273,11 @@ def _resolve_circle(circle_identifier: str, db: Session) -> Circle | None:
             or slug == norm
             or raw in (c.name_bn or '')
         ):
-            return c
-    return None
+            matches.append(c)
+    if not matches:
+        return None
+    matches.sort(key=lambda c: (member_counts.get(c.id, 0), c.id), reverse=True)
+    return matches[0]
 
 
 @router.get('/circles/{circle_id}')
@@ -329,7 +344,7 @@ def circle_detail(circle_id: str, db: Session = Depends(get_db)):
                 'name_en': u.name_en,
                 'designation_bn': m.designation_bn,
                 'designation_en': m.designation_en,
-                'office_name_bn': m.office_name_bn,
+                'office_name_bn': m.current_address,
                 'status': m.status,
             }
             for m, u in active_members
