@@ -183,7 +183,8 @@ class SupersedeDocRequest(BaseModel):
 
 
 class AIAskRequest(BaseModel):
-    question: str = Field(min_length=2, max_length=1500)
+    question: str | None = Field(default=None, max_length=1500)
+    message: str | None = Field(default=None, max_length=1500)
     mode: str = Field(default='PUBLIC')  # PUBLIC, MEMBER, ADMIN
     language: str = Field(default='en')
     circle_id: int | None = None
@@ -1714,7 +1715,9 @@ async def ask_ai_assistant(
     t0 = time.perf_counter()
     ensure_default_knowledge_seeded(db)
 
-    question = payload.question.strip()
+    question = (payload.question or payload.message or '').strip()
+    if len(question) < 2:
+        raise HTTPException(status_code=422, detail='Question or message must be at least 2 characters.')
     q_lower = question.lower()
     mode = (payload.mode or 'PUBLIC').strip().upper()
     if mode not in ('PUBLIC', 'MEMBER', 'ADMIN'):
