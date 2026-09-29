@@ -180,7 +180,7 @@ def seed_synthetic_members(db: Session, count: int = 2000) -> int:
     return created
 
 
-def main(synthetic_count: int = 0, production_only: bool = False) -> None:
+def main(synthetic_count: int = 0, production_only: bool = False, import_official_members: bool = False) -> None:
     env_mode = settings.app_env.lower()
     is_prod_like = settings.is_production_like or production_only
 
@@ -253,6 +253,11 @@ def main(synthetic_count: int = 0, production_only: bool = False) -> None:
                 print(f'Configured administrator ensured for {env_mode}: {admin_email}')
             else:
                 print(f'Skipping demo user creation in {env_mode} (use ADMIN_EMAIL/ADMIN_PASSWORD or create_admin CLI).')
+            if import_official_members:
+                from scripts.import_official_member_list import apply_to_database, load_official_dataset
+                dataset = load_official_dataset()
+                result = apply_to_database(dataset)
+                print(f"Imported official Diprokous dataset in {env_mode}: {result}")
             return
 
         # Test / Development environment only: deterministic test fixtures
@@ -500,20 +505,26 @@ def main(synthetic_count: int = 0, production_only: bool = False) -> None:
             db.add_all([
                 MediaAsset(
                     media_type='PHOTO',
-                    title_bn='53rd IDEB National Convention Delegate Assembly',
-                    url='#',
+                    title_bn='ডিপ্রকৌস (পিজিসিবি) কেন্দ্রীয় প্রতিনিধি সম্মেলন ও কাউন্সিল অধিবেশন',
+                    url='/brand/pgcb-logo.svg',
+                    thumbnail_url='/brand/pgcb-logo.svg',
+                    description_bn='পাওয়ার গ্রিড ডিপ্লোমা প্রকৌশলী সমিতির কেন্দ্রীয় প্রতিনিধি সম্মেলন ও সাধারণ সভা।',
                     published=True,
                 ),
                 MediaAsset(
                     media_type='PHOTO',
-                    title_bn='National Polytechnic Robotics & Innovation Expo',
-                    url='#',
+                    title_bn='৪০০ কেভি ও ২৩০ কেভি গ্রিড সাবস্টেশন অটোমেশন ও রিলে প্রোটেকশন কর্মশালা',
+                    url='/brand/pgcb-logo.svg',
+                    thumbnail_url='/brand/pgcb-logo.svg',
+                    description_bn='জাতীয় পাওয়ার গ্রিড আধুনিকীকরণ ও কারিগরি দক্ষতা উন্নয়ন বিষয়ক বিশেষ কর্মশালা।',
                     published=True,
                 ),
                 MediaAsset(
                     media_type='PHOTO',
-                    title_bn='Central Executive Committee Delegation Meeting',
-                    url='#',
+                    title_bn='কেন্দ্রীয় কার্যনির্বাহী পরিষদ ও সার্কেল প্রতিনিধিদের সমন্বয় সভা',
+                    url='/brand/pgcb-logo.svg',
+                    thumbnail_url='/brand/pgcb-logo.svg',
+                    description_bn='সকল গ্রিড সার্কেল ও শাখা কমিটির প্রতিনিধিদের অংশগ্রহণে সাংগঠনিক সমন্বয় সভা।',
                     published=True,
                 ),
             ])
@@ -540,8 +551,8 @@ def main(synthetic_count: int = 0, production_only: bool = False) -> None:
                     slug='pgcb-digital-portal-and-smart-id-launch',
                     title_bn='পিজিসিবি প্রকৌশলী সমিতির ডিজিটাল মেম্বার পোর্টাল ও কিউআর স্মার্ট আইডি কার্ড উদ্বোধন',
                     title_en='PGCB Engineers Association Launches Digital Member Portal & QR Smart ID Card',
-                    summary_bn='৯টি গ্রিড সার্কেলের ১,৫০০+ প্রকৌশলীর জন্য সমন্বিত ডিজিটাল সদস্য সেবা ও তাৎক্ষণিক ভেরিফিকেশন সুবিধা চালু।',
-                    summary_en='Integrated digital member services and instant QR verification launched for 1,500+ engineers across 9 Grid Circles.',
+                    summary_bn='২০টি শাখা কমিটি ও গ্রিড সার্কেলের ১,৪৫৭+ প্রকৌশলীর জন্য সমন্বিত ডিজিটাল সদস্য সেবা ও তাৎক্ষণিক ভেরিফিকেশন সুবিধা চালু।',
+                    summary_en='Integrated digital member services and instant QR verification launched for 1,457+ engineers across 20 Branch Committees & Grid Circles.',
                     content_bn='সকল গ্রিড সার্কেলের সদস্যদের সদস্যপদ নবায়ন, ডিজিটাল সনদপত্র ও স্মার্ট আইডি কার্ড সেবা এক প্ল্যাটফর্মে নিশ্চিত করতে আধুনিক পোর্টাল চালু করা হয়েছে।',
                     content_en='The modern institutional portal has been launched to provide membership renewal, digital certificates, and smart ID cards on a unified platform.',
                     category='PRESS_RELEASE',
@@ -559,6 +570,12 @@ def main(synthetic_count: int = 0, production_only: bool = False) -> None:
             added = seed_synthetic_members(db, count=synthetic_count)
             print(f'Seeded {added} synthetic members.')
 
+        if import_official_members:
+            from scripts.import_official_member_list import apply_to_database, load_official_dataset
+            dataset = load_official_dataset()
+            result = apply_to_database(dataset)
+            print(f"Imported official Diprokous dataset: {result}")
+
         print('Seed complete')
     finally:
         db.close()
@@ -570,8 +587,17 @@ if __name__ == '__main__':
     parser.add_argument(
         '--production',
         action='store_true',
-        help='Seed ONLY required system data (9 Grid Circles and optional ADMIN_EMAIL/ADMIN_PASSWORD); never create fake members.',
+        help='Seed ONLY required system data (Grid Circles and optional ADMIN_EMAIL/ADMIN_PASSWORD); never create fake members.',
+    )
+    parser.add_argument(
+        '--import-official-members',
+        action='store_true',
+        help='Import all 20 official Diprokous Branch Committees and 1,457 official members (2026-2028 term).',
     )
     args = parser.parse_args()
-    main(synthetic_count=args.synthetic_members, production_only=args.production)
+    main(
+        synthetic_count=args.synthetic_members,
+        production_only=args.production,
+        import_official_members=args.import_official_members,
+    )
 
