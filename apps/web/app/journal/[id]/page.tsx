@@ -2,9 +2,12 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
 
-export default function JournalDetailPage({ params }: { params: { id: string } }) {
+export default function JournalDetailPage() {
+  const params = useParams<{ id: string }>();
+  const journalId = String(params?.id || '');
   const [item, setItem] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -13,12 +16,12 @@ export default function JournalDetailPage({ params }: { params: { id: string } }
       .getJournals()
       .then((rows) => {
         const list = Array.isArray(rows) ? rows : [];
-        const match = list.find((x) => String(x.id) === String(params.id)) || list[0] || null;
+        const match = list.find((x) => String(x.id) === journalId) || list[0] || null;
         setItem(match);
       })
       .catch(() => setItem(null))
       .finally(() => setLoading(false));
-  }, [params.id]);
+  }, [journalId]);
 
   if (loading) {
     return (

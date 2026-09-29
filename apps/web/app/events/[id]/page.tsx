@@ -2,19 +2,22 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { api, EventItem } from '@/lib/api';
 
-export default function EventDetailPage({ params }: { params: { id: string } }) {
+export default function EventDetailPage() {
+  const params = useParams<{ id: string }>();
+  const eventId = String(params?.id || '');
   const [ev, setEv] = useState<EventItem | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api
-      .getEvent(Number(params.id))
+      .getEvent(Number(eventId))
       .then((res) => setEv(res))
       .catch(() => setEv(null))
       .finally(() => setLoading(false));
-  }, [params.id]);
+  }, [eventId]);
 
   if (loading) {
     return (

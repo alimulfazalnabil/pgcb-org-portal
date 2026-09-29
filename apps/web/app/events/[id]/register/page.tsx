@@ -2,12 +2,14 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { api, EventItem } from '@/lib/api';
 
-export default function EventRegisterPage({ params }: { params: { id: string } }) {
+export default function EventRegisterPage() {
   const router = useRouter();
-  const eventId = Number(params.id);
+  const params = useParams<{ id: string }>();
+  const idStr = String(params?.id || '');
+  const eventId = Number(idStr);
   const [ev, setEv] = useState<EventItem | null>(null);
   const [ticketCount, setTicketCount] = useState(1);
   const [notes, setNotes] = useState('');
@@ -48,7 +50,7 @@ export default function EventRegisterPage({ params }: { params: { id: string } }
       <div className="max-w-2xl mx-auto">
         <div className="mb-6">
           <Link
-            href={`/events/${params.id}`}
+            href={`/events/${idStr}`}
             className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-primary transition-colors"
           >
             ← ইভেন্ট বিবরণীতে ফিরে যান
@@ -64,7 +66,7 @@ export default function EventRegisterPage({ params }: { params: { id: string } }
               DELEGATE REGISTRATION
             </span>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight mb-1">
-              {ev?.title_bn || `ইভেন্ট #${params.id} নিবন্ধন ফর্ম`}
+              {ev?.title_bn || `ইভেন্ট #${idStr} নিবন্ধন ফর্ম`}
             </h1>
             <p className="text-slate-300 text-sm">
               নিবন্ধন সফল হলে তাৎক্ষণিক কিউআর ই-টিকেট ও ডেলিগেট পাস ইস্যু করা হবে।
@@ -122,7 +124,7 @@ export default function EventRegisterPage({ params }: { params: { id: string } }
                 {submitting ? 'নিবন্ধন প্রক্রিয়াকরণ হচ্ছে...' : 'নিবন্ধন নিশ্চিত করুন ও ই-টিকেট নিন'}
               </button>
               <Link
-                href={`/events/${params.id}`}
+                href={`/events/${idStr}`}
                 className="text-sm font-bold text-slate-500 hover:text-slate-900"
               >
                 বাতিল করুন

@@ -133,7 +133,6 @@ def apply_to_database(data: dict) -> dict:
                         name_bn=bn,
                         name_en=en,
                         region=reg,
-                        description_bn=f"আওতাধীন শাখা কমিটি: {bn} ({en})",
                         is_active=True,
                     )
                 )
@@ -176,6 +175,7 @@ def apply_to_database(data: dict) -> dict:
                     application_no=m_item["application_no"],
                     designation_bn=m_item["designation_bn"],
                     designation_en=m_item["designation_en"],
+                    office_name_bn=m_item["workplace"],
                     employee_id=m_item["employee_id"],
                     current_address=m_item["workplace"],
                     circle_id=c_id,
@@ -192,6 +192,7 @@ def apply_to_database(data: dict) -> dict:
                 member.application_no = m_item["application_no"]
                 member.designation_bn = m_item["designation_bn"]
                 member.designation_en = m_item["designation_en"]
+                member.office_name_bn = m_item["workplace"]
                 member.employee_id = m_item["employee_id"]
                 member.current_address = m_item["workplace"]
                 member.circle_id = c_id

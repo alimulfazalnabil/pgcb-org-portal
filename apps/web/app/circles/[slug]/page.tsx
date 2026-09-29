@@ -2,10 +2,12 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
 
-export default function CircleDetailPage({ params }: { params: { slug: string } }) {
-  const slug = decodeURIComponent(params.slug);
+export default function CircleDetailPage() {
+  const params = useParams<{ slug: string }>();
+  const slug = decodeURIComponent(String(params?.slug || ''));
   const [detail, setDetail] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
