@@ -643,6 +643,14 @@ def search_knowledge_base(
 
     scored_results.sort(key=lambda r: (r['is_current'], r['score']), reverse=True)
     top_results = scored_results[:limit]
+    if include_historical and not any(not r['is_current'] for r in top_results):
+        hist_candidates = [r for r in scored_results if not r['is_current']]
+        if hist_candidates:
+            hist_candidates.sort(key=lambda r: r['score'], reverse=True)
+            if len(top_results) >= limit:
+                top_results[-1] = hist_candidates[0]
+            else:
+                top_results.append(hist_candidates[0])
 
     return {
         'query': query,
