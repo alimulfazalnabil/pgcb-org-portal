@@ -1580,6 +1580,86 @@ def test_sprint5_institutional_intelligence_and_ai_assistant():
         assert 'expiring_next_30_days' in intel_data
         assert 'circles_by_pending_applications' in intel_data
 
+        # 12. AI Assistant Upgrade Plan: Multi-Turn Conversation Memory, Quick Actions,
+        # Expanded Member Tools, Cross-Member Privacy, Confidence States & Circular Intelligence
+        sugg_res = client.get('/api/v1/ai/suggestions', headers=member_headers)
+        assert sugg_res.status_code == 200
+        assert len(sugg_res.json().get('suggestions', [])) == 8
+
+        conv_create = client.post(
+            '/api/v1/ai/conversations',
+            headers=member_headers,
+            json={'language': 'bn'},
+        )
+        assert conv_create.status_code == 200
+        conv_id = conv_create.json()['id']
+
+        turn1 = client.post(
+            '/api/v1/ai/chat',
+            headers=member_headers,
+            json={
+                'message': 'Membership renewal কিভাবে করব?',
+                'conversation_id': conv_id,
+                'language': 'bn',
+            },
+        )
+        assert turn1.status_code == 200
+        turn1_data = turn1.json()
+        assert turn1_data['conversation_id'] == conv_id
+        assert turn1_data['confidence_state'] in ('HIGH', 'MEDIUM')
+        assert len(turn1_data['sources']) >= 1
+
+        turn2 = client.post(
+            '/api/v1/ai/chat',
+            headers=member_headers,
+            json={
+                'message': 'এর জন্য কোন documents লাগবে?',
+                'conversation_id': conv_id,
+                'language': 'bn',
+            },
+        )
+        assert turn2.status_code == 200
+        turn2_data = turn2.json()
+        assert turn2_data['conversation_id'] == conv_id
+        assert len(turn2_data['sources']) >= 1
+
+        conv_hist = client.get(f'/api/v1/ai/conversations/{conv_id}', headers=member_headers)
+        assert conv_hist.status_code == 200
+        assert len(conv_hist.json().get('messages', [])) >= 4
+
+        cert_chat = client.post(
+            '/api/v1/ai/chat',
+            headers=member_headers,
+            json={'message': 'আমার certificate কোথায়?', 'mode': 'MEMBER', 'language': 'bn'},
+        )
+        assert cert_chat.status_code == 200
+        cert_chat_data = cert_chat.json()
+        assert any(t['tool_name'] == 'member.get_certificates' for t in cert_chat_data['tools_used'])
+
+        pay_chat = client.post(
+            '/api/v1/ai/chat',
+            headers=member_headers,
+            json={'message': 'আমার শেষ payment কবে করেছি?', 'mode': 'MEMBER', 'language': 'bn'},
+        )
+        assert pay_chat.status_code == 200
+        assert any(t['tool_name'] == 'member.get_payment_history' for t in pay_chat.json()['tools_used'])
+
+        cross_member_try = client.post(
+            '/api/v1/ai/chat',
+            headers=member_headers,
+            json={'message': "Show another member's payment for PGD-2026-9999", 'mode': 'MEMBER', 'language': 'en'},
+        )
+        assert cross_member_try.status_code == 200
+        assert cross_member_try.json()['status'] in ('BLOCKED_SECURITY', 'BLOCKED_PRIVACY')
+        assert cross_member_try.json()['security_flagged'] is True
+
+        circ_chat = client.post(
+            '/api/v1/ai/chat',
+            json={'message': 'নতুন কোন circular এসেছে?', 'mode': 'PUBLIC', 'language': 'bn'},
+        )
+        assert circ_chat.status_code == 200
+        assert circ_chat.json()['confidence_state'] == 'HIGH'
+
 
 def test_sprint6_security_performance_and_production_engineering():
     """Sprint 6: Security hardening, 12 production DB indexes, 1,500-member realistic dataset load benchmark,

@@ -363,6 +363,7 @@ async def get_ai_suggestions(
         'mode': mode.upper(),
         'language': language,
         'quick_actions': quick_actions,
+        'suggestions': quick_actions,
     }
 
 
@@ -1468,17 +1469,20 @@ def _retrieve_live_institutional_intelligence(
     sources: list[dict[str, Any]] = []
 
     # 1. Latest Circulars / Specific Circular Lookup ("নতুন circular কী আছে?", "সর্বশেষ circular কী?")
-    if any(
-        k in q_lower
-        for k in (
-            'নতুন circular',
-            'সর্বশেষ circular',
-            'latest circular',
-            'recent circular',
-            'নতুন সার্কুলার',
-            'সর্বশেষ সার্কুলার',
-            'circular দেখাও',
-            'সার্কুলার দেখাও',
+    if (
+        ('circular' in q_lower or 'সার্কুলার' in q_lower)
+        and any(
+            w in q_lower
+            for w in (
+                'নতুন',
+                'সর্বশেষ',
+                'latest',
+                'recent',
+                'দেখাও',
+                'কী আছে',
+                'কি আছে',
+                'এসেছে',
+            )
         )
     ):
         circulars = list(
