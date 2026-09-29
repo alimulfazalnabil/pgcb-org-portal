@@ -678,8 +678,9 @@ def get_payment_receipt(payment_id: str, user: User = Depends(current_user), db:
     return build_receipt_payload(db, payment)
 
 
-@router.get("/member/payments/{payment_id}/receipt.pdf")
+@router.get("/member/payments/{payment_id}/receipt.pdf", operation_id="download_payment_receipt_pdf_dot")
 @router.get("/member/payments/{payment_id}/receipt/pdf")
+@router.get("/payments/transactions/{payment_id}/receipt.pdf", operation_id="download_transaction_receipt_pdf")
 def download_payment_receipt_pdf(payment_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     receipt = get_payment_receipt(payment_id, user, db)
     pdf_bytes = generate_receipt_pdf_bytes(receipt)
@@ -714,7 +715,6 @@ def verify_payment_receipt(token_or_receipt_no: str, db: Session = Depends(get_d
         "amount": data["amount"],
         "currency": data["currency"],
         "payment_method": data["payment_method"],
-        "status": data["status"],
         "status": data["status"],
         "paid_at": data["paid_at"],
     }

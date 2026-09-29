@@ -243,9 +243,31 @@ def circles(db: Session = Depends(get_db)):
     ]
 
 
+def _resolve_circle(circle_identifier: str, db: Session) -> Circle | None:
+    raw = (circle_identifier or '').strip()
+    if not raw:
+        return None
+    if raw.isdigit():
+        c = db.get(Circle, int(raw))
+        if c and c.active:
+            return c
+    rows = db.scalars(select(Circle).where(Circle.active == True)).all()
+    norm = raw.lower().replace(' ', '-')
+    for c in rows:
+        slug = (c.name_en or f'circle-{c.id}').lower().replace(' ', '-')
+        if (
+            c.name_bn == raw
+            or (c.name_en and c.name_en.lower() == raw.lower())
+            or slug == norm
+            or raw in (c.name_bn or '')
+        ):
+            return c
+    return None
+
+
 @router.get('/circles/{circle_id}')
-def circle_detail(circle_id: int, db: Session = Depends(get_db)):
-    circle = db.get(Circle, circle_id)
+def circle_detail(circle_id: str, db: Session = Depends(get_db)):
+    circle = _resolve_circle(circle_id, db)
     if not circle or not circle.active:
         raise HTTPException(404, 'Circle not found')
 
@@ -257,6 +279,13 @@ def circle_detail(circle_id: int, db: Session = Depends(get_db)):
         .join(Member, Member.user_id == User.id)
         .where(Member.circle_id == circle.id, User.role == 'CIRCLE_ADMIN', User.is_active == True)
     )
+    active_members = db.execute(
+        select(Member, User)
+        .join(User, User.id == Member.user_id)
+        .where(Member.circle_id == circle.id, Member.status == 'ACTIVE')
+        .order_by(Member.membership_id.asc())
+        .limit(24)
+    ).all()
     recent_notices = db.scalars(select(Notice).where(Notice.is_published == True).order_by(Notice.published_at.desc()).limit(5)).all()
     recent_events = db.scalars(select(Event).where(Event.is_published == True).order_by(Event.event_date.desc()).limit(5)).all()
 
@@ -264,6 +293,7 @@ def circle_detail(circle_id: int, db: Session = Depends(get_db)):
         'id': circle.id,
         'name_bn': circle.name_bn,
         'name_en': circle.name_en,
+        'slug': (circle.name_en or f'circle-{circle.id}').lower().replace(' ', '-'),
         'description_bn': circle.description_bn,
         'circle_administrator': {
             'name_bn': circle_admin.name_bn,
@@ -291,16 +321,30 @@ def circle_detail(circle_id: int, db: Session = Depends(get_db)):
             }
             for c in committee_rows
         ],
+        'members': [
+            {
+                'membership_id': m.membership_id,
+                'employee_id': m.employee_id,
+                'name_bn': u.name_bn,
+                'name_en': u.name_en,
+                'designation_bn': m.designation_bn,
+                'designation_en': m.designation_en,
+                'office_name_bn': m.office_name_bn,
+                'status': m.status,
+            }
+            for m, u in active_members
+        ],
         'notices': [{'id': n.id, 'title_bn': n.title_bn, 'published_at': n.published_at} for n in recent_notices],
         'events': [{'id': e.id, 'title_bn': e.title_bn, 'event_date': e.event_date, 'location_bn': e.location_bn} for e in recent_events],
     }
 
 
 @router.get('/circles/{circle_id}/committee')
-def circle_committee(circle_id: int, db: Session = Depends(get_db)):
-    if not db.get(Circle, circle_id):
+def circle_committee(circle_id: str, db: Session = Depends(get_db)):
+    circle = _resolve_circle(circle_id, db)
+    if not circle:
         raise HTTPException(404, 'Circle not found')
-    rows = db.scalars(select(CommitteeMember).where(CommitteeMember.circle_id == circle_id, CommitteeMember.active == True).order_by(CommitteeMember.display_order)).all()
+    rows = db.scalars(select(CommitteeMember).where(CommitteeMember.circle_id == circle.id, CommitteeMember.active == True).order_by(CommitteeMember.display_order)).all()
     return [{'id': x.id, 'name_bn': x.name_bn, 'name_en': x.name_en, 'designation_bn': x.designation_bn, 'designation_en': x.designation_en, 'photo_url': x.photo_url, 'term_start': x.term_start, 'term_end': x.term_end} for x in rows]
 
 
