@@ -2138,8 +2138,15 @@ async def preview_members_csv(
         email = _col(row, 'email').lower()
         phone = _col(row, 'phone', ('mobile',)) or None
         employee_id = _col(row, 'employee_id', ('emp_id',)) or None
+        diprokous_member_no = _col(row, 'diprokous_member_no', ('member_no',)) or None
+        membership_id = _col(row, 'membership_id') or None
+        application_no = _col(row, 'application_no') or (f'DIP-2026-{diprokous_member_no}' if diprokous_member_no else None)
         designation_bn = _col(row, 'designation_bn', ('designation',)) or None
-        circle_val = _col(row, 'circle', ('circle_id',))
+        designation_en = _col(row, 'designation_en') or None
+        workplace = _col(row, 'workplace', ('office_name', 'current_address')) or None
+        circle_val = _col(row, 'circle', ('circle_id', 'circle_name_bn', 'circle_name_en'))
+        circle_name_bn = _col(row, 'circle_name_bn', ('circle',)) or None
+        circle_name_en = _col(row, 'circle_name_en') or None
 
         if not name_bn:
             errors.append('নাম (Bangla name) আবশ্যক (required)')
@@ -2173,13 +2180,20 @@ async def preview_members_csv(
 
         rows.append({
             'row_number': idx,
+            'membership_id': membership_id,
+            'diprokous_member_no': diprokous_member_no,
+            'application_no': application_no,
             'name_bn': name_bn,
             'name_en': name_en,
             'email': email,
             'phone': phone,
             'employee_id': employee_id,
             'designation_bn': designation_bn,
+            'designation_en': designation_en,
+            'workplace': workplace,
             'circle_id': circle_id,
+            'circle_name_bn': circle_name_bn,
+            'circle_name_en': circle_name_en,
             'valid': is_valid,
             'duplicate': is_duplicate,
             'errors': errors,
@@ -2224,6 +2238,20 @@ async def commit_members_csv(
             skipped += 1
             continue
 
+        circle_id = item.get('circle_id')
+        circle_name_bn = (item.get('circle_name_bn') or '').strip()
+        if not circle_id and circle_name_bn:
+            existing_c = db.scalar(select(Circle).where(Circle.name_bn == circle_name_bn))
+            if not existing_c:
+                existing_c = Circle(
+                    name_bn=circle_name_bn,
+                    name_en=(item.get('circle_name_en') or circle_name_bn).strip(),
+                    active=True,
+                )
+                db.add(existing_c)
+                db.flush()
+            circle_id = existing_c.id
+
         import secrets
         temp_password = hash_password(secrets.token_urlsafe(18))
         user = User(
@@ -2239,14 +2267,33 @@ async def commit_members_csv(
         db.add(user)
         db.flush()
 
+        dip_no = (item.get('diprokous_member_no') or '').strip()
+        workplace = (item.get('workplace') or item.get('current_address') or '').strip() or None
+        app_no = (item.get('application_no') or '').strip() or (f'DIP-2026-{dip_no}' if dip_no else None)
+        note_parts = []
+        if dip_no:
+            note_parts.append(f'ডিপ্রকৌস সদস্য নম্বর: {dip_no}')
+        if workplace:
+            note_parts.append(f'কর্মস্থল: {workplace}')
+        app_note = ' | '.join(note_parts) if note_parts else None
+
+        provided_mid = (item.get('membership_id') or '').strip()
+        if provided_mid and not db.scalar(select(Member.id).where(Member.membership_id == provided_mid)):
+            final_mid = provided_mid
+        else:
+            final_mid = next_membership_id(db)
+
         member = Member(
             user_id=user.id,
-            membership_id=next_membership_id(db),
+            membership_id=final_mid,
+            application_no=app_no,
             employee_id=item.get('employee_id'),
             designation_bn=item.get('designation_bn'),
             designation_en=item.get('designation_en') or item.get('designation_bn'),
-            circle_id=item.get('circle_id'),
+            current_address=workplace,
+            circle_id=circle_id,
             status='ACTIVE',
+            application_note=app_note,
             membership_type=item.get('membership_type', 'GENERAL'),
             issue_date=now,
             validity_date=expires,
