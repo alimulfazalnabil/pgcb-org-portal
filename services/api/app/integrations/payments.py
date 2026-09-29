@@ -236,7 +236,32 @@ class BKashProvider(PaymentProvider):
         )
 
     def is_configured(self) -> bool:
+        if _is_production_like():
+            return bool(self.app_key and self.app_secret and self.username and self.password)
         return bool(self.app_key and self.app_secret)
+
+    def _grant_token(self) -> str:
+        """Obtain short-lived bKash tokenized checkout id_token from /tokenized/checkout/token/grant."""
+        req = urllib.request.Request(
+            f"{self.base_url}/tokenized/checkout/token/grant",
+            data=json.dumps({
+                "app_key": self.app_key,
+                "app_secret": self.app_secret,
+            }).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "username": self.username,
+                "password": self.password,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        id_token = str(data.get("id_token") or "").strip()
+        if not id_token:
+            raise RuntimeError(f"bKash token grant failed: {data.get('statusMessage', 'missing id_token')}")
+        return id_token
 
     def create_payment(self, amount: float, reference: str, return_url: str) -> Dict[str, Any]:
         if amount <= 0:
@@ -245,7 +270,37 @@ class BKashProvider(PaymentProvider):
             raise RuntimeError("bKash gateway credentials are not configured for production")
 
         trx_id = f"BKASH-{secrets.token_hex(8).upper()}"
-        checkout_url = f"{self.base_url}/tokenized/checkout/create?paymentID={trx_id}"
+        if _is_production_like() or os.getenv("BKASH_LIVE_API", "").lower() == "true":
+            id_token = self._grant_token()
+            create_payload = {
+                "mode": "0011",
+                "payerReference": str(reference),
+                "callbackURL": return_url,
+                "amount": f"{float(amount):.2f}",
+                "currency": "BDT",
+                "intent": "sale",
+                "merchantInvoiceNumber": str(reference),
+            }
+            req = urllib.request.Request(
+                f"{self.base_url}/tokenized/checkout/create",
+                data=json.dumps(create_payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "Authorization": id_token,
+                    "X-APP-Key": self.app_key,
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            if str(body.get("statusCode", "")) not in {"0000", ""} or not body.get("bkashURL"):
+                raise RuntimeError(f"bKash checkout creation failed: {body.get('statusMessage', 'Unknown error')}")
+            trx_id = str(body.get("paymentID") or trx_id)
+            checkout_url = str(body["bkashURL"])
+        else:
+            checkout_url = f"{self.base_url}/tokenized/checkout/create?paymentID={trx_id}"
+
         register_issued_transaction(trx_id, "BKASH", amount, reference)
         return {
             "checkout_url": checkout_url,
@@ -255,17 +310,38 @@ class BKashProvider(PaymentProvider):
             "reference": reference,
         }
 
+    def execute_payment(self, payment_id: str) -> Dict[str, Any]:
+        """Execute an authorized bKash tokenized checkout payment (/tokenized/checkout/execute)."""
+        id_token = self._grant_token()
+        req = urllib.request.Request(
+            f"{self.base_url}/tokenized/checkout/execute",
+            data=json.dumps({"paymentID": payment_id}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Authorization": id_token,
+                "X-APP-Key": self.app_key,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
     def verify_payment(self, provider_transaction_id: str, expected_amount: float | None = None) -> bool:
         if _is_suspicious_trx_id(provider_transaction_id):
             return False
-        if _is_production_like():
+        if _is_production_like() or os.getenv("BKASH_LIVE_API", "").lower() == "true":
             if not self.is_configured():
                 return False
             try:
+                id_token = self._grant_token() if (self.username and self.password) else ""
+                headers = {"Content-Type": "application/json", "X-APP-Key": self.app_key}
+                if id_token:
+                    headers["Authorization"] = id_token
                 req = urllib.request.Request(
                     f"{self.base_url}/tokenized/checkout/payment/status",
                     data=json.dumps({"paymentID": provider_transaction_id}).encode("utf-8"),
-                    headers={"Content-Type": "application/json", "X-APP-Key": self.app_key},
+                    headers=headers,
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=15) as resp:
@@ -329,9 +405,29 @@ class NagadProvider(PaymentProvider):
             raise RuntimeError("Nagad gateway credentials are not configured for production")
 
         trx_id = f"NAGAD-{secrets.token_hex(8).upper()}"
+        if _is_production_like() or os.getenv("NAGAD_LIVE_API", "").lower() == "true":
+            init_url = f"{self.base_url}/check-out/initialize/{urllib.parse.quote(self.merchant_id)}/{urllib.parse.quote(trx_id)}"
+            req = urllib.request.Request(
+                init_url,
+                data=json.dumps({
+                    "merchantId": self.merchant_id,
+                    "orderId": trx_id,
+                    "amount": f"{float(amount):.2f}",
+                    "currencyCode": "050",
+                    "merchantCallbackURL": return_url,
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json", "X-KM-Api-Version": "v-0.2.0"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            checkout_url = str(body.get("callBackUrl") or f"https://payment.nagad.com.bd/pay/{trx_id}")
+        else:
+            checkout_url = f"https://payment.nagad.com.bd/pay/{trx_id}"
+
         register_issued_transaction(trx_id, "NAGAD", amount, reference)
         return {
-            "checkout_url": f"https://payment.nagad.com.bd/pay/{trx_id}",
+            "checkout_url": checkout_url,
             "trx_id": trx_id,
             "amount": amount,
             "currency": "BDT",

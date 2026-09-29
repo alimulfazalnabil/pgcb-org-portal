@@ -154,6 +154,34 @@ def compute_semantic_tokens(text: str) -> list[str]:
 
 
 def compute_embedding_vector(text: str) -> list[float]:
+    import os
+    import urllib.request
+
+    openai_key = os.getenv('OPENAI_API_KEY', '').strip()
+    if openai_key and os.getenv('AI_USE_OPENAI_EMBEDDINGS', '').lower() == 'true':
+        try:
+            emb_model = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small').strip()
+            req = urllib.request.Request(
+                'https://api.openai.com/v1/embeddings',
+                data=json.dumps({
+                    'input': text[:4000],
+                    'model': emb_model,
+                    'dimensions': EMBEDDING_DIM,
+                }).encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {openai_key}',
+                },
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                payload = json.loads(resp.read().decode('utf-8'))
+            data = payload.get('data') or []
+            if data and isinstance(data[0].get('embedding'), list):
+                return [round(float(x), 6) for x in data[0]['embedding'][:EMBEDDING_DIM]]
+        except Exception:
+            pass
+
     tokens = compute_semantic_tokens(text)
     vec = [0.0] * EMBEDDING_DIM
     if not tokens:

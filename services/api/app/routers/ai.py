@@ -782,6 +782,50 @@ async def ask_ai_assistant(
             f"{top['title_bn']} ({top['section']}, পৃষ্ঠা {top['page']}) অনুযায়ী: "
             f"{_sanitize_pii(top['snippet'])}"
         )
+        import os
+        import urllib.request
+        openai_key = os.getenv('OPENAI_API_KEY', '').strip()
+        if openai_key and os.getenv('AI_USE_OPENAI_LLM', 'true').lower() == 'true':
+            try:
+                llm_model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini').strip()
+                context_block = '\n\n'.join(
+                    f"[{s['title']} | {s['section']} | Page {s['page']}]: {s['snippet']}"
+                    for s in sources[:3]
+                )
+                req = urllib.request.Request(
+                    'https://api.openai.com/v1/chat/completions',
+                    data=json.dumps({
+                        'model': llm_model,
+                        'temperature': 0.1,
+                        'messages': [
+                            {
+                                'role': 'system',
+                                'content': (
+                                    'You are the official PGCB Diprokous Institutional AI Assistant. '
+                                    'Answer strictly using the provided official document passages and include the source citation.'
+                                ),
+                            },
+                            {
+                                'role': 'user',
+                                'content': f"Context:\n{context_block}\n\nQuestion: {question}",
+                            },
+                        ],
+                    }).encode('utf-8'),
+                    headers={
+                        'Content-Type': 'application/json',
+                        'Authorization': f'Bearer {openai_key}',
+                    },
+                    method='POST',
+                )
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    llm_data = json.loads(resp.read().decode('utf-8'))
+                choices = llm_data.get('choices') or []
+                if choices and choices[0].get('message', {}).get('content'):
+                    synthesized = _sanitize_pii(str(choices[0]['message']['content']).strip())
+                    if synthesized:
+                        answer_en = f"{synthesized} [{citation_str}]"
+            except Exception:
+                pass
     else:
         confidence = 0.0
         unanswered = True
