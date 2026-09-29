@@ -1,13 +1,22 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('PGCB Portal Comprehensive E2E Journeys', () => {
-  test('PUBLIC: Homepage loads and displays Bangla-first content', async ({ page }) => {
+  test('PUBLIC: Homepage loads, displays Bangla-first content, and toggles Bangla <-> English', async ({ page }) => {
     await page.goto('/');
 
     await expect(page.locator('h1')).toContainText('পাওয়ার গ্রিড প্রকৌশলী সমিতি');
 
     const registerBtn = page.getByRole('link', { name: /সদস্যপদের? আবেদন/ }).first();
     await expect(registerBtn).toBeVisible();
+
+    // Switch to English
+    const langBtn = page.getByRole('button', { name: /Switch language/i }).first();
+    await langBtn.click();
+    await expect(page.locator('h1')).toContainText('Power Grid Engineers Association');
+
+    // Switch back to Bangla
+    await langBtn.click();
+    await expect(page.locator('h1')).toContainText('পাওয়ার গ্রিড প্রকৌশলী সমিতি');
   });
 
   test('PUBLIC: Member directory, notices, events, and publications load', async ({ page }) => {
