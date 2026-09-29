@@ -286,7 +286,7 @@ def build_card_back(member: Member) -> Path:
 
 
 @router.get('/card/details')
-@router.get('/card/metadata')
+@router.get('/card/metadata', operation_id='digital_card_metadata')
 def digital_card_details(user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Return structured Digital ID Card metadata (including QR base64, expiry indicator, and revoked/expired state) for mobile wallet rendering."""
     import base64
@@ -392,7 +392,7 @@ def digital_card_back(user: User = Depends(current_user), db: Session = Depends(
     return FileResponse(path, media_type='image/png', filename=path.name)
 
 
-@router.get('/card.pdf')
+@router.get('/card.pdf', operation_id='digital_card_pdf_dot')
 @router.get('/card/pdf')
 def digital_card_pdf(user: User = Depends(current_user), db: Session = Depends(get_db)):
     m = db.scalar(
