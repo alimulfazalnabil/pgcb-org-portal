@@ -157,7 +157,6 @@ const BN_TO_EN_EXACT: Record<string, string> = {
   'সাধারণ সার্কুলার': 'General Circular',
   'প্রশাসনিক বিজ্ঞপ্তি': 'Administrative Notice',
   'কল্যাণমূলক কার্যক্রম': 'Welfare Program',
-  'ইভেন্ট ও সম্মেলন': 'Events & Conferences',
   'বিজ্ঞপ্তি তালিকা লোড হচ্ছে...': 'Loading circulars...',
   'সার্কুলার সেবা সাময়িকভাবে অনুপলব্ধ': 'Circulars Service Temporarily Unavailable',
   'অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন অথবা কেন্দ্রীয় সচিবালয়ে যোগাযোগ করুন।':
