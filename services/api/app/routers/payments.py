@@ -746,12 +746,33 @@ def simulate_sandbox_payment_webhook(
     if not core_tx:
         raise HTTPException(404, "Payment transaction not found")
 
+    if user.role == "MEMBER" and core_tx.user_id != user.id:
+        raise HTTPException(403, "Not authorized to access or simulate another member's payment")
+
+    if payload.get("amount") is not None and float(payload.get("amount")) != float(core_tx.amount):
+        raise HTTPException(400, "Tampered payment amount does not match server record")
+
     if core_tx.status in ("PAID", "SUCCESS"):
         return {
             "status": "already_processed",
             "idempotent_replay": True,
             "payment_id": core_tx.id,
             "receipt_no": core_tx.receipt_no,
+        }
+
+    sim_outcome = str(payload.get("outcome") or payload.get("status") or "SUCCESS").strip().upper()
+    if sim_outcome in ("FAILED", "CANCELLED", "EXPIRED"):
+        transition_payment_status(core_tx, sim_outcome)
+        db.commit()
+        db.refresh(core_tx)
+        member = db.get(Member, core_tx.member_id) if core_tx.member_id else None
+        return {
+            "status": "failed",
+            "payment_mode": settings.payment_mode,
+            "payment_id": core_tx.id,
+            "payment_status": core_tx.status,
+            "member_status": member.status if member else None,
+            "membership_id": member.membership_id if member else None,
         }
 
     sim_trx_id = payload.get("provider_transaction_id") or f"SANDBOX-{core_tx.provider or 'BKASH'}-{core_tx.id}"
