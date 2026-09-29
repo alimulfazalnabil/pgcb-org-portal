@@ -216,6 +216,8 @@ def run_realistic_db_benchmark(scale: float = 1.0) -> dict[str, Any]:
                 for i in range(1, n_audits + 1)
             ]
             cur.executemany('INSERT INTO audit_logs VALUES (?, ?, ?, ?, ?)', audit_rows)
+            cur.executescript(
+                """
                 CREATE TABLE membership_applications (
                     id INTEGER PRIMARY KEY,
                     member_id INTEGER NOT NULL,
@@ -245,6 +247,18 @@ def run_realistic_db_benchmark(scale: float = 1.0) -> dict[str, Any]:
                 CREATE UNIQUE INDEX ix_payments_canonical_tx ON payments(transaction_id);
                 """
             )
+
+            memberships_rows = [
+                (
+                    i,
+                    i,
+                    f'PGCB-MEM-2026-{i:04d}',
+                    'ACTIVE' if i % 5 != 0 else 'PENDING',
+                    now_iso,
+                )
+                for i in range(1, n_members + 1)
+            ]
+            cur.executemany('INSERT INTO memberships VALUES (?, ?, ?, ?, ?)', memberships_rows)
 
             apps_rows = [
                 (
