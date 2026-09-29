@@ -9,13 +9,13 @@
 
 | Control | Implementation | Verification |
 |---|---|---|
-| **Password Hashing** | `passlib` PBKDF2-SHA256 (`services/api/app/core/security.py`) | Verified in unit & integration tests |
+| **Password Hashing** | `passlib` Argon2 (`CryptContext(schemes=['argon2'])` in `services/api/app/core/security.py`) | Verified in unit & integration tests |
 | **JWT & Cookie Security** | `HttpOnly`, `SameSite=Lax`, configurable `Secure`, token blacklist & session revocation | Verified in `test_rc1_validation_sprint.py` |
 | **RBAC & Circle Isolation** | 7 canonical roles (`MEMBER`, `CIRCLE_ADMIN`, `MEMBERSHIP_ADMIN`, `FINANCE_ADMIN`, `CONTENT_ADMIN`, `CENTRAL_ADMIN`, `SUPER_ADMIN`); Circle Admins restricted to their `circle_id` | Verified in `test_Cross_Circle_Isolation_And_Payment_Tampering` |
 | **BOLA / IDOR Prevention** | Ownership checks on `/api/v1/member/documents/{id}`, `/api/v1/member/payments/{id}/receipt`, and `/api/v1/payments/sandbox/simulate` | Verified in `test_IDOR_And_BOLA_Prevention` |
 | **File Upload Validation** | Magic-byte inspection (`%PDF-`, PNG, JPEG, WEBP), 5 MB limit, randomized UUID storage filenames | Verified in `services/api/app/utils/files.py` and `test_Security_Upload_Abuse_And_Rate_Limiting` |
 | **Public Privacy Protection** | `/api/v1/public/members` and `/api/v1/public/verify/{id}` never expose NID, phone, personal address, or uploaded documents | Verified across all public endpoints |
-| **Production Startup Guards** | `settings.validate_production_secrets()` blocks weak `SECRET_KEY`, SQLite, or wildcard CORS when `APP_ENV=production` | Verified in `services/api/app/core/config.py` |
+| **Production Startup Guards** | `Settings.validate_production()` blocks weak `JWT_SECRET` (<32 chars) and validates `STORAGE_BACKEND` (`local`, `filesystem`, `persistent_disk`) & `STORAGE_ROOT` when `APP_ENV=production` | Verified in `services/api/app/core/config.py` |
 
 ---
 

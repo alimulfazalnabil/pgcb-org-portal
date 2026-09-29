@@ -29,35 +29,25 @@ export default function CircularsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     fetch('/backend/api/v1/public/circulars')
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error('Circulars service unavailable');
+        return res.json();
+      })
       .then((data) => {
         if (Array.isArray(data)) {
           setItems(data);
+        } else {
+          setItems([]);
         }
+        setError(false);
       })
       .catch(() => {
-        // Fallback demo circulars for immediate display
-        setItems([
-          {
-            id: 1,
-            category: 'OFFICE_ORDER',
-            reference_no: 'PGCB/ADMIN/2026/089',
-            title_bn: 'কেন্দ্রীয় কার্যনির্বাহী পরিষদের বার্ষিক সভার অফিস আদেশ ও কার্যতালিকা',
-            summary_bn: 'সকল গ্রিড সার্কেলের ডিপ্লোমা প্রকৌশলীদের অবগতির জন্য জানানো যাচ্ছে যে আগামী মাসের ১৫ তারিখে কেন্দ্রীয় সাধারণ সভা অনুষ্ঠিত হবে।',
-            published_at: new Date().toISOString(),
-          },
-          {
-            id: 2,
-            category: 'CIRCULAR',
-            reference_no: 'PGCB/ENG/2026/044',
-            title_bn: 'গ্রিড উপকেন্দ্র পরিচালন ও রক্ষণাবেক্ষণ নির্দেশিকা ২০২৬ প্রকাশ',
-            summary_bn: 'জাতীয় গ্রিডের ৪০০কেভি ও ২৩০কেভি সাবস্টেশনের সুরক্ষা ও ডিজিটাল মনিটরিং বিষয়ক কারিগরি নির্দেশিকা প্রকাশ প্রসঙ্গে।',
-            published_at: new Date().toISOString(),
-          }
-        ]);
+        setItems([]);
+        setError(true);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -79,7 +69,7 @@ export default function CircularsPage() {
         {/* Section Header */}
         <div className="space-y-3">
           <span className="inline-block py-1 px-3 rounded-full bg-primary/10 border border-primary/20 text-primary dark:text-accent text-xs font-bold uppercase tracking-wider">
-            IDEB & PGCB OFFICIAL BULLETIN
+            DIPROKOUS & PGCB OFFICIAL BULLETIN
           </span>
           <h1 className="text-3xl sm:text-4xl font-extrabold text-primary dark:text-white tracking-tight">
             গ্রিড সার্কুলার ও অফিসিয়াল বিজ্ঞপ্তি
@@ -135,6 +125,12 @@ export default function CircularsPage() {
             <div className="text-center py-12">
               <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <p className="text-xs text-secondary">বিজ্ঞপ্তি তালিকা লোড হচ্ছে...</p>
+            </div>
+          ) : error ? (
+            <div className="bg-background rounded-2xl border border-amber-500/30 p-12 text-center space-y-2">
+              <FileText size={36} className="mx-auto text-amber-600/70" />
+              <h3 className="font-bold text-primary dark:text-white text-base">সার্কুলার সেবা সাময়িকভাবে অনুপলব্ধ</h3>
+              <p className="text-xs text-secondary">অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন অথবা কেন্দ্রীয় সচিবালয়ে যোগাযোগ করুন।</p>
             </div>
           ) : filtered.length === 0 ? (
             <div className="bg-background rounded-2xl border border-border p-12 text-center space-y-2">
