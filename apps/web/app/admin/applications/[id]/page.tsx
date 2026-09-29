@@ -1,1 +1,1 @@
-export { default } from '../memberships/applications/[id]/page';
+export { default } from '../../memberships/applications/[id]/page';
