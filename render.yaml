@@ -14,9 +14,10 @@ services:
     runtime: python
     rootDir: services/api
     plan: starter
-    buildCommand: pip install -r requirements.txt && alembic upgrade head && python -m app.db.seed --production --import-official-members
+    buildCommand: pip install -r requirements.txt
+    preDeployCommand: alembic upgrade head && python -m app.db.seed --production --import-official-members
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /healthz
+    healthCheckPath: /health
     disk:
       name: pgcb-portal-uploads
       mountPath: /var/data/uploads
@@ -28,17 +29,19 @@ services:
         fromDatabase:
           name: pgcb-portal-db
           property: connectionString
-      - key: SECRET_KEY
+      - key: JWT_SECRET
         generateValue: true
       - key: MFA_ENCRYPTION_KEY
         generateValue: true
-      - key: STORAGE_DIR
+      - key: STORAGE_BACKEND
+        value: persistent_disk
+      - key: STORAGE_ROOT
         value: /var/data/uploads
       - key: PAYMENT_MODE
         value: sandbox
       - key: FRONTEND_URL
         value: https://pgcb-portal-web.onrender.com
-      - key: CORS_ORIGINS
+      - key: ALLOWED_ORIGINS
         value: https://pgcb-portal-web.onrender.com
 
   - type: web

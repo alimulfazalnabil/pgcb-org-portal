@@ -203,6 +203,7 @@ def root():
 
 
 @app.get('/health')
+@app.get('/healthz', include_in_schema=False)
 @app.get('/api/v1/health')
 def health():
     return {
@@ -233,6 +234,7 @@ def metrics(request: Request):
     return Response(content=body, media_type=media_type)
 
 @app.get('/ready')
+@app.get('/readyz', include_in_schema=False)
 def ready():
     db = SessionLocal()
     try:

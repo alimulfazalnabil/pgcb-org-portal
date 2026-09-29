@@ -32,12 +32,14 @@ class Settings(BaseSettings):
     cookie_name: str = 'pgcb_access_token'
     frontend_url: str = 'http://localhost:3000'
     allowed_origins: str | None = None
+    cors_origins: str | None = None
     password_reset_hours: int = 2
     email_verification_hours: int = 24
     require_email_verification: bool = False
     max_upload_mb: int = 5
     storage_backend: str = 'local'
     storage_root: str = './storage'
+    storage_dir: str | None = None
     mfa_encryption_key: str | None = None
     rate_limit_enabled: bool = True
     redis_rate_limit_enabled: bool = False
@@ -68,6 +70,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def validate_production(self) -> 'Settings':
+        if self.jwt_secret.startswith('dev-only-secret') and self.secret_key:
+            self.jwt_secret = self.secret_key
+
+        if not self.allowed_origins and self.cors_origins:
+            self.allowed_origins = self.cors_origins
+
+        if (not self.storage_root or self.storage_root == './storage') and self.storage_dir:
+            self.storage_root = self.storage_dir
+
         if self.db_host and self.db_user and self.db_password:
             sslmode = self.db_sslmode or ('disable' if self.db_host in ('localhost', '127.0.0.1') else 'require')
             self.database_url = (
