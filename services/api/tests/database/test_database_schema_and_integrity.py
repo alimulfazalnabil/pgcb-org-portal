@@ -63,7 +63,7 @@ def test_unique_constraints_and_transaction_atomicity():
                 email=duplicate_email,
                 phone='01799998888',
                 password_hash='invalid-hash',
-                role_id=first_user.role_id,
+                role=first_user.role,
                 is_active=True,
             )
             db.add(dup_user)
