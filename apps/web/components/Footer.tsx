@@ -48,10 +48,12 @@ export function Footer() {
           <p style={{ fontSize: '14px', color: '#94a3b8', margin: '0 0 12px 0' }}>
             ইমেইল: <a href="mailto:info@pgcb.gov.bd" className="text-emerald-400">info@pgcb.gov.bd</a>
           </p>
-          <div style={{ display: 'flex', gap: '12px', fontSize: '13px', color: '#64748b' }}>
+          <div style={{ display: 'flex', gap: '12px', fontSize: '13px', color: '#64748b', flexWrap: 'wrap' }}>
             <Link href="/privacy" className="hover:text-slate-300">গোপনীয়তা</Link>
             <span>•</span>
             <Link href="/terms" className="hover:text-slate-300">শর্তাবলী</Link>
+            <span>•</span>
+            <Link href="/accessibility" className="hover:text-slate-300">অ্যাক্সেসিবিলিটি</Link>
             <span>•</span>
             <Link href="/search" className="hover:text-slate-300">সাইট সার্চ</Link>
           </div>
@@ -59,7 +61,7 @@ export function Footer() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6" style={{ borderTop: '1px solid #1e293b', marginTop: '40px', paddingTop: '20px', fontSize: '13px', color: '#64748b', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <div>&copy; 2026 Power Grid Bangladesh PLC &middot; সর্বস্বত্ব সংরক্ষিত।</div>
+        <div>&copy; {new Date().getFullYear()} ডিপ্লোমা প্রকৌশলী সমিতি, পিজিসিবি (ডিপ্রকৌস) &middot; Power Grid Bangladesh PLC &middot; সর্বস্বত্ব সংরক্ষিত।</div>
         <div>সরকারি ও প্রাতিষ্ঠানিক ডিজিটাল সেবা পোর্টাল</div>
       </div>
     </footer>
