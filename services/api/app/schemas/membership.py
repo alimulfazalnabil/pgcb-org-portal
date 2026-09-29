@@ -15,6 +15,11 @@ class MemberProfileUpdate(BaseModel):
     current_address: str | None = None
     permanent_address: str | None = None
     circle_id: int | None = None
+    membership_type: str | None = None
+    status: str | None = None
+    membership_status: str | None = None
+    payment_status: str | None = None
+    membership_id: str | None = None
 
 class ApplicationResponse(BaseModel):
     id: int

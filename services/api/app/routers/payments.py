@@ -251,6 +251,8 @@ def create_payment(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
+    if any(val is not None for val in (payload.status, payload.payment_status, payload.membership_status)):
+        raise HTTPException(403, 'Browser cannot directly modify payment_status or membership_status')
     idem_key = (payload.idempotency_key or x_idempotency_key or "").strip() or None
     if idem_key:
         existing = db.scalar(select(CorePaymentTransaction).where(CorePaymentTransaction.idempotency_key == idem_key))
@@ -329,6 +331,8 @@ def create_checkout_intent(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
+    if any(val is not None for val in (payload.status, payload.payment_status, payload.membership_status)):
+        raise HTTPException(403, 'Browser cannot directly modify payment_status or membership_status')
     try:
         provider = normalize_provider(payload.provider)
     except ValueError as exc:

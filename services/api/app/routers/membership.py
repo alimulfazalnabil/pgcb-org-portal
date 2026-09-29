@@ -511,24 +511,80 @@ def initiate_membership_renewal(
 
 
 @router.patch('/profile')
+@router.put('/profile')
 def update_profile(payload: MemberProfileUpdate, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if any(
+        val is not None
+        for val in (payload.status, payload.membership_status, payload.payment_status, payload.membership_id)
+    ):
+        raise HTTPException(403, 'Browser cannot directly modify membership_status, payment_status, or membership_id')
     m = get_member(user, db)
     user.name_bn = payload.name_bn; user.name_en = payload.name_en; user.phone = payload.phone
     for field in ['designation_bn', 'designation_en', 'employee_id', 'diploma_institution', 'graduation_year', 'nid_number', 'date_of_birth', 'current_address', 'permanent_address', 'circle_id']:
         setattr(m, field, getattr(payload, field))
+    if payload.membership_type:
+        m.membership_type = payload.membership_type
     audit(db, user, 'UPDATE_PROFILE', 'MEMBER', m.id, request.client.host if request.client else None)
     db.commit()
     return {'ok': True, 'id': m.id}
+
+
+@router.post('/application/draft', response_model=ApplicationResponse)
+def save_application_draft(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.models import MembershipApplication
+    from app.services.membership_service import transition_application_status
+    m = get_member(user, db)
+    if m.status == 'ACTIVE':
+        raise HTTPException(409, 'Membership is already active')
+    transition_application_status(m, 'DRAFT')
+    if not m.application_no:
+        m.application_no = f'PGCB-APP-{datetime.utcnow().year}-{m.id:04d}'
+    m.application_note = 'Application saved as draft.'
+    app_row = db.scalar(select(MembershipApplication).where(MembershipApplication.member_id == m.id))
+    if not app_row:
+        db.add(
+            MembershipApplication(
+                member_id=m.id,
+                application_no=m.application_no,
+                membership_type=m.membership_type or 'GENERAL',
+                circle_id=m.circle_id,
+                status='DRAFT',
+            )
+        )
+    else:
+        app_row.status = 'DRAFT'
+        app_row.circle_id = m.circle_id
+    audit(db, user, 'SAVE_DRAFT_APPLICATION', 'MEMBER', m.id, request.client.host if request.client else None)
+    db.commit(); db.refresh(m)
+    return response(m)
+
+
+@router.post('/application/cancel', response_model=ApplicationResponse)
+def cancel_application(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.models import MembershipApplication
+    from app.services.membership_service import transition_application_status
+    m = get_member(user, db)
+    if m.status == 'ACTIVE':
+        raise HTTPException(409, 'Active membership cannot be cancelled via application endpoint')
+    transition_application_status(m, 'CANCELLED')
+    m.application_note = 'Application cancelled by applicant.'
+    app_row = db.scalar(select(MembershipApplication).where(MembershipApplication.member_id == m.id))
+    if app_row:
+        app_row.status = 'CANCELLED'
+    audit(db, user, 'CANCEL_APPLICATION', 'MEMBER', m.id, request.client.host if request.client else None)
+    db.commit(); db.refresh(m)
+    return response(m)
 
 
 @router.post('/application', response_model=ApplicationResponse)
 @router.post('/apply', response_model=ApplicationResponse)
 def submit_application(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
     from app.models import MembershipApplication
+    from app.services.membership_service import transition_application_status
     m = get_member(user, db)
     if m.status == 'ACTIVE':
         raise HTTPException(409, 'Membership is already active')
-    m.status = 'SUBMITTED'
+    transition_application_status(m, 'SUBMITTED')
     if not m.application_no:
         m.application_no = f'PGCB-APP-{datetime.utcnow().year}-{m.id:04d}'
     m.application_note = 'Application submitted by member.'
@@ -549,7 +605,7 @@ def submit_application(request: Request, user: User = Depends(current_user), db:
     audit(db, user, 'SUBMIT_APPLICATION', 'MEMBER', m.id, request.client.host if request.client else None)
     officers = db.scalars(
         select(User).where(
-            User.role.in_(['MEMBERSHIP_OFFICER', 'CIRCLE_ADMIN', 'CENTRAL_ADMIN', 'SUPER_ADMIN']),
+            User.role.in_(['MEMBERSHIP_OFFICER', 'MEMBERSHIP_ADMIN', 'CIRCLE_ADMIN', 'CENTRAL_ADMIN', 'SUPER_ADMIN']),
             User.is_active == True,
         )
     ).all()

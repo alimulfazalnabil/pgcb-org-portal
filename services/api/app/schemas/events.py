@@ -36,6 +36,9 @@ class PaymentCreate(BaseModel):
     provider: str = Field(default='MANUAL', max_length=40)
     event_registration_id: int | None = None
     transaction_ref: str | None = Field(default=None, max_length=120)
+    status: str | None = None
+    payment_status: str | None = None
+    membership_status: str | None = None
 
 class PaymentStatusUpdate(BaseModel):
     status: str = Field(min_length=3, max_length=30)

@@ -12,6 +12,100 @@ from app.models import Member, User, Notification
 from app.services import audit, notify, next_membership_id, membership_dates
 from app.services.email import EmailService
 
+APPLICATION_STATES: tuple[str, ...] = (
+    'DRAFT',
+    'SUBMITTED',
+    'UNDER_REVIEW',
+    'CORRECTION_REQUIRED',
+    'APPROVED',
+    'PAYMENT_PENDING',
+    'ACTIVE',
+    'REJECTED',
+    'CANCELLED',
+)
+
+VALID_APPLICATION_TRANSITIONS: dict[str, set[str]] = {
+    'DRAFT': {'DRAFT', 'SUBMITTED', 'PENDING', 'CANCELLED'},
+    'PENDING': {
+        'SUBMITTED',
+        'UNDER_REVIEW',
+        'CORRECTION_REQUIRED',
+        'DOCUMENTS_REQUIRED',
+        'APPROVED',
+        'PAYMENT_PENDING',
+        'ACTIVE',
+        'REJECTED',
+        'CANCELLED',
+    },
+    'SUBMITTED': {
+        'SUBMITTED',
+        'UNDER_REVIEW',
+        'CORRECTION_REQUIRED',
+        'DOCUMENTS_REQUIRED',
+        'APPROVED',
+        'PAYMENT_PENDING',
+        'ACTIVE',
+        'REJECTED',
+        'CANCELLED',
+    },
+    'UNDER_REVIEW': {
+        'UNDER_REVIEW',
+        'CORRECTION_REQUIRED',
+        'DOCUMENTS_REQUIRED',
+        'APPROVED',
+        'PAYMENT_PENDING',
+        'ACTIVE',
+        'REJECTED',
+        'CANCELLED',
+    },
+    'CORRECTION_REQUIRED': {
+        'CORRECTION_REQUIRED',
+        'DOCUMENTS_REQUIRED',
+        'SUBMITTED',
+        'UNDER_REVIEW',
+        'APPROVED',
+        'PAYMENT_PENDING',
+        'ACTIVE',
+        'REJECTED',
+        'CANCELLED',
+    },
+    'DOCUMENTS_REQUIRED': {
+        'CORRECTION_REQUIRED',
+        'DOCUMENTS_REQUIRED',
+        'SUBMITTED',
+        'UNDER_REVIEW',
+        'APPROVED',
+        'PAYMENT_PENDING',
+        'ACTIVE',
+        'REJECTED',
+        'CANCELLED',
+    },
+    'APPROVED': {'APPROVED', 'PAYMENT_PENDING', 'ACTIVE', 'REJECTED', 'CANCELLED'},
+    'PAYMENT_PENDING': {'PAYMENT_PENDING', 'ACTIVE', 'REJECTED', 'CANCELLED'},
+    'ACTIVE': {'ACTIVE', 'SUSPENDED', 'EXPIRED', 'REVOKED'},
+    'SUSPENDED': {'SUSPENDED', 'ACTIVE', 'REVOKED'},
+    'REJECTED': {'REJECTED', 'SUBMITTED', 'UNDER_REVIEW'},
+    'CANCELLED': {'CANCELLED', 'DRAFT', 'SUBMITTED'},
+}
+
+
+def validate_application_transition(current_status: str | None, next_status: str) -> bool:
+    cur = (current_status or 'DRAFT').strip().upper()
+    nxt = (next_status or '').strip().upper()
+    allowed = VALID_APPLICATION_TRANSITIONS.get(cur)
+    if allowed is None:
+        return False
+    return nxt in allowed
+
+
+def transition_application_status(member: Member, next_status: str) -> str:
+    cur = (member.status or 'DRAFT').strip().upper()
+    nxt = next_status.strip().upper()
+    if not validate_application_transition(cur, nxt):
+        raise ValueError(f'Illegal application state transition: {cur} -> {nxt}')
+    member.status = nxt
+    return nxt
+
 
 class MembershipService:
     @staticmethod
@@ -136,6 +230,34 @@ class MembershipService:
                     'আপনার আবেদনটি সচিবালয় কর্তৃক পর্যালোচনা করা হচ্ছে।',
                     'MEMBERSHIP',
                 )
+
+        elif action in ('CORRECTION_REQUIRED', 'REQUEST_CORRECTION', 'DOCUMENTS_REQUIRED'):
+            member.status = 'CORRECTION_REQUIRED' if action == 'CORRECTION_REQUIRED' else 'DOCUMENTS_REQUIRED'
+            audit(db, admin_user, 'REQUEST_CORRECTION_MEMBER', 'MEMBER', member.id, ip)
+            if user:
+                notify(
+                    db,
+                    user.id,
+                    'সদস্যপদ আবেদনে সংশোধন প্রয়োজন',
+                    note or 'আপনার সদস্যপদ আবেদনের তথ্য/নথিপত্র সংশোধন করে পুনরায় জমা দিন।',
+                    'MEMBERSHIP',
+                )
+
+        elif action in ('PAYMENT_PENDING', 'APPROVE_FOR_PAYMENT'):
+            member.status = 'PAYMENT_PENDING'
+            audit(db, admin_user, 'APPROVE_PAYMENT_PENDING_MEMBER', 'MEMBER', member.id, ip)
+            if user:
+                notify(
+                    db,
+                    user.id,
+                    'সদস্যপদ আবেদন অনুমোদিত — ফি পরিশোধ করুন',
+                    note or 'আপনার সদস্যপদ আবেদন অনুমোদিত হয়েছে। সদস্যপদ সক্রিয় করতে নির্ধারিত ফি পরিশোধ করুন।',
+                    'MEMBERSHIP',
+                )
+
+        elif action in ('CANCEL', 'CANCELLED'):
+            member.status = 'CANCELLED'
+            audit(db, admin_user, 'CANCEL_MEMBER_APPLICATION', 'MEMBER', member.id, ip)
 
         elif action == 'SUSPEND':
             member.status = 'SUSPENDED'
