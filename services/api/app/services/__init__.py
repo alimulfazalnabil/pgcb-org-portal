@@ -22,19 +22,28 @@ def notify(db: Session, user_id: int, title_bn: str, body_bn: str, notification_
     db.add(Notification(user_id=user_id, title_bn=title_bn, body_bn=body_bn, notification_type=notification_type))
 
 def next_membership_id(db: Session) -> str:
-    # Return the next sequential membership id for the current year.
+    # Return the next sequential membership id for the current year, guaranteed collision-free.
+    from app.models import Membership
     year = datetime.utcnow().year
     prefix = f'PGD-{year}-'
-    latest = db.scalar(
-        select(func.max(Member.membership_id)).where(Member.membership_id.like(prefix + '%'))
+    existing_ids = set(
+        db.scalars(select(Member.membership_id).where(Member.membership_id.like(prefix + '%'))).all()
+    ) | set(
+        db.scalars(select(Membership.membership_id).where(Membership.membership_id.like(prefix + '%'))).all()
     )
-    sequence = 0
-    if latest:
-        try:
-            sequence = int(latest.rsplit('-', 1)[1])
-        except (IndexError, ValueError):
-            sequence = 0
-    return f'{prefix}{sequence + 1:04d}'
+    max_seq = 0
+    for mid in existing_ids:
+        if not mid:
+            continue
+        suffix = mid[len(prefix):]
+        if suffix.isdigit():
+            max_seq = max(max_seq, int(suffix))
+    seq = max_seq + 1
+    candidate = f'{prefix}{seq:04d}'
+    while candidate in existing_ids:
+        seq += 1
+        candidate = f'{prefix}{seq:04d}'
+    return candidate
 
 def membership_dates():
     now = datetime.utcnow()
