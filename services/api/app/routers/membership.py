@@ -519,6 +519,12 @@ def update_profile(payload: MemberProfileUpdate, request: Request, user: User = 
     ):
         raise HTTPException(403, 'Browser cannot directly modify membership_status, payment_status, or membership_id')
     m = get_member(user, db)
+    if payload.employee_id:
+        existing_emp = db.scalar(
+            select(Member).where(Member.employee_id == payload.employee_id, Member.id != m.id)
+        )
+        if existing_emp:
+            raise HTTPException(409, 'Duplicate membership: employee_id is already registered to another member')
     user.name_bn = payload.name_bn; user.name_en = payload.name_en; user.phone = payload.phone
     for field in ['designation_bn', 'designation_en', 'employee_id', 'diploma_institution', 'graduation_year', 'nid_number', 'date_of_birth', 'current_address', 'permanent_address', 'circle_id']:
         setattr(m, field, getattr(payload, field))

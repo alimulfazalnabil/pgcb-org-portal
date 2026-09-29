@@ -112,16 +112,22 @@ def _verification_response(m: Member) -> VerificationResponse:
     name_en = (m.user.name_en if m.user else None) or getattr(m, 'full_name_en', None) or getattr(m, 'name_en', None)
     circle_bn = m.circle.name_bn if m.circle else None
     validity_str = m.validity_date.strftime('%d-%m-%Y') if (m.validity_date and hasattr(m.validity_date, 'strftime')) else (str(m.validity_date)[:10] if m.validity_date else None)
-    
+    is_expired_by_date = False
+    if m.validity_date:
+        val_date = m.validity_date.date() if hasattr(m.validity_date, 'date') else m.validity_date
+        if hasattr(val_date, 'year') and val_date < datetime.utcnow().date():
+            is_expired_by_date = True
+    effective_status = 'EXPIRED' if (m.status == 'EXPIRED' or is_expired_by_date) else m.status
+
     return VerificationResponse(
-        verified=m.status == 'ACTIVE',
+        verified=(effective_status == 'ACTIVE'),
         name_bn=name_bn,
         name_en=name_en,
         membership_id=m.membership_id or '',
         employee_id=getattr(m, 'employee_id', None),
         designation_bn=m.designation_bn or getattr(m, 'designation_en', None),
         circle_bn=circle_bn,
-        status=m.status,
+        status=effective_status,
         validity_date=validity_str,
         verified_at=datetime.utcnow().strftime('%d-%m-%Y %H:%M UTC'),
     )
