@@ -2,8 +2,10 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
+import { useLanguage } from '@/lib/i18n';
 
 export default function MediaPage() {
+  const { t, pick } = useLanguage();
   const [items, setItems] = useState<any[]>([]);
   const [filter, setFilter] = useState<'ALL' | 'PHOTO' | 'VIDEO'>('ALL');
   const [selected, setSelected] = useState<any | null>(null);
@@ -23,28 +25,31 @@ export default function MediaPage() {
   }, [items, filter]);
 
   return (
-    <div className="bg-slate-50 min-h-screen py-12 px-4 sm:px-6 lg:px-8">
+    <div className="bg-slate-50 min-h-screen py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-8 sm:p-12 text-white shadow-xl mb-10">
+        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 sm:p-10 text-white shadow-xl mb-10">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div>
               <span className="inline-flex items-center px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 mb-3">
                 MEDIA ARCHIVE • GALLERY
               </span>
-              <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-2">
-                মিডিয়া গ্যালারি ও ফটো আর্কাইভ
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight mb-2">
+                {t('মিডিয়া গ্যালারি ও ফটো আর্কাইভ', 'Media Gallery & Photo Archive')}
               </h1>
-              <p className="text-slate-300 text-base max-w-2xl">
-                ডিপ্লোমা প্রকৌশলী সমিতি, পিজিসিবি (ডিপ্রকৌস)-এর কেন্দ্রীয় সম্মেলন, কারিগরি কর্মশালা, গ্রিড পরিদর্শন এবং সাংগঠনিক কার্যক্রমের আলোকচিত্র ও ভিডিও সংগ্রহ।
+              <p className="text-slate-300 text-sm sm:text-base max-w-2xl">
+                {t(
+                  'ডিপ্লোমা প্রকৌশলী সমিতি, পিজিসিবি (ডিপ্রকৌস)-এর কেন্দ্রীয় সম্মেলন, কারিগরি কর্মশালা, গ্রিড পরিদর্শন এবং সাংগঠনিক কার্যক্রমের আলোকচিত্র ও ভিডিও সংগ্রহ।',
+                  'Photo and video archive of central conferences, technical workshops, grid inspections, and organizational activities of the Diploma Engineers Association, PGCB (Diprokous).'
+                )}
               </p>
             </div>
 
-            <div className="flex items-center gap-2 bg-white/10 p-1.5 rounded-2xl border border-white/15 self-start">
+            <div className="flex items-center gap-2 bg-white/10 p-1.5 rounded-2xl border border-white/15 self-start shrink-0">
               {(
                 [
-                  { id: 'ALL', label: 'সকল মিডিয়া' },
-                  { id: 'PHOTO', label: 'আলোকচিত্র' },
-                  { id: 'VIDEO', label: 'ভিডিও' },
+                  { id: 'ALL', labelBn: 'সকল মিডিয়া', labelEn: 'All Media' },
+                  { id: 'PHOTO', labelBn: 'আলোকচিত্র', labelEn: 'Photos' },
+                  { id: 'VIDEO', labelBn: 'ভিডিও', labelEn: 'Videos' },
                 ] as const
               ).map((tab) => (
                 <button
@@ -57,7 +62,7 @@ export default function MediaPage() {
                       : 'text-slate-300 hover:text-white'
                   }`}
                 >
-                  {tab.label}
+                  {t(tab.labelBn, tab.labelEn)}
                 </button>
               ))}
             </div>
@@ -72,8 +77,12 @@ export default function MediaPage() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
-            <p className="text-lg font-bold text-slate-700 mb-1">কোনো মিডিয়া আইটেম পাওয়া যায়নি</p>
-            <p className="text-sm text-slate-500">নতুন আলোকচিত্র বা ভিডিও শীঘ্রই যুক্ত করা হবে।</p>
+            <p className="text-lg font-bold text-slate-700 mb-1">
+              {t('কোনো মিডিয়া আইটেম পাওয়া যায়নি', 'No media items found')}
+            </p>
+            <p className="text-sm text-slate-500">
+              {t('নতুন আলোকচিত্র বা ভিডিও শীঘ্রই যুক্ত করা হবে।', 'New photos and videos will be added shortly.')}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -99,22 +108,29 @@ export default function MediaPage() {
                       } group-hover:scale-105 transition-transform duration-300`}
                     />
                     <span className="absolute top-3 left-3 px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-slate-900/80 text-emerald-300 border border-emerald-400/30 backdrop-blur-sm">
-                      {item.media_type === 'VIDEO' ? 'ভিডিও' : 'আলোকচিত্র'}
+                      {item.media_type === 'VIDEO' ? t('ভিডিও', 'Video') : t('আলোকচিত্র', 'Photo')}
                     </span>
                   </div>
 
                   <div className="p-6 flex-1 flex flex-col justify-between">
                     <div>
                       <h2 className="text-lg font-extrabold text-slate-900 group-hover:text-primary transition-colors mb-2">
-                        {item.title_bn}
+                        {pick(item, 'title', item.title_bn)}
                       </h2>
                       <p className="text-sm text-slate-600 line-clamp-2">
-                        {item.description_bn ||
-                          'ডিপ্রকৌস (পিজিসিবি)-এর অফিসিয়াল সাংগঠনিক কার্যক্রম ও কারিগরি অধিবেশনের দৃশ্যপট।'}
+                        {pick(
+                          item,
+                          'description',
+                          item.description_bn ||
+                            t(
+                              'ডিপ্রকৌস (পিজিসিবি)-এর অফিসিয়াল সাংগঠনিক কার্যক্রম ও কারিগরি অধিবেশনের দৃশ্যপট।',
+                              'Official organizational activities and technical sessions of Diprokous (PGCB).'
+                            )
+                        )}
                       </p>
                     </div>
                     <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-primary">
-                      <span>বিস্তারিত প্রিভিউ দেখুন</span>
+                      <span>{t('বিস্তারিত প্রিভিউ দেখুন', 'View Full Preview')}</span>
                       <span>→</span>
                     </div>
                   </div>
@@ -152,21 +168,28 @@ export default function MediaPage() {
                   type="button"
                   onClick={() => setSelected(null)}
                   className="absolute top-4 right-4 w-10 h-10 rounded-full bg-slate-900/80 text-white font-bold hover:bg-red-600 transition-colors"
-                  aria-label="বন্ধ করুন"
+                  aria-label={t('বন্ধ করুন', 'Close')}
                 >
                   ✕
                 </button>
               </div>
               <div className="p-6 sm:p-8">
                 <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-emerald-50 text-emerald-800 mb-2">
-                  {selected.media_type === 'VIDEO' ? 'ভিডিও আর্কাইভ' : 'ফটো আর্কাইভ'}
+                  {selected.media_type === 'VIDEO' ? t('ভিডিও আর্কাইভ', 'Video Archive') : t('ফটো আর্কাইভ', 'Photo Archive')}
                 </span>
                 <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 mb-2">
-                  {selected.title_bn}
+                  {pick(selected, 'title', selected.title_bn)}
                 </h3>
                 <p className="text-sm sm:text-base text-slate-600">
-                  {selected.description_bn ||
-                    'পাওয়ার গ্রিড ডিপ্লোমা প্রকৌশলী সমিতি (ডিপ্রকৌস)-এর কেন্দ্রীয় ও আঞ্চলিক কার্যক্রমের অফিসিয়াল মিডিয়া সংরক্ষণাগার।'}
+                  {pick(
+                    selected,
+                    'description',
+                    selected.description_bn ||
+                      t(
+                        'পাওয়ার গ্রিড ডিপ্লোমা প্রকৌশলী সমিতি (ডিপ্রকৌস)-এর কেন্দ্রীয় ও আঞ্চলিক কার্যক্রমের অফিসিয়াল মিডিয়া সংরক্ষণাগার।',
+                        'Official media repository of central and regional activities of the Power Grid Diploma Engineers Association (Diprokous).'
+                      )
+                  )}
                 </p>
               </div>
             </div>

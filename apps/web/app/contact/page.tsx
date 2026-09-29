@@ -2,8 +2,10 @@
 
 import React, { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { useLanguage } from '@/lib/i18n';
 
 export default function ContactPage() {
+  const { language, t } = useLanguage();
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [form, setForm] = useState({
     name: '',
@@ -39,31 +41,44 @@ export default function ContactPage() {
     } catch (err: any) {
       setResult({
         ok: false,
-        error: err?.message || 'বার্তা পাঠানো সম্ভব হয়নি। অনুগ্রহ করে তথ্য যাচাই করে পুনরায় চেষ্টা করুন।',
+        error:
+          err?.message ||
+          t(
+            'বার্তা পাঠানো সম্ভব হয়নি। অনুগ্রহ করে তথ্য যাচাই করে পুনরায় চেষ্টা করুন।',
+            'Unable to send message. Please verify your details and try again.'
+          ),
       });
     } finally {
       setSubmitting(false);
     }
   }
 
-  const addressBn =
-    settings.contact_address_bn || 'পিজিসিবি ভবন, এভিনিউ-৩, জহুরুল ইসলাম সিটি, আফতাবনগর, বাড্ডা, ঢাকা-১২১২';
+  const addressDisplay =
+    language === 'en'
+      ? settings.contact_address_en || 'PGCB Bhaban, Avenue-3, Jahurul Islam City, Aftabnagar, Badda, Dhaka-1212'
+      : settings.contact_address_bn || 'পিজিসিবি ভবন, এভিনিউ-৩, জহুরুল ইসলাম সিটি, আফতাবনগর, বাড্ডা, ঢাকা-১২১২';
   const contactEmail = settings.contact_email || 'info@pgcb.org.bd';
   const contactPhone = settings.contact_phone || '+880-2-55046731';
-  const officeHoursBn = settings.office_hours_bn || 'রবিবার – বৃহস্পতিবার, সকাল ৯:০০ – বিকাল ৫:০০';
+  const officeHoursDisplay =
+    language === 'en'
+      ? settings.office_hours_en || 'Sunday – Thursday, 9:00 AM – 5:00 PM'
+      : settings.office_hours_bn || 'রবিবার – বৃহস্পতিবার, সকাল ৯:০০ – বিকাল ৫:০০';
 
   return (
-    <div className="bg-slate-50 min-h-screen py-12 px-4 sm:px-6 lg:px-8">
+    <div className="bg-slate-50 min-h-screen py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-8 sm:p-12 text-white shadow-xl mb-10">
+        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 sm:p-10 text-white shadow-xl mb-10">
           <span className="inline-flex items-center px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 mb-3">
             CENTRAL SECRETARIAT • CONTACT & SUPPORT
           </span>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-3">
-            যোগাযোগ ও দাপ্তরিক সহায়তা কেন্দ্র
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight mb-3">
+            {t('যোগাযোগ ও দাপ্তরিক সহায়তা কেন্দ্র', 'Contact & Official Support Center')}
           </h1>
-          <p className="text-slate-300 text-base sm:text-lg max-w-2xl">
-            সদস্যপদ নিবন্ধন, ডিজিটাল আইডি কার্ড যাচাইকরণ, বার্ষিক নবায়ন বা সাংগঠনিক যেকোনো বিষয়ে কেন্দ্রীয় দপ্তরের সাথে যোগাযোগ করুন।
+          <p className="text-slate-300 text-sm sm:text-base max-w-2xl">
+            {t(
+              'সদস্যপদ নিবন্ধন, ডিজিটাল আইডি কার্ড যাচাইকরণ, বার্ষিক নবায়ন বা সাংগঠনিক যেকোনো বিষয়ে কেন্দ্রীয় দপ্তরের সাথে যোগাযোগ করুন।',
+              'Contact the Central Secretariat regarding membership registration, digital ID card verification, annual renewal, or any organizational inquiry.'
+            )}
           </p>
         </div>
 
@@ -71,43 +86,52 @@ export default function ContactPage() {
           {/* Office Info */}
           <div className="space-y-6">
             <div className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-8 shadow-sm">
-              <h2 className="text-xl font-extrabold text-slate-900 mb-6">কেন্দ্রীয় দপ্তর</h2>
+              <h2 className="text-xl font-extrabold text-slate-900 mb-6">
+                {t('কেন্দ্রীয় দপ্তর', 'Central Office')}
+              </h2>
 
               <dl className="space-y-5 text-sm">
                 <div>
                   <dt className="text-xs font-extrabold uppercase tracking-wider text-primary mb-1">
-                    প্রধান কার্যালয়ের ঠিকানা
+                    {t('প্রধান কার্যালয়ের ঠিকানা', 'Head Office Address')}
                   </dt>
-                  <dd className="font-semibold text-slate-800 leading-relaxed">{addressBn}</dd>
+                  <dd className="font-semibold text-slate-800 leading-relaxed">{addressDisplay}</dd>
                 </div>
 
                 <div>
                   <dt className="text-xs font-extrabold uppercase tracking-wider text-primary mb-1">
-                    অফিসিয়াল ইমেইল
+                    {t('অফিসিয়াল ইমেইল', 'Official Email')}
                   </dt>
                   <dd className="font-mono font-bold text-slate-800">{contactEmail}</dd>
                 </div>
 
                 <div>
                   <dt className="text-xs font-extrabold uppercase tracking-wider text-primary mb-1">
-                    টেলিফোন ও হেল্পডেস্ক
+                    {t('টেলিফোন ও হেল্পডেস্ক', 'Telephone & Helpdesk')}
                   </dt>
                   <dd className="font-mono font-bold text-slate-800">{contactPhone}</dd>
                 </div>
 
                 <div>
                   <dt className="text-xs font-extrabold uppercase tracking-wider text-primary mb-1">
-                    দাপ্তরিক সময়সূচি
+                    {t('দাপ্তরিক সময়সূচি', 'Office Hours')}
                   </dt>
-                  <dd className="font-semibold text-slate-700">{officeHoursBn}</dd>
+                  <dd className="font-semibold text-slate-700">{officeHoursDisplay}</dd>
                 </div>
               </dl>
             </div>
 
             <div className="bg-emerald-950 text-white rounded-2xl p-6 shadow-sm">
-              <h3 className="text-base font-extrabold text-emerald-300 mb-2">জরুরি সদস্যপদ সহায়তা</h3>
+              <h3 className="text-base font-extrabold text-emerald-300 mb-2">
+                {t('জরুরি সদস্যপদ সহায়তা', 'Priority Membership Support')}
+              </h3>
               <p className="text-xs text-slate-300 leading-relaxed">
-                আবেদন ট্র্যাকিং বা ডিজিটাল আইডি কার্ড যাচাইয়ের জন্য আপনার মেম্বারশিপ আইডি (যেমন: <code className="text-emerald-300">PGD-2026-0001</code>) অথবা এমপ্লয়ি আইডি উল্লেখ করুন।
+                {t(
+                  'আবেদন ট্র্যাকিং বা ডিজিটাল আইডি কার্ড যাচাইয়ের জন্য আপনার মেম্বারশিপ আইডি (যেমন: ',
+                  'For application tracking or digital ID card verification, please mention your Membership ID (e.g., '
+                )}
+                <code className="text-emerald-300">PGD-2026-0001</code>
+                {t(') অথবা এমপ্লয়ি আইডি উল্লেখ করুন।', ') or Employee ID.')}
               </p>
             </div>
           </div>
@@ -119,17 +143,24 @@ export default function ContactPage() {
               className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-10 shadow-sm space-y-6"
             >
               <div>
-                <h2 className="text-2xl font-extrabold text-slate-900 mb-1">বার্তা বা অনুসন্ধান পাঠান</h2>
+                <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 mb-1">
+                  {t('বার্তা বা অনুসন্ধান পাঠান', 'Send a Message or Inquiry')}
+                </h2>
                 <p className="text-sm text-slate-500">
-                  আপনার বার্তা সরাসরি কেন্দ্রীয় সচিবালয়ের সাপোর্ট টিকেট সিস্টেমে সংরক্ষিত হবে।
+                  {t(
+                    'আপনার বার্তা সরাসরি কেন্দ্রীয় সচিবালয়ের সাপোর্ট টিকেট সিস্টেমে সংরক্ষিত হবে।',
+                    'Your message will be logged directly in the Central Secretariat support ticket system.'
+                  )}
                 </p>
               </div>
 
               {result?.ok && (
                 <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900">
-                  <div className="font-extrabold text-base mb-1">আপনার বার্তা সফলভাবে গৃহীত হয়েছে!</div>
+                  <div className="font-extrabold text-base mb-1">
+                    {t('আপনার বার্তা সফলভাবে গৃহীত হয়েছে!', 'Your message has been received!')}
+                  </div>
                   <p className="text-sm">
-                    অনুসন্ধান রেফারেন্স টিকেট নম্বর:{' '}
+                    {t('অনুসন্ধান রেফারেন্স টিকেট নম্বর:', 'Inquiry Reference Ticket Number:')}{' '}
                     <span className="font-mono font-extrabold px-2 py-0.5 rounded bg-white border border-emerald-300">
                       {result.ticket_no}
                     </span>
@@ -146,7 +177,7 @@ export default function ContactPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-2">
-                    আপনার পূর্ণ নাম *
+                    {t('আপনার পূর্ণ নাম *', 'Your Full Name *')}
                   </label>
                   <input
                     type="text"
@@ -154,14 +185,14 @@ export default function ContactPage() {
                     minLength={2}
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    placeholder="যেমন: প্রকৌ. মোঃ সাইফুল ইসলাম"
+                    placeholder={t('যেমন: প্রকৌ. মোঃ সাইফুল ইসলাম', 'e.g., Engr. Md. Saiful Islam')}
                     className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-primary outline-none text-sm font-medium"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-2">
-                    ইমেইল ঠিকানা *
+                    {t('ইমেইল ঠিকানা *', 'Email Address *')}
                   </label>
                   <input
                     type="email"
@@ -177,7 +208,7 @@ export default function ContactPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-2">
-                    মোবাইল নম্বর (ঐচ্ছিক)
+                    {t('মোবাইল নম্বর (ঐচ্ছিক)', 'Mobile Number (Optional)')}
                   </label>
                   <input
                     type="tel"
@@ -190,7 +221,7 @@ export default function ContactPage() {
 
                 <div>
                   <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-2">
-                    বিষয় *
+                    {t('বিষয় *', 'Subject *')}
                   </label>
                   <input
                     type="text"
@@ -198,7 +229,7 @@ export default function ContactPage() {
                     minLength={3}
                     value={form.subject}
                     onChange={(e) => setForm({ ...form, subject: e.target.value })}
-                    placeholder="সদস্যপদ / ডিজিটাল আইডি / সাধারণ জিজ্ঞাসা"
+                    placeholder={t('সদস্যপদ / ডিজিটাল আইডি / সাধারণ জিজ্ঞাসা', 'Membership / Digital ID / General Inquiry')}
                     className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-primary outline-none text-sm font-medium"
                   />
                 </div>
@@ -206,7 +237,7 @@ export default function ContactPage() {
 
               <div>
                 <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-2">
-                  বিস্তারিত বার্তা *
+                  {t('বিস্তারিত বার্তা *', 'Detailed Message *')}
                 </label>
                 <textarea
                   rows={5}
@@ -214,7 +245,10 @@ export default function ContactPage() {
                   minLength={10}
                   value={form.message}
                   onChange={(e) => setForm({ ...form, message: e.target.value })}
-                  placeholder="আপনার জিজ্ঞাসা বা মতামত বিস্তারিত লিখুন (কমপক্ষে ১০ অক্ষর)..."
+                  placeholder={t(
+                    'আপনার জিজ্ঞাসা বা মতামত বিস্তারিত লিখুন (কমপক্ষে ১০ অক্ষর)...',
+                    'Write your inquiry or feedback in detail (minimum 10 characters)...'
+                  )}
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-primary outline-none text-sm font-medium"
                 />
               </div>
@@ -224,7 +258,7 @@ export default function ContactPage() {
                 disabled={submitting}
                 className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-primary hover:bg-emerald-800 disabled:opacity-60 text-white text-sm font-extrabold shadow-md transition-all"
               >
-                {submitting ? 'বার্তা পাঠানো হচ্ছে...' : 'বার্তা জমা দিন'}
+                {submitting ? t('বার্তা পাঠানো হচ্ছে...', 'Sending message...') : t('বার্তা জমা দিন', 'Submit Message')}
               </button>
             </form>
           </div>
