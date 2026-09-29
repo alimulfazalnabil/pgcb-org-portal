@@ -369,6 +369,10 @@ def run_concurrency_tiers(
         '/api/v1/public/circles',
         '/api/v1/public/committee',
     )
+    # Warm up SQLAlchemy pool & route table before steady-state concurrency measurement
+    for ep in endpoints:
+        client.get(ep)
+
     tier_results: dict[str, Any] = {}
 
     for tier in concurrency_tiers:
