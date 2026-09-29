@@ -1,2 +1,235 @@
-'use client';import {useState} from 'react';
-export default function Contact(){const [form,setForm]=useState({name:'',email:'',phone:'',subject:'',message:''});const [sent,setSent]=useState(false);const [loading,setLoading]=useState(false);async function submit(e:React.FormEvent){e.preventDefault();setLoading(true);const r=await fetch('/backend/api/v1/public/contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)});if(r.ok){setSent(true);setForm({name:'',email:'',phone:'',subject:'',message:''})}else alert('বার্তা পাঠানো যায়নি।');setLoading(false)}return <section className="section"><div className="container"><div className="section-head left"><span className="eyebrow">IDEB CENTRAL SECRETARIAT</span><h1>সমিতি সচিবালয়ের সাথে যোগাযোগ</h1><p>সদস্যসেবা, প্রশাসনিক প্রশ্ন ও অফিসিয়াল যোগাযোগের জন্য আমাদের সাথে যোগাযোগ করুন।</p></div><div className="portal-grid"><div className="contact-panel"><div className="kicker orange">HEAD OFFICE</div><h2>IDEb Bhaban, Kakrail</h2><p>কাকরাইল, ঢাকা-১০০০</p><p>☎ +880 2 2234 8901</p><p>✉ info@pg-diprokous.org.bd</p><p>শনিবার–বৃহস্পতিবার · ৯:০০ AM–৫:০০ PM</p></div><div className="card card-body"><h2>✈ সচিবালয়ে বার্তা পাঠান</h2>{sent?<div className="notice-success">আপনার বার্তা গ্রহণ করা হয়েছে। সচিবালয় থেকে প্রয়োজন অনুযায়ী যোগাযোগ করা হবে।</div>:<form onSubmit={submit} className="form-grid"><input required placeholder="আপনার নাম *" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/><input required type="email" placeholder="অফিসিয়াল ইমেইল *" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/><input placeholder="মোবাইল নম্বর" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/><input required placeholder="বিষয় *" value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})}/><textarea className="span-2" required rows={6} placeholder="বার্তা *" value={form.message} onChange={e=>setForm({...form,message:e.target.value})}/><button className="btn btn-green span-2" disabled={loading}>{loading?'পাঠানো হচ্ছে...':'বার্তা পাঠান'}</button></form>}</div></div></div></section>}
+'use client';
+
+import React, { useEffect, useState } from 'react';
+import { api } from '@/lib/api';
+
+export default function ContactPage() {
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    subject: '',
+    message: '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; ticket_no?: string; error?: string } | null>(null);
+
+  useEffect(() => {
+    api
+      .getSettings()
+      .then((res) => setSettings(res || {}))
+      .catch(() => setSettings({}));
+  }, []);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setResult(null);
+    try {
+      const res = await api.submitContact({
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim() || undefined,
+        subject: form.subject.trim(),
+        message: form.message.trim(),
+      });
+      setResult({ ok: true, ticket_no: res.ticket_no || `PGCB-TKT-${res.message_id}` });
+      setForm({ name: '', email: '', phone: '', subject: '', message: '' });
+    } catch (err: any) {
+      setResult({
+        ok: false,
+        error: err?.message || 'বার্তা পাঠানো সম্ভব হয়নি। অনুগ্রহ করে তথ্য যাচাই করে পুনরায় চেষ্টা করুন।',
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const addressBn =
+    settings.contact_address_bn || 'পিজিসিবি ভবন, এভিনিউ-৩, জহুরুল ইসলাম সিটি, আফতাবনগর, বাড্ডা, ঢাকা-১২১২';
+  const contactEmail = settings.contact_email || 'info@pgcb.org.bd';
+  const contactPhone = settings.contact_phone || '+880-2-55046731';
+  const officeHoursBn = settings.office_hours_bn || 'রবিবার – বৃহস্পতিবার, সকাল ৯:০০ – বিকাল ৫:০০';
+
+  return (
+    <div className="bg-slate-50 min-h-screen py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-8 sm:p-12 text-white shadow-xl mb-10">
+          <span className="inline-flex items-center px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 mb-3">
+            CENTRAL SECRETARIAT • CONTACT & SUPPORT
+          </span>
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-3">
+            যোগাযোগ ও দাপ্তরিক সহায়তা কেন্দ্র
+          </h1>
+          <p className="text-slate-300 text-base sm:text-lg max-w-2xl">
+            সদস্যপদ নিবন্ধন, ডিজিটাল আইডি কার্ড যাচাইকরণ, বার্ষিক নবায়ন বা সাংগঠনিক যেকোনো বিষয়ে কেন্দ্রীয় দপ্তরের সাথে যোগাযোগ করুন।
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Office Info */}
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-8 shadow-sm">
+              <h2 className="text-xl font-extrabold text-slate-900 mb-6">কেন্দ্রীয় দপ্তর</h2>
+
+              <dl className="space-y-5 text-sm">
+                <div>
+                  <dt className="text-xs font-extrabold uppercase tracking-wider text-primary mb-1">
+                    প্রধান কার্যালয়ের ঠিকানা
+                  </dt>
+                  <dd className="font-semibold text-slate-800 leading-relaxed">{addressBn}</dd>
+                </div>
+
+                <div>
+                  <dt className="text-xs font-extrabold uppercase tracking-wider text-primary mb-1">
+                    অফিসিয়াল ইমেইল
+                  </dt>
+                  <dd className="font-mono font-bold text-slate-800">{contactEmail}</dd>
+                </div>
+
+                <div>
+                  <dt className="text-xs font-extrabold uppercase tracking-wider text-primary mb-1">
+                    টেলিফোন ও হেল্পডেস্ক
+                  </dt>
+                  <dd className="font-mono font-bold text-slate-800">{contactPhone}</dd>
+                </div>
+
+                <div>
+                  <dt className="text-xs font-extrabold uppercase tracking-wider text-primary mb-1">
+                    দাপ্তরিক সময়সূচি
+                  </dt>
+                  <dd className="font-semibold text-slate-700">{officeHoursBn}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <div className="bg-emerald-950 text-white rounded-2xl p-6 shadow-sm">
+              <h3 className="text-base font-extrabold text-emerald-300 mb-2">জরুরি সদস্যপদ সহায়তা</h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                আবেদন ট্র্যাকিং বা ডিজিটাল আইডি কার্ড যাচাইয়ের জন্য আপনার মেম্বারশিপ আইডি (যেমন: <code className="text-emerald-300">PGD-2026-0001</code>) অথবা এমপ্লয়ি আইডি উল্লেখ করুন।
+              </p>
+            </div>
+          </div>
+
+          {/* Contact Form */}
+          <div className="lg:col-span-2">
+            <form
+              onSubmit={handleSubmit}
+              className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-10 shadow-sm space-y-6"
+            >
+              <div>
+                <h2 className="text-2xl font-extrabold text-slate-900 mb-1">বার্তা বা অনুসন্ধান পাঠান</h2>
+                <p className="text-sm text-slate-500">
+                  আপনার বার্তা সরাসরি কেন্দ্রীয় সচিবালয়ের সাপোর্ট টিকেট সিস্টেমে সংরক্ষিত হবে।
+                </p>
+              </div>
+
+              {result?.ok && (
+                <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900">
+                  <div className="font-extrabold text-base mb-1">আপনার বার্তা সফলভাবে গৃহীত হয়েছে!</div>
+                  <p className="text-sm">
+                    অনুসন্ধান রেফারেন্স টিকেট নম্বর:{' '}
+                    <span className="font-mono font-extrabold px-2 py-0.5 rounded bg-white border border-emerald-300">
+                      {result.ticket_no}
+                    </span>
+                  </p>
+                </div>
+              )}
+
+              {result && !result.ok && (
+                <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm font-bold">
+                  {result.error}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-2">
+                    আপনার পূর্ণ নাম *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    minLength={2}
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    placeholder="যেমন: প্রকৌ. মোঃ সাইফুল ইসলাম"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-primary outline-none text-sm font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-2">
+                    ইমেইল ঠিকানা *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    placeholder="name@pgcb.org.bd"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-primary outline-none text-sm font-medium"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-2">
+                    মোবাইল নম্বর (ঐচ্ছিক)
+                  </label>
+                  <input
+                    type="tel"
+                    value={form.phone}
+                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                    placeholder="017XXXXXXXX"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-primary outline-none text-sm font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-2">
+                    বিষয় *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    minLength={3}
+                    value={form.subject}
+                    onChange={(e) => setForm({ ...form, subject: e.target.value })}
+                    placeholder="সদস্যপদ / ডিজিটাল আইডি / সাধারণ জিজ্ঞাসা"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-primary outline-none text-sm font-medium"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-2">
+                  বিস্তারিত বার্তা *
+                </label>
+                <textarea
+                  rows={5}
+                  required
+                  minLength={10}
+                  value={form.message}
+                  onChange={(e) => setForm({ ...form, message: e.target.value })}
+                  placeholder="আপনার জিজ্ঞাসা বা মতামত বিস্তারিত লিখুন (কমপক্ষে ১০ অক্ষর)..."
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-primary outline-none text-sm font-medium"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-primary hover:bg-emerald-800 disabled:opacity-60 text-white text-sm font-extrabold shadow-md transition-all"
+              >
+                {submitting ? 'বার্তা পাঠানো হচ্ছে...' : 'বার্তা জমা দিন'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,15 +1,115 @@
 'use client';
-import Link from 'next/link';
-import { use, useEffect, useState } from 'react';
 
-export default function EventDetail({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const [event, setEvent] = useState<any>(null);
-  const [error, setError] = useState('');
+import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { api, EventItem } from '@/lib/api';
+
+export default function EventDetailPage({ params }: { params: { id: string } }) {
+  const [ev, setEv] = useState<EventItem | null>(null);
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
-    fetch(`/backend/api/v1/event/${id}`).then(async r => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.detail || 'Event not found'); setEvent(b); }).catch(e => setError(e.message));
-  }, [id]);
-  if (error) return <section className="section"><div className="container narrow"><div className="card card-body"><h1>ইভেন্ট পাওয়া যায়নি</h1><p className="muted">{error}</p><Link className="btn btn-primary" href="/events">ইভেন্ট তালিকায় ফিরুন</Link></div></div></section>;
-  if (!event) return <section className="section"><div className="container">লোড হচ্ছে...</div></section>;
-  return <section className="section"><div className="container narrow-wide"><Link className="back-link" href="/events">← সকল ইভেন্ট</Link><article className="card card-body"><span className="tag orange">EVENT</span><h1>{event.title_bn}</h1>{event.title_en && <p className="muted">{event.title_en}</p>}<div className="meta">{event.event_date ? new Date(event.event_date).toLocaleString('bn-BD') : 'তারিখ নির্ধারিত নয়'} · {event.location_bn || 'স্থান নির্ধারিত নয়'}</div><p style={{lineHeight:1.9}}>{event.description_bn || 'এই ইভেন্টের জন্য এখনো বিস্তারিত বিবরণ প্রকাশিত হয়নি।'}</p><div className="detail-grid"><div><small>Capacity</small><strong>{event.capacity || 'Unlimited'}</strong></div><div><small>Registration deadline</small><strong>{event.registration_deadline ? new Date(event.registration_deadline).toLocaleString('bn-BD') : 'Not specified'}</strong></div><div><small>Participation fee</small><strong>{event.fee_amount ? `${event.fee_amount.toLocaleString('bn-BD')} ${event.fee_currency}` : 'Free'}</strong></div><div><small>Registration</small><strong>{event.registration_enabled ? 'Open' : 'Closed'}</strong></div></div>{event.registration_enabled ? <Link className="btn btn-green" href={`/events/${event.id}/register`}>ইভেন্ট নিবন্ধন করুন</Link> : <span className="status-pill">নিবন্ধন বন্ধ</span>}</article></div></section>;
+    api
+      .getEvent(Number(params.id))
+      .then((res) => setEv(res))
+      .catch(() => setEv(null))
+      .finally(() => setLoading(false));
+  }, [params.id]);
+
+  if (loading) {
+    return (
+      <div className="bg-slate-50 min-h-screen py-16 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-4xl mx-auto h-96 rounded-3xl bg-white border border-slate-200 animate-pulse" />
+      </div>
+    );
+  }
+
+  if (!ev) {
+    return (
+      <div className="bg-slate-50 min-h-screen py-20 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-xl mx-auto bg-white rounded-3xl border border-slate-200 p-10 text-center">
+          <h1 className="text-2xl font-extrabold text-slate-900 mb-2">ইভেন্ট খুঁজে পাওয়া যায়নি</h1>
+          <p className="text-sm text-slate-600 mb-6">অনুরোধকৃত সম্মেলন বা কর্মশালার তথ্য পাওয়া যায়নি।</p>
+          <Link
+            href="/events"
+            className="inline-flex items-center px-6 py-3 rounded-xl bg-primary text-white text-sm font-bold"
+          >
+            সকল ইভেন্ট দেখুন
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-slate-50 min-h-screen py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="mb-6">
+          <Link
+            href="/events"
+            className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-primary transition-colors"
+          >
+            ← সকল সম্মেলন ও কর্মশালা
+          </Link>
+        </div>
+
+        <article className="bg-white rounded-3xl border border-slate-200/80 shadow-lg overflow-hidden">
+          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 p-8 sm:p-12 text-white">
+            <span className="inline-flex items-center px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 mb-4">
+              OFFICIAL EVENT • #{ev.id}
+            </span>
+            <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight mb-3">{ev.title_bn}</h1>
+            {ev.title_en && <p className="text-slate-300 text-base">{ev.title_en}</p>}
+          </div>
+
+          <div className="p-8 sm:p-12 space-y-8">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
+                <div className="text-xs font-extrabold uppercase tracking-wider text-primary mb-1">তারিখ ও সময়</div>
+                <div className="font-bold text-slate-900 text-sm">
+                  {ev.event_date ? new Date(ev.event_date).toLocaleString('bn-BD') : 'তারিখ শীঘ্রই ঘোষিত হবে'}
+                </div>
+              </div>
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
+                <div className="text-xs font-extrabold uppercase tracking-wider text-primary mb-1">ভেন্যু / স্থান</div>
+                <div className="font-bold text-slate-900 text-sm">
+                  {ev.location_bn || 'পিজিসিবি হেড অফিস অডিটোরিয়াম, ঢাকা'}
+                </div>
+              </div>
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
+                <div className="text-xs font-extrabold uppercase tracking-wider text-primary mb-1">আসন সংখ্যা ও ফি</div>
+                <div className="font-bold text-slate-900 text-sm">
+                  {ev.capacity || 300} আসন •{' '}
+                  {ev.fee_amount > 0 ? `৳${ev.fee_amount.toLocaleString('bn-BD')}` : 'বিনামূল্যে'}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-slate-700 leading-relaxed">
+              <h2 className="text-lg font-extrabold text-slate-900">কর্মসূচির বিবরণ</h2>
+              <p>
+                {ev.description_bn ||
+                  'পাওয়ার গ্রিড কোম্পানি অব বাংলাদেশ পিএলসি (পিজিসিবি)-এর ডিপ্লোমা প্রকৌশলীদের অংশগ্রহণে কেন্দ্রীয় অধিবেশন, কারিগরি প্রেজেন্টেশন এবং প্যানেল আলোচনা অনুষ্ঠিত হবে।'}
+              </p>
+            </div>
+
+            <div className="pt-6 border-t border-slate-100 flex items-center justify-between flex-wrap gap-4">
+              <Link
+                href={`/events/${ev.id}/register`}
+                className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl bg-primary text-white text-sm font-extrabold hover:bg-emerald-800 shadow-md transition-all"
+              >
+                অংশগ্রহণের জন্য নিবন্ধন করুন →
+              </Link>
+              <Link
+                href="/events"
+                className="text-sm font-bold text-slate-500 hover:text-slate-900 transition-colors"
+              >
+                সকল ইভেন্ট দেখুন
+              </Link>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  );
 }

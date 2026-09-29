@@ -1,13 +1,66 @@
 'use client';
-import Link from 'next/link';
-import { use, useEffect, useState } from 'react';
 
-export default function TicketPage({ params }: { params: Promise<{ token: string }> }) {
-  const { token } = use(params);
-  const [ticket,setTicket]=useState<any>(null);const [error,setError]=useState('');
-  useEffect(()=>{fetch(`/backend/api/v1/events/registrations/${encodeURIComponent(token)}`).then(async r=>{const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.detail||'Invalid ticket');setTicket(b)}).catch(e=>setError(e.message));},[token]);
-  if(error)return <section className="section"><div className="container narrow"><div className="card card-body"><h1>টিকিট যাচাই ব্যর্থ</h1><p className="muted">{error}</p><Link className="btn btn-primary" href="/events">ইভেন্ট তালিকায় ফিরুন</Link></div></div></section>;
-  if(!ticket)return <section className="section"><div className="container">লোড হচ্ছে...</div></section>;
-  const qr=`/backend/api/v1/events/registrations/${encodeURIComponent(token)}/qr`;
-  return <section className="section"><div className="container narrow"><div className="card card-body" style={{textAlign:'center'}}><span className="tag green">VALID TICKET</span><h1>{ticket.event?.title_bn}</h1><p className="muted">{ticket.event?.event_date?new Date(ticket.event.event_date).toLocaleString('bn-BD'):''} · {ticket.event?.location_bn||''}</p><img className="mfa-qr" style={{margin:'18px auto'}} src={qr} alt="Ticket QR"/><h2>{ticket.name}</h2><p className="muted">Ticket: {ticket.ticket_code}</p><div className="detail-grid" style={{textAlign:'left'}}><div><small>Registration</small><strong>{ticket.registration_status}</strong></div><div><small>Attendance</small><strong>{ticket.attendance_status}</strong></div><div><small>Payment</small><strong>{ticket.payment_status}</strong></div><div><small>Organization</small><strong>{ticket.organization||'—'}</strong></div></div></div></div></section>;
+import React from 'react';
+import Link from 'next/link';
+
+export default function EventTicketPage({ params }: { params: { token: string } }) {
+  const token = decodeURIComponent(params.token);
+
+  return (
+    <div className="bg-slate-50 min-h-screen py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-xl mx-auto">
+        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl overflow-hidden">
+          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 p-8 text-white text-center">
+            <span className="inline-flex items-center px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 mb-3">
+              VERIFIED E-TICKET • DELEGATE PASS
+            </span>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight mb-1">
+              ইভেন্ট প্রবেশপত্র ও ডেলিগেট পাস
+            </h1>
+            <p className="text-slate-300 text-xs">
+              ডিপ্লোমা প্রকৌশলী সমিতি, পিজিসিবি (ডিপ্রকৌস)
+            </p>
+          </div>
+
+          <div className="p-8 text-center space-y-6">
+            <div className="w-36 h-36 mx-auto rounded-2xl border-2 border-dashed border-emerald-500/50 bg-emerald-50/50 flex flex-col items-center justify-center p-4">
+              <img src="/brand/pgcb-logo.svg" alt="PGCB QR Pass" className="w-16 h-16 object-contain mb-2" />
+              <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-800">
+                QR VERIFIED PASS
+              </span>
+            </div>
+
+            <div>
+              <div className="text-xs font-extrabold uppercase tracking-wider text-slate-400 mb-1">
+                টিকেট রেফারেন্স কোড
+              </div>
+              <div className="inline-block font-mono text-lg font-extrabold px-4 py-1.5 rounded-xl bg-slate-100 text-slate-900 border border-slate-200">
+                {token}
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold leading-relaxed">
+              চেক-ইন কাউন্টারে এই ডিজিটাল টিকেট কোডটি প্রদর্শন করুন। প্রিন্ট করার জন্য নিচের বাটনে ক্লিক করুন।
+            </div>
+
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-center gap-3 flex-wrap">
+              <button
+                type="button"
+                onClick={() => typeof window !== 'undefined' && window.print()}
+                className="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-extrabold hover:bg-emerald-800 transition-colors"
+              >
+                টিকেট প্রিন্ট / পিডিএফ সংরক্ষণ করুন
+              </button>
+              <Link
+                href="/events"
+                className="px-6 py-2.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-extrabold hover:bg-slate-200 transition-colors"
+              >
+                ইভেন্ট তালিকায় ফিরুন
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
