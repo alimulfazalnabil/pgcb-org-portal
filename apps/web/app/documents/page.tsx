@@ -5,16 +5,17 @@ import { api, DocumentItem } from '../../lib/api';
 import { LoadingState } from '../../components/ui/LoadingState';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Pagination } from '../../components/ui/Pagination';
-import { Search, Download, FileText, Filter, CheckCircle2 } from 'lucide-react';
+import { Search, Download } from 'lucide-react';
+import { useLanguage } from '../../lib/i18n';
 
 const CATEGORIES = [
-  { label: 'সকল ডকুমেন্টস', value: '' },
-  { label: 'ফরম (Forms)', value: 'FORM' },
-  { label: 'নীতিমালা (Policies)', value: 'POLICY' },
-  { label: 'বার্ষিক প্রতিবেদন (Reports)', value: 'REPORT' },
-  { label: 'ম্যানুয়াল ও নির্দেশিকা', value: 'MANUAL' },
-  { label: 'সার্কুলার', value: 'CIRCULAR' },
-  { label: 'অন্যান্য', value: 'OTHER' },
+  { labelBn: 'সকল ডকুমেন্টস', labelEn: 'All Documents', value: '' },
+  { labelBn: 'ফরম (Forms)', labelEn: 'Forms', value: 'FORM' },
+  { labelBn: 'নীতিমালা (Policies)', labelEn: 'Policies', value: 'POLICY' },
+  { labelBn: 'বার্ষিক প্রতিবেদন (Reports)', labelEn: 'Annual Reports', value: 'REPORT' },
+  { labelBn: 'ম্যানুয়াল ও নির্দেশিকা', labelEn: 'Manuals & Guidelines', value: 'MANUAL' },
+  { labelBn: 'সার্কুলার', labelEn: 'Circulars', value: 'CIRCULAR' },
+  { labelBn: 'অন্যান্য', labelEn: 'Other', value: 'OTHER' },
 ];
 
 function formatBytes(bytes?: number): string {
@@ -25,6 +26,7 @@ function formatBytes(bytes?: number): string {
 }
 
 export default function DocumentsPage() {
+  const { language, t, pick, formatNumber } = useLanguage();
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState('');
@@ -56,16 +58,22 @@ export default function DocumentsPage() {
     return (
       d.title_bn.toLowerCase().includes(q) ||
       (d.title_en && d.title_en.toLowerCase().includes(q)) ||
-      (d.description_bn && d.description_bn.toLowerCase().includes(q))
+      (d.description_bn && d.description_bn.toLowerCase().includes(q)) ||
+      (d.description_en && d.description_en.toLowerCase().includes(q))
     );
   });
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-10 min-h-screen">
       <div className="border-b border-slate-200 pb-6 mb-8">
-        <h1 className="text-3xl font-bold text-slate-900 mb-2">প্রাতিষ্ঠানিক ডকুমেন্টস ও ফরম সংগ্রহশালা</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
+          {t('প্রাতিষ্ঠানিক ডকুমেন্টস ও ফরম সংগ্রহশালা', 'Institutional Documents & Forms Repository')}
+        </h1>
         <p className="text-slate-600 text-sm md:text-base">
-          পিজিসিবি প্রকৌশলী সমিতির সদস্য ফরম, কল্যাণ নীতিমালা, বার্ষিক নিরীক্ষা রিপোর্ট ও অফিশিয়াল প্রকাশনাসমূহ ডাউনলোড করুন।
+          {t(
+            'পিজিসিবি প্রকৌশলী সমিতির সদস্য ফরম, কল্যাণ নীতিমালা, বার্ষিক নিরীক্ষা রিপোর্ট ও অফিশিয়াল প্রকাশনাসমূহ ডাউনলোড করুন।',
+            'Download membership forms, welfare policies, annual audit reports, and official publications of the PGCB Engineers Association.'
+          )}
         </p>
       </div>
 
@@ -85,7 +93,7 @@ export default function DocumentsPage() {
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
             >
-              {c.label}
+              {t(c.labelBn, c.labelEn)}
             </button>
           ))}
         </div>
@@ -94,7 +102,7 @@ export default function DocumentsPage() {
           <Search size={16} className="absolute left-3 top-3 text-slate-400" />
           <input
             type="text"
-            placeholder="ডকুমেন্ট খুঁজুন..."
+            placeholder={t('ডকুমেন্ট খুঁজুন...', 'Search documents...')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
@@ -104,12 +112,12 @@ export default function DocumentsPage() {
 
       {/* List */}
       {loading ? (
-        <LoadingState message="ডকুমেন্ট তালিকা লোড হচ্ছে..." />
+        <LoadingState message={t('ডকুমেন্ট তালিকা লোড হচ্ছে...', 'Loading documents...')} />
       ) : filteredDocs.length === 0 ? (
         <EmptyState
           icon="📂"
-          title="কোনো দলিল পাওয়া যায়নি"
-          description="বর্তমানে এই ক্যাটাগরিতে কোনো নথি বা ফরম আপলোড করা হয়নি।"
+          title={t('কোনো দলিল পাওয়া যায়নি', 'No documents found')}
+          description={t('বর্তমানে এই ক্যাটাগরিতে কোনো নথি বা ফরম আপলোড করা হয়নি।', 'No documents or forms have been uploaded in this category yet.')}
         />
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -117,22 +125,24 @@ export default function DocumentsPage() {
             <table className="w-full text-left border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold text-xs">
-                  <th className="py-3 px-4">ডকুমেন্টের নাম ও বিবরণ</th>
-                  <th className="py-3 px-4">ক্যাটাগরি</th>
-                  <th className="py-3 px-4">ভার্সন</th>
-                  <th className="py-3 px-4">ফাইল সাইজ</th>
-                  <th className="py-3 px-4">ডাউনলোড</th>
-                  <th className="py-3 px-4 text-right">অ্যাকশন</th>
+                  <th className="py-3 px-4">{t('ডকুমেন্টের নাম ও বিবরণ', 'Document Name & Description')}</th>
+                  <th className="py-3 px-4">{t('ক্যাটাগরি', 'Category')}</th>
+                  <th className="py-3 px-4">{t('ভার্সন', 'Version')}</th>
+                  <th className="py-3 px-4">{t('ফাইল সাইজ', 'File Size')}</th>
+                  <th className="py-3 px-4">{t('ডাউনলোড', 'Downloads')}</th>
+                  <th className="py-3 px-4 text-right">{t('অ্যাকশন', 'Action')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredDocs.map((doc) => (
                   <tr key={doc.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-4 px-4">
-                      <div className="font-semibold text-slate-900">{doc.title_bn}</div>
-                      {doc.title_en && <div className="text-xs text-slate-500 italic">{doc.title_en}</div>}
-                      {doc.description_bn && (
-                        <div className="text-xs text-slate-600 mt-1 line-clamp-1">{doc.description_bn}</div>
+                      <div className="font-semibold text-slate-900">{pick(doc, 'title', doc.title_bn)}</div>
+                      {language === 'bn' && doc.title_en && <div className="text-xs text-slate-500 italic">{doc.title_en}</div>}
+                      {(doc.description_bn || doc.description_en) && (
+                        <div className="text-xs text-slate-600 mt-1 line-clamp-1">
+                          {pick(doc, 'description', doc.description_bn || '')}
+                        </div>
                       )}
                     </td>
                     <td className="py-4 px-4">
@@ -143,7 +153,7 @@ export default function DocumentsPage() {
                     <td className="py-4 px-4 text-xs font-mono text-slate-500">v{doc.version}</td>
                     <td className="py-4 px-4 text-xs text-slate-500">{formatBytes(doc.file_size)}</td>
                     <td className="py-4 px-4 text-xs text-slate-500">
-                      {doc.download_count.toLocaleString('bn-BD')} বার
+                      {language === 'en' ? `${formatNumber(doc.download_count)} times` : `${formatNumber(doc.download_count)} বার`}
                     </td>
                     <td className="py-4 px-4 text-right">
                       <a
@@ -152,7 +162,7 @@ export default function DocumentsPage() {
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-md text-xs font-medium transition-colors shadow-sm"
                       >
-                        <Download size={13} /> ডাউনলোড
+                        <Download size={13} /> {t('ডাউনলোড', 'Download')}
                       </a>
                     </td>
                   </tr>

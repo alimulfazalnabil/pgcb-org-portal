@@ -4,17 +4,19 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, NewsItem } from '@/lib/api';
 import { Newspaper, Calendar, Eye, Tag, Search, Star, ArrowRight } from 'lucide-react';
+import { useLanguage } from '@/lib/i18n';
 
 const CATEGORIES = [
-  { code: '', label: 'সকল সংবাদ' },
-  { code: 'ORGANIZATIONAL', label: 'সাংগঠনিক' },
-  { code: 'PRESS_RELEASE', label: 'প্রেস বিজ্ঞপ্তি' },
-  { code: 'WELFARE', label: 'সদস্য কল্যাণ' },
-  { code: 'GRID_OPERATIONS', label: 'গ্রিড কার্যক্রম' },
-  { code: 'EVENT', label: 'সম্মেলন ও ইভেন্ট' },
+  { code: '', labelBn: 'সকল সংবাদ', labelEn: 'All News' },
+  { code: 'ORGANIZATIONAL', labelBn: 'সাংগঠনিক', labelEn: 'Organizational' },
+  { code: 'PRESS_RELEASE', labelBn: 'প্রেস বিজ্ঞপ্তি', labelEn: 'Press Release' },
+  { code: 'WELFARE', labelBn: 'সদস্য কল্যাণ', labelEn: 'Member Welfare' },
+  { code: 'GRID_OPERATIONS', labelBn: 'গ্রিড কার্যক্রম', labelEn: 'Grid Operations' },
+  { code: 'EVENT', labelBn: 'সম্মেলন ও ইভেন্ট', labelEn: 'Conferences & Events' },
 ];
 
 export default function NewsListPage() {
+  const { language, t, pick, formatNumber, formatDate } = useLanguage();
   const [items, setItems] = useState<NewsItem[]>([]);
   const [category, setCategory] = useState('');
   const [query, setQuery] = useState('');
@@ -42,7 +44,7 @@ export default function NewsListPage() {
   const featured = items.find((item) => item.is_featured);
 
   return (
-    <section className="section py-12 min-h-screen bg-background">
+    <section className="section py-10 min-h-screen bg-background">
       <div className="container max-w-6xl mx-auto px-4 space-y-8">
         {/* Page Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 pb-6 border-b border-border">
@@ -50,9 +52,14 @@ export default function NewsListPage() {
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-primary/10 text-primary mb-2">
               <Newspaper size={14} /> NEWS & PRESS RELEASES
             </span>
-            <h1 className="text-3xl font-extrabold text-foreground">সংবাদ ও প্রেস বিজ্ঞপ্তি</h1>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground">
+              {t('সংবাদ ও প্রেস বিজ্ঞপ্তি', 'News & Press Releases')}
+            </h1>
             <p className="text-secondary text-sm mt-1">
-              পাওয়ার গ্রিড প্রকৌশলী সমিতির সাম্প্রতিক সাংগঠনিক সংবাদ, প্রেস বিজ্ঞপ্তি ও ঘোষণা।
+              {t(
+                'পাওয়ার গ্রিড প্রকৌশলী সমিতির সাম্প্রতিক সাংগঠনিক সংবাদ, প্রেস বিজ্ঞপ্তি ও ঘোষণা।',
+                'Recent organizational news, press releases, and official announcements of the Power Grid Engineers Association.'
+              )}
             </p>
           </div>
 
@@ -67,7 +74,7 @@ export default function NewsListPage() {
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary" />
               <input
                 type="text"
-                placeholder="সংবাদ অনুসন্ধান করুন..."
+                placeholder={t('সংবাদ অনুসন্ধান করুন...', 'Search news...')}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -77,7 +84,7 @@ export default function NewsListPage() {
               type="submit"
               className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:opacity-90 transition-all"
             >
-              খুঁজুন
+              {t('খুঁজুন', 'Search')}
             </button>
           </form>
         </div>
@@ -95,7 +102,7 @@ export default function NewsListPage() {
                   : 'bg-card border border-border text-secondary hover:text-foreground'
               }`}
             >
-              {cat.label}
+              {t(cat.labelBn, cat.labelEn)}
             </button>
           ))}
         </div>
@@ -104,33 +111,34 @@ export default function NewsListPage() {
         {featured && !query && !category && (
           <div className="rounded-3xl bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white p-6 md:p-8 shadow-lg border border-amber-500/30">
             <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-wider mb-2">
-              <Star size={14} /> প্রধান সংবাদ (Featured News)
+              <Star size={14} /> {t('প্রধান সংবাদ (Featured News)', 'Featured News')}
             </div>
-            <h2 className="text-2xl font-extrabold text-white mb-2">
-              {featured.title_bn || featured.title_en}
+            <h2 className="text-xl sm:text-2xl font-extrabold text-white mb-2">
+              {pick(featured, 'title', featured.title_bn || featured.title_en)}
             </h2>
-            {featured.summary_bn && (
+            {(featured.summary_bn || featured.summary_en) && (
               <p className="text-sm text-slate-300 line-clamp-2 mb-4 max-w-3xl">
-                {featured.summary_bn}
+                {pick(featured, 'summary', featured.summary_bn || '')}
               </p>
             )}
             <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
               <div className="flex items-center gap-4 text-xs text-slate-400">
                 <span className="inline-flex items-center gap-1">
                   <Calendar size={13} />
-                  {featured.published_at
-                    ? new Date(featured.published_at).toLocaleDateString('bn-BD')
-                    : 'সাম্প্রতিক'}
+                  {featured.published_at ? formatDate(featured.published_at) : t('সাম্প্রতিক', 'Recent')}
                 </span>
                 <span className="inline-flex items-center gap-1">
-                  <Eye size={13} /> {featured.view_count || 0} বার পঠিত
+                  <Eye size={13} />{' '}
+                  {language === 'en'
+                    ? `${formatNumber(featured.view_count || 0)} views`
+                    : `${formatNumber(featured.view_count || 0)} বার পঠিত`}
                 </span>
               </div>
               <Link
                 href={`/news/${encodeURIComponent(featured.slug)}`}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 text-slate-950 text-xs font-bold hover:bg-amber-400 transition-colors"
               >
-                বিস্তারিত পড়ুন <ArrowRight size={14} />
+                {t('বিস্তারিত পড়ুন', 'Read Full Story')} <ArrowRight size={14} />
               </Link>
             </div>
           </div>
@@ -140,13 +148,17 @@ export default function NewsListPage() {
         {loading ? (
           <div className="py-16 text-center">
             <div className="inline-block animate-spin rounded-full h-9 w-9 border-4 border-primary border-t-transparent mb-3" />
-            <p className="text-xs text-secondary">সংবাদ লোড হচ্ছে...</p>
+            <p className="text-xs text-secondary">{t('সংবাদ লোড হচ্ছে...', 'Loading news...')}</p>
           </div>
         ) : items.length === 0 ? (
           <div className="bg-card border border-border rounded-2xl p-12 text-center">
             <Newspaper className="mx-auto text-secondary mb-3" size={40} />
-            <h3 className="text-base font-bold text-foreground mb-1">কোনো সংবাদ পাওয়া যায়নি</h3>
-            <p className="text-xs text-secondary">অনুগ্রহ করে ভিন্ন ক্যাটাগরি বা কীওয়ার্ড দিয়ে অনুসন্ধান করুন।</p>
+            <h3 className="text-base font-bold text-foreground mb-1">
+              {t('কোনো সংবাদ পাওয়া যায়নি', 'No news found')}
+            </h3>
+            <p className="text-xs text-secondary">
+              {t('অনুগ্রহ করে ভিন্ন ক্যাটাগরি বা কীওয়ার্ড দিয়ে অনুসন্ধান করুন।', 'Please search with a different category or keyword.')}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -172,21 +184,19 @@ export default function NewsListPage() {
                       </span>
                       <span className="text-[11px] text-secondary inline-flex items-center gap-1">
                         <Calendar size={12} />
-                        {item.published_at
-                          ? new Date(item.published_at).toLocaleDateString('bn-BD')
-                          : ''}
+                        {item.published_at ? formatDate(item.published_at) : ''}
                       </span>
                     </div>
 
                     <h3 className="text-base font-bold text-foreground line-clamp-2">
                       <Link href={`/news/${encodeURIComponent(item.slug)}`} className="hover:text-primary">
-                        {item.title_bn || item.title_en}
+                        {pick(item, 'title', item.title_bn || item.title_en)}
                       </Link>
                     </h3>
 
-                    {(item.summary_bn || item.body_bn) && (
+                    {(item.summary_bn || item.summary_en || item.body_bn || item.body_en) && (
                       <p className="text-xs text-secondary line-clamp-3 leading-relaxed">
-                        {item.summary_bn || item.body_bn}
+                        {pick(item, 'summary', item.summary_bn || item.body_bn || '')}
                       </p>
                     )}
                   </div>
@@ -206,7 +216,7 @@ export default function NewsListPage() {
                       href={`/news/${encodeURIComponent(item.slug)}`}
                       className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
                     >
-                      পড়ুন <ArrowRight size={13} />
+                      {t('পড়ুন', 'Read')} <ArrowRight size={13} />
                     </Link>
                   </div>
                 </div>
