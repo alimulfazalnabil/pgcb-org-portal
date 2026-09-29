@@ -824,3 +824,57 @@ class NotificationTemplate(Base, TimestampMixin):
     body_en: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
+
+class MemberProfileMeta(Base, TimestampMixin):
+    __tablename__ = 'member_profile_meta'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey('members.id', ondelete='CASCADE'), unique=True, index=True)
+    father_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    mother_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    blood_group: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    organization: Mapped[str | None] = mapped_column(String(250), default='Power Grid Bangladesh PLC (PGCB)', nullable=True)
+    department: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    profession: Mapped[str | None] = mapped_column(String(200), default='Diploma Engineer', nullable=True)
+    academic_qualification: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    professional_qualification: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    years_of_experience: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    alternate_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    district: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    emergency_contact_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    emergency_contact_relationship: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    emergency_contact_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    emergency_contact_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preferred_language: Mapped[str] = mapped_column(String(10), default='bn')
+    profile_visibility: Mapped[str] = mapped_column(String(30), default='MEMBERS_ONLY')
+    directory_visibility: Mapped[bool] = mapped_column(Boolean, default=True)
+    contact_visibility: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class MemberProfileChangeRequest(Base, TimestampMixin):
+    __tablename__ = 'member_profile_change_requests'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey('members.id', ondelete='CASCADE'), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
+    field_name: Mapped[str] = mapped_column(String(80), index=True)  # name_bn, name_en, date_of_birth, nid_number, membership_id, certificate_info
+    current_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_value: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    supporting_doc_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default='PENDING', index=True)  # PENDING, APPROVED, REJECTED
+    reviewer_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class MemberSavedContent(Base, TimestampMixin):
+    __tablename__ = 'member_saved_content'
+    __table_args__ = (UniqueConstraint('user_id', 'entity_type', 'entity_id', name='uq_member_saved_content'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
+    entity_type: Mapped[str] = mapped_column(String(40), index=True)  # CIRCULAR, NOTICE, EVENT
+    entity_id: Mapped[int] = mapped_column(Integer, index=True)
+    is_bookmarked: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+

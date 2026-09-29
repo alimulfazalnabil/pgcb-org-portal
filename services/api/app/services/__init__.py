@@ -11,7 +11,16 @@ except Exception:
     BASE_STORAGE = Path(__file__).resolve().parents[2] / 'storage'
     BASE_STORAGE.mkdir(parents=True, exist_ok=True)
 
-ALLOWED_DOC_TYPES = {'NID', 'CERTIFICATE', 'PHOTO', 'OTHER'}
+ALLOWED_DOC_TYPES = {
+    'NID',
+    'PASSPORT',
+    'CERTIFICATE',
+    'ACADEMIC_CERTIFICATE',
+    'PROFESSIONAL_CERTIFICATE',
+    'EXPERIENCE_CERTIFICATE',
+    'PHOTO',
+    'OTHER',
+}
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 ALLOWED_CONTENT_TYPES = {'application/pdf', 'image/jpeg', 'image/png', 'image/webp'}
 
