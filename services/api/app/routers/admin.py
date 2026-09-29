@@ -1134,6 +1134,7 @@ def _execute_member_application_action(
         'ok': True,
         'membership_id': m.membership_id,
         'status': m.status,
+        'application_status': m.status,
         'application_note': m.application_note,
         'issue_date': m.issue_date,
         'validity_date': m.validity_date,
@@ -1180,8 +1181,19 @@ async def review_membership_application_action(
         body_data = await request.json()
     except Exception:
         body_data = {}
-    resolved_action = action or body_data.get('action') or ''
-    resolved_note = note if note is not None else body_data.get('note')
+    resolved_action = (action or body_data.get('action') or '').strip()
+    resolved_note = (
+        note
+        if note is not None
+        else (
+            body_data.get('note')
+            or body_data.get('correction_reason')
+            or body_data.get('rejection_reason')
+        )
+    )
+    if resolved_action.upper() in ('REQUEST_CORRECTION', 'CORRECTION_REQUIRED', 'REJECT'):
+        if not resolved_note or not str(resolved_note).strip():
+            raise HTTPException(400, f'A reason/note is required for {resolved_action.upper()} action')
     resolved_circle = circle_id if circle_id is not None else body_data.get('circle_id')
     resolved_mid = membership_id or body_data.get('membership_id')
     require_payment = bool(body_data.get('require_payment', True))
