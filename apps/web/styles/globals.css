@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Bengali:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -53,9 +55,22 @@
   * {
     @apply border-border;
   }
+  html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', 'Noto Sans Bengali', sans-serif;
+    font-family: 'Inter', 'Noto Sans Bengali', 'Hind Siliguri', system-ui, -apple-system, sans-serif;
+    line-height: 1.6;
+  }
+  html[lang="bn"] body {
+    font-family: 'Noto Sans Bengali', 'Hind Siliguri', 'Inter', system-ui, -apple-system, sans-serif;
+    line-height: 1.65;
+  }
+  html[lang="en"] body {
+    font-family: 'Inter', 'Noto Sans Bengali', system-ui, -apple-system, sans-serif;
+    line-height: 1.55;
   }
 }
 
@@ -70,7 +85,7 @@
     margin: 0 auto;
   }
   .section {
-    padding: 72px 0;
+    padding: 48px 0;
   }
   .section.dark {
     background: var(--navy);
@@ -78,7 +93,7 @@
   }
   .section-head {
     text-align: center;
-    margin-bottom: 36px;
+    margin-bottom: 32px;
   }
   .section-head .eyebrow {
     display: inline-block;
@@ -102,8 +117,8 @@
   .card {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 18px;
-    box-shadow: 0 8px 28px rgba(11, 19, 43, 0.06);
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(11, 19, 43, 0.05);
     overflow: hidden;
   }
   .card-body {
@@ -112,9 +127,10 @@
   .btn {
     border: 0;
     border-radius: 10px;
-    padding: 12px 18px;
+    padding: 10px 16px;
     cursor: pointer;
-    font-weight: 700;
+    font-weight: 600;
+    font-size: 14px;
     display: inline-flex;
     gap: 8px;
     align-items: center;
@@ -139,12 +155,12 @@
   }
   .status-pill {
     display: inline-flex;
-    padding: 5px 10px;
+    padding: 4px 10px;
     border-radius: 999px;
     background: #eef3f7;
     border: 1px solid var(--border);
     font-size: 11px;
-    font-weight: 900;
+    font-weight: 700;
   }
   .portal-grid {
     display: grid;
@@ -171,10 +187,11 @@
     background: transparent;
     color: #dbe4ef;
     text-align: left;
-    padding: 11px 12px;
+    padding: 10px 12px;
     border-radius: 9px;
     cursor: pointer;
-    font-weight: 800;
+    font-weight: 600;
+    font-size: 13px;
     display: flex;
     align-items: center;
     gap: 6px;
