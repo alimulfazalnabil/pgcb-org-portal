@@ -26,7 +26,6 @@ from app.models import (
     Document,
     Event,
     EventRegistration,
-    JournalIssue,
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeFAQ,
