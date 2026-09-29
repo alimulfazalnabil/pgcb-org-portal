@@ -30,47 +30,39 @@ EMBEDDING_DIM = 64
 # Domain concept expansion for bilingual semantic matching (English <-> Bangla + synonyms)
 SEMANTIC_SYNONYM_GROUPS: list[set[str]] = [
     {
-        'renew', 'renewal', 'renewing', 'extend', 'validity', 'expire', 'expiry', 'annual', 'expired',
-        'নবায়ন', 'নবায়ন', 'মেয়াদ', 'মেয়াদ', 'বার্ষিক', 'নবায়নের', 'নবায়নের', 'মেয়াদোত্তীর্ণ',
+        'renew', 'renewal', 'renewing', 'extend', 'validity', 'expire', 'expiry', 'annual',
+        'নবায়ন', 'নবায়ন', 'মেয়াদ', 'মেয়াদ', 'বার্ষিক',
     },
     {
-        'fee', 'fees', 'pay', 'payment', 'cost', 'price', 'amount', 'charge', 'bdt', 'taka', 'subscription',
-        'ফি', 'চাঁদা', 'টাকা', 'পেমেন্ট', 'কত', 'খরচ', 'রসিদ', 'receipt',
+        'fee', 'fees', 'pay', 'payment', 'cost', 'price', 'amount', 'charge', 'bdt', 'taka',
+        'ফি', 'চাঁদা', 'টাকা', 'পেমেন্ট', 'কত',
     },
     {
-        'member', 'membership', 'join', 'apply', 'application', 'register', 'registration', 'eligibility', 'eligible', 'require', 'required', 'requirement', 'documents',
-        'সদস্য', 'সদস্যপদ', 'আবেদন', 'নিবন্ধন', 'যোগ্যতা', 'লাগবে', 'লাগে', 'প্রয়োজন', 'প্রয়োজন', 'নিতে',
+        'member', 'membership', 'join', 'apply', 'application', 'register', 'registration', 'eligibility',
+        'সদস্য', 'সদস্যপদ', 'আবেদন', 'নিবন্ধন', 'যোগ্যতা',
     },
     {
-        'constitution', 'rule', 'rules', 'regulation', 'regulations', 'bylaw', 'guideline', 'guidelines', 'policy',
+        'constitution', 'rule', 'rules', 'regulation', 'regulations', 'bylaw', 'guideline', 'guidelines',
         'গঠনতন্ত্র', 'বিধিমালা', 'নীতিমালা', 'নিয়মাবলী', 'নিয়মাবলী', 'নির্দেশিকা',
     },
     {
-        'certificate', 'certificates', 'card', 'id', 'verify', 'verification', 'qr', 'digital',
-        'সনদ', 'সনদপত্র', 'পরিচয়পত্র', 'পরিচয়পত্র', 'আইডি', 'যাচাই', 'ডিজিটাল',
+        'certificate', 'card', 'id', 'verify', 'verification', 'qr', 'digital',
+        'সনদ', 'পরিচয়পত্র', 'পরিচয়পত্র', 'আইডি', 'যাচাই', 'ডিজিটাল',
     },
     {
-        'circle', 'circles', 'grid', 'dhaka', 'chattogram', 'division', 'regional', 'branch', 'committee',
-        'সার্কেল', 'গ্রিড', 'ঢাকা', 'চট্টগ্রাম', 'কক্সবাজার', 'সিলেট', 'রাজশাহী', 'খুলনা', 'বরিশাল', 'রংপুর', 'ময়মনসিংহ', 'কুমিল্লা', 'বগুড়া', 'শাখা', 'কমিটি',
+        'circle', 'circles', 'grid', 'dhaka', 'chattogram', 'division', 'regional',
+        'সার্কেল', 'গ্রিড', 'ঢাকা', 'চট্টগ্রাম', 'বিভাগ',
     },
     {
-        'welfare', 'benefit', 'benefits', 'fund', 'support', 'voting', 'vote', 'grant', 'medical',
-        'কল্যাণ', 'তহবিল', 'সুবিধা', 'ভোটাধিকার', 'অনুদান', 'চিকিৎসা',
-    },
-    {
-        'circular', 'circulars', 'notice', 'notices', 'order', 'memo', 'latest', 'new', 'recent',
-        'সার্কুলার', 'নোটিশ', 'বিজ্ঞপ্তি', 'স্মারক', 'আদেশ', 'নতুন', 'সর্বশেষ',
-    },
-    {
-        'event', 'events', 'agm', 'meeting', 'seminar', 'conference', 'journal', 'publication',
-        'ইভেন্ট', 'সভা', 'সেমিনার', 'সম্মেলন', 'জার্নাল', 'প্রকাশনা',
+        'welfare', 'benefit', 'benefits', 'fund', 'support', 'voting', 'vote',
+        'কল্যাণ', 'তহবিল', 'সুবিধা', 'ভোটাধিকার',
     },
 ]
 
 STOPWORDS = {
     'the', 'is', 'are', 'a', 'an', 'to', 'for', 'of', 'in', 'on', 'and', 'or', 'how', 'do', 'i',
     'need', 'much', 'my', 'what', 'can', 'from', 'with', 'by', 'at', 'be', 'this', 'that', 'it',
-    'কিভাবে', 'কীভাবে', 'কী', 'কি', 'জন্য', 'করতে', 'চাই', 'করব', 'হলে', 'কোন', 'কোনটা', 'দাও', 'দেখাও',
+    'কিভাবে', 'কীভাবে', 'কী', 'কি', 'জন্য', 'করতে', 'চাই', 'করব', 'হলে',
 }
 
 

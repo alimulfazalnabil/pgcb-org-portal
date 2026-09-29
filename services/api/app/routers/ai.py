@@ -730,10 +730,18 @@ def _execute_member_tools(
             if (member and member.validity_date)
             else 'Lifetime / N/A'
         )
-        name_en = (member.name_en if member and member.name_en else user.name_en) or user.name_bn
-        name_bn = (member.name_bn if member and member.name_bn else user.name_bn) or name_en
-        desig_en = (member.designation_en if member and member.designation_en else None) or 'Diploma Engineer'
-        desig_bn = (member.designation_bn if member and member.designation_bn else None) or 'ডিপ্লোমা প্রকৌশলী'
+        name_en = (getattr(member, 'name_en', None) if member else None) or user.name_en or user.name_bn
+        name_bn = (getattr(member, 'name_bn', None) if member else None) or user.name_bn or name_en
+        desig_en = (
+            (getattr(member, 'designation', None) or getattr(member, 'designation_en', None))
+            if member
+            else None
+        ) or 'Diploma Engineer'
+        desig_bn = (
+            (getattr(member, 'designation_bn', None) or getattr(member, 'designation', None))
+            if member
+            else None
+        ) or 'ডিপ্লোমা প্রকৌশলী'
 
         profile_payload = {
             'name': name_en,
@@ -1005,8 +1013,8 @@ def _execute_member_tools(
             )
         app_status = (app_row.status if app_row else (member.status if member else 'NONE'))
         app_no = (
-            (app_row.application_no if app_row else None)
-            or (member.application_no if member else None)
+            (getattr(app_row, 'application_no', None) if app_row else None)
+            or (getattr(member, 'application_no', None) if member else None)
             or 'N/A'
         )
         app_payload = {'application_status': app_status, 'application_no': app_no}
