@@ -72,6 +72,12 @@
     font-family: 'Inter', 'Noto Sans Bengali', system-ui, -apple-system, sans-serif;
     line-height: 1.55;
   }
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
 }
 
 /* Subtle Hover Transitions & Utilities */

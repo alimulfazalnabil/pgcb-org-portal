@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Calendar, Download, FileText, Hash } from 'lucide-react';
+import { useLanguage } from '@/lib/i18n';
 
 export default function CircularDetail() {
+  const { language, t, pick, formatDate } = useLanguage();
   const params = useParams();
   const id = String(params?.id || '');
   const [item, setItem] = useState<any>(null);
@@ -30,7 +32,7 @@ export default function CircularDetail() {
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="text-center space-y-3">
           <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs text-secondary font-medium">সার্কুলার লোড হচ্ছে...</p>
+          <p className="text-xs text-secondary font-medium">{t('সার্কুলার লোড হচ্ছে...', 'Loading circular...')}</p>
         </div>
       </div>
     );
@@ -41,13 +43,17 @@ export default function CircularDetail() {
       <div className="max-w-3xl mx-auto px-4 py-16">
         <div className="bg-background rounded-2xl border border-border p-10 text-center space-y-4 shadow-sm">
           <FileText size={40} className="mx-auto text-secondary/50" />
-          <h1 className="text-2xl font-extrabold text-primary dark:text-white">সার্কুলার পাওয়া যায়নি</h1>
-          <p className="text-sm text-secondary">{error || 'অনুরোধকৃত সার্কুলারটি বিদ্যমান নেই।'}</p>
+          <h1 className="text-2xl font-extrabold text-primary dark:text-white">
+            {t('সার্কুলার পাওয়া যায়নি', 'Circular Not Found')}
+          </h1>
+          <p className="text-sm text-secondary">
+            {error || t('অনুরোধকৃত সার্কুলারটি বিদ্যমান নেই।', 'The requested circular does not exist.')}
+          </p>
           <Link
             href="/circulars"
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-white text-xs font-bold hover:opacity-90 transition-all"
           >
-            <ArrowLeft size={14} /> সকল সার্কুলারে ফিরুন
+            <ArrowLeft size={14} /> {t('সকল সার্কুলারে ফিরুন', 'Back to All Circulars')}
           </Link>
         </div>
       </div>
@@ -55,13 +61,13 @@ export default function CircularDetail() {
   }
 
   return (
-    <div className="min-h-screen bg-surface/30 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-surface/30 py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto space-y-6">
         <Link
           href="/circulars"
           className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline"
         >
-          <ArrowLeft size={14} /> সকল সার্কুলার ও অফিস আদেশ
+          <ArrowLeft size={14} /> {t('সকল সার্কুলার ও অফিস আদেশ', 'All Circulars & Office Orders')}
         </Link>
 
         <article className="bg-background rounded-3xl border border-border p-6 sm:p-10 shadow-sm space-y-6">
@@ -71,27 +77,31 @@ export default function CircularDetail() {
             </span>
             {item.published_at && (
               <span className="text-xs text-secondary inline-flex items-center gap-1">
-                <Calendar size={13} /> {new Date(item.published_at).toLocaleDateString('bn-BD')}
+                <Calendar size={13} /> {formatDate(item.published_at)}
               </span>
             )}
             {item.reference_no && (
               <span className="text-xs font-mono text-secondary bg-surface px-2.5 py-1 rounded-lg border border-border inline-flex items-center gap-1">
-                <Hash size={12} /> রেফারেন্স: {item.reference_no}
+                <Hash size={12} /> {t('রেফারেন্স:', 'Ref:')} {item.reference_no}
               </span>
             )}
           </div>
 
           <div className="space-y-2">
             <h1 className="text-2xl sm:text-3xl font-extrabold text-primary dark:text-white leading-snug">
-              {item.title_bn}
+              {pick(item, 'title', item.title_bn)}
             </h1>
-            {item.title_en && (
+            {language === 'bn' && item.title_en && (
               <p className="text-sm sm:text-base text-secondary italic">{item.title_en}</p>
             )}
           </div>
 
           <div className="text-sm sm:text-base text-foreground leading-relaxed whitespace-pre-wrap pt-2">
-            {item.summary_bn || item.content_bn || 'এই সার্কুলারের জন্য বিস্তারিত বিবরণ প্রকাশিত হয়নি।'}
+            {pick(
+              item,
+              'summary',
+              item.summary_bn || item.content_bn || t('এই সার্কুলারের জন্য বিস্তারিত বিবরণ প্রকাশিত হয়নি।', 'Detailed description has not been published for this circular.')
+            )}
           </div>
 
           <div className="pt-6 border-t border-border/60 flex flex-wrap items-center justify-between gap-4">
@@ -102,11 +112,11 @@ export default function CircularDetail() {
                 rel="noreferrer"
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold shadow-sm transition-all"
               >
-                <Download size={15} /> অফিসিয়াল নথি ডাউনলোড করুন (PDF)
+                <Download size={15} /> {t('অফিসিয়াল নথি ডাউনলোড করুন (PDF)', 'Download Official Document (PDF)')}
               </a>
             ) : (
               <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-surface border border-border text-xs font-semibold text-secondary">
-                <FileText size={14} /> আলাদা পিডিএফ সংযুক্তি নেই
+                <FileText size={14} /> {t('আলাদা পিডিএফ সংযুক্তি নেই', 'No separate PDF attachment')}
               </span>
             )}
           </div>

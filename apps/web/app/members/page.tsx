@@ -49,7 +49,7 @@ export default function PublicMembersPage() {
     <div className="max-w-7xl mx-auto px-6 py-10 min-h-screen">
       {/* Page Header */}
       <div className="border-b border-slate-200 pb-6 mb-8">
-        <h1 className="text-3xl font-bold text-slate-900 mb-2">
+        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
           {t('সদস্য প্রকৌশলী ডিরেক্টরি', 'Member Engineer Directory')}
         </h1>
         <p className="text-slate-600 text-sm md:text-base">

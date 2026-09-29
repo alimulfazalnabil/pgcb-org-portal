@@ -1,22 +1,19 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { 
-  ShieldCheck, 
-  Search, 
-  AlertCircle, 
-  CheckCircle2, 
-  XCircle, 
-  Lock, 
-  QrCode, 
-  Building2, 
-  Calendar, 
-  User, 
+import {
+  ShieldCheck,
+  Search,
+  CheckCircle2,
+  XCircle,
+  Lock,
+  Building2,
+  Calendar,
+  User,
   Award,
   RefreshCw,
-  ExternalLink
 } from 'lucide-react';
+import { useLanguage } from '@/lib/i18n';
 
 interface VerificationData {
   verified: boolean;
@@ -25,7 +22,9 @@ interface VerificationData {
   membership_id: string;
   employee_id?: string | null;
   designation_bn?: string | null;
+  designation_en?: string | null;
   circle_bn?: string | null;
+  circle_en?: string | null;
   status: string;
   validity_date?: string | null;
   verified_at?: string | null;
@@ -33,6 +32,7 @@ interface VerificationData {
 }
 
 export default function VerifyPage() {
+  const { language, t, pick } = useLanguage();
   const [queryId, setQueryId] = useState('');
   const [result, setResult] = useState<VerificationData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -41,7 +41,7 @@ export default function VerifyPage() {
   async function performLookup(value: string = queryId) {
     const trimmed = value.trim();
     if (!trimmed) return;
-    
+
     setLoading(true);
     setResult(null);
 
@@ -60,20 +60,28 @@ export default function VerifyPage() {
       } else {
         const err = await res.json().catch(() => ({}));
         setResult({
-          error: err.detail || 'কোনো অনুমোদিত রেকর্ড পাওয়া যায়নি বা যাচাইকরণ টোকেনটি অবৈধ।',
+          error:
+            err.detail ||
+            t(
+              'কোনো অনুমোদিত রেকর্ড পাওয়া যায়নি বা যাচাইকরণ টোকেনটি অবৈধ।',
+              'No verified record found or the verification token is invalid.'
+            ),
           verified: false,
           name_bn: '',
           membership_id: trimmed,
-          status: 'NOT_FOUND'
+          status: 'NOT_FOUND',
         });
       }
     } catch (e) {
       setResult({
-        error: 'কেন্দ্রীয় ডেটাবেস সার্ভারের সাথে যোগাযোগ স্থাপন করা সম্ভব হয়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।',
+        error: t(
+          'কেন্দ্রীয় ডেটাবেস সার্ভারের সাথে যোগাযোগ স্থাপন করা সম্ভব হয়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।',
+          'Could not connect to the central database server. Please try again.'
+        ),
         verified: false,
         name_bn: '',
         membership_id: trimmed,
-        status: 'SERVER_ERROR'
+        status: 'SERVER_ERROR',
       });
     } finally {
       setLoading(false);
@@ -97,7 +105,7 @@ export default function VerifyPage() {
     if (verified && status === 'ACTIVE') {
       return (
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-500/30">
-          <CheckCircle2 size={14} className="text-emerald-600" /> সক্রিয় সদস্য (ACTIVE)
+          <CheckCircle2 size={14} className="text-emerald-600" /> {t('সক্রিয় সদস্য (ACTIVE)', 'Active Member (ACTIVE)')}
         </span>
       );
     }
@@ -105,51 +113,53 @@ export default function VerifyPage() {
       case 'UNDER_REVIEW':
         return (
           <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-500/30">
-            পর্যালোচনাধীন (UNDER REVIEW)
+            {t('পর্যালোচনাধীন (UNDER REVIEW)', 'Under Review')}
           </span>
         );
       case 'SUBMITTED':
       case 'PENDING':
         return (
           <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-500/30">
-            আবেদন জমা (SUBMITTED)
+            {t('আবেদন জমা (SUBMITTED)', 'Application Submitted')}
           </span>
         );
       case 'SUSPENDED':
         return (
           <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-500/30">
-            স্থগিত (SUSPENDED)
+            {t('স্থগিত (SUSPENDED)', 'Suspended')}
           </span>
         );
       default:
         return (
           <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-500/30">
-            অননুমোদিত (INACTIVE / REJECTED)
+            {t('অননুমোদিত (INACTIVE / REJECTED)', 'Inactive / Rejected')}
           </span>
         );
     }
   };
 
   return (
-    <div className="min-h-screen bg-surface/30 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-surface/30 py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto space-y-8">
-        
         {/* Institutional Header */}
         <div className="text-center space-y-3">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary dark:text-accent text-xs font-bold uppercase tracking-wider">
             <ShieldCheck size={16} /> NATIONAL VERIFICATION SYSTEM
           </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-primary dark:text-white tracking-tight">
-            অফিসিয়াল সদস্য কার্ড ও ডিজিটাল সনদ যাচাই
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-primary dark:text-white tracking-tight">
+            {t('অফিসিয়াল সদস্য কার্ড ও ডিজিটাল সনদ যাচাই', 'Official Member Card & Digital Certificate Verification')}
           </h1>
           <p className="text-sm sm:text-base text-secondary max-w-2xl mx-auto">
-            পাওয়ার গ্রিড ডিপ্লোমা প্রকৌশলী সমিতির অফিসিয়াল পরিচয়পত্র নম্বর অথবা ডিজিটাল কার্ডের কিউআর কোড টোকেন যাচাই করুন।
+            {t(
+              'পাওয়ার গ্রিড ডিপ্লোমা প্রকৌশলী সমিতির অফিসিয়াল পরিচয়পত্র নম্বর অথবা ডিজিটাল কার্ডের কিউআর কোড টোকেন যাচাই করুন।',
+              'Verify an official membership ID number or QR code token of the Power Grid Diploma Engineers Association.'
+            )}
           </p>
         </div>
 
         {/* Verification Search Box */}
         <div className="bg-background rounded-2xl shadow-xl border border-border p-6 sm:p-8 space-y-4">
-          <form 
+          <form
             onSubmit={(e) => {
               e.preventDefault();
               performLookup();
@@ -160,12 +170,12 @@ export default function VerifyPage() {
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-secondary">
                 <Search size={18} />
               </div>
-              <input 
+              <input
                 type="text"
                 required
                 value={queryId}
                 onChange={(e) => setQueryId(e.target.value)}
-                placeholder="সদস্য আইডি (যেমন: PGD-2026-1001) বা QR টোকেন লিখুন"
+                placeholder={t('সদস্য আইডি (যেমন: PGD-2026-1001) বা QR টোকেন লিখুন', 'Enter Member ID (e.g., PGD-2026-1001) or QR token')}
                 className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-surface text-primary dark:text-white placeholder:text-secondary/60 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm sm:text-base"
               />
             </div>
@@ -176,11 +186,11 @@ export default function VerifyPage() {
             >
               {loading ? (
                 <>
-                  <RefreshCw size={18} className="animate-spin" /> যাচাই হচ্ছে...
+                  <RefreshCw size={18} className="animate-spin" /> {t('যাচাই হচ্ছে...', 'Verifying...')}
                 </>
               ) : (
                 <>
-                  <ShieldCheck size={18} /> আইডি যাচাই করুন
+                  <ShieldCheck size={18} /> {t('আইডি যাচাই করুন', 'Verify ID')}
                 </>
               )}
             </button>
@@ -190,11 +200,11 @@ export default function VerifyPage() {
           <div className="flex items-center justify-between text-xs text-secondary flex-wrap gap-2 pt-1 border-t border-border/50">
             <div className="flex items-center gap-1.5">
               <Lock size={13} className="text-success" />
-              <span>ক্রিপ্টোগ্রাফিক HMAC-SHA256 দ্বারা সুরক্ষিত</span>
+              <span>{t('ক্রিপ্টোগ্রাফিক HMAC-SHA256 দ্বারা সুরক্ষিত', 'Secured by cryptographic HMAC-SHA256')}</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-secondary/70">নমুনা আইডি:</span>
-              <button 
+              <span className="text-secondary/70">{t('নমুনা আইডি:', 'Sample ID:')}</span>
+              <button
                 type="button"
                 onClick={() => {
                   setQueryId('PGD-2026-1001');
@@ -220,7 +230,7 @@ export default function VerifyPage() {
                   </div>
                   <div className="space-y-1">
                     <h2 className="text-xl font-bold text-rose-800 dark:text-rose-300">
-                      যাচাইকরণ ব্যর্থ হয়েছে
+                      {t('যাচাইকরণ ব্যর্থ হয়েছে', 'Verification Failed')}
                     </h2>
                     <p className="text-sm text-rose-700 dark:text-rose-400">
                       {result.error}
@@ -229,11 +239,28 @@ export default function VerifyPage() {
                 </div>
 
                 <div className="bg-background/80 rounded-xl p-4 border border-rose-500/20 text-xs text-secondary space-y-2">
-                  <p className="font-bold text-primary dark:text-white">সম্ভাব্য কারণ ও পরামর্শ:</p>
+                  <p className="font-bold text-primary dark:text-white">
+                    {t('সম্ভাব্য কারণ ও পরামর্শ:', 'Possible Reasons & Recommendations:')}
+                  </p>
                   <ul className="list-disc list-inside space-y-1">
-                    <li>প্রদত্ত সদস্য আইডি নম্বরে কোনো টাইপিং ভুল হতে পারে (নমুনা ফরম্যাট: PGD-2026-1001)।</li>
-                    <li>কিউআর কোড টোকেনটি পরিবর্তিত বা ডিজিটাল স্বাক্ষরটি মেয়াদোত্তীর্ণ হতে পারে।</li>
-                    <li>আবেদনটি এখনও অনুমোদিত হয়নি অথবা প্রশাসনিক পর্যালোচনায় রয়েছে।</li>
+                    <li>
+                      {t(
+                        'প্রদত্ত সদস্য আইডি নম্বরে কোনো টাইপিং ভুল হতে পারে (নমুনা ফরম্যাট: PGD-2026-1001)।',
+                        'There may be a typo in the entered Member ID (sample format: PGD-2026-1001).'
+                      )}
+                    </li>
+                    <li>
+                      {t(
+                        'কিউআর কোড টোকেনটি পরিবর্তিত বা ডিজিটাল স্বাক্ষরটি মেয়াদোত্তীর্ণ হতে পারে।',
+                        'The QR code token may have been altered or the digital signature has expired.'
+                      )}
+                    </li>
+                    <li>
+                      {t(
+                        'আবেদনটি এখনও অনুমোদিত হয়নি অথবা প্রশাসনিক পর্যালোচনায় রয়েছে।',
+                        'The application has not yet been approved or is currently under administrative review.'
+                      )}
+                    </li>
                   </ul>
                 </div>
               </div>
@@ -251,7 +278,7 @@ export default function VerifyPage() {
                         OFFICIAL VERIFIED CREDENTIAL
                       </span>
                       <h2 className="text-xl sm:text-2xl font-black">
-                        বৈধ ও অনুমোদিত সদস্য
+                        {t('বৈধ ও অনুমোদিত সদস্য', 'Valid & Verified Member')}
                       </h2>
                     </div>
                   </div>
@@ -265,19 +292,23 @@ export default function VerifyPage() {
                   {/* Name and Monospace ID */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-border">
                     <div>
-                      <span className="text-xs font-bold text-secondary uppercase">সদস্যের নাম</span>
-                      <h3 className="text-2xl sm:text-3xl font-extrabold text-primary dark:text-white mt-0.5">
-                        {result.name_bn}
+                      <span className="text-xs font-bold text-secondary uppercase">
+                        {t('সদস্যের নাম', 'Member Name')}
+                      </span>
+                      <h3 className="text-xl sm:text-2xl font-extrabold text-primary dark:text-white mt-0.5">
+                        {pick(result as any, 'name', result.name_bn)}
                       </h3>
-                      {result.name_en && (
-                        <p className="text-base font-medium text-secondary mt-0.5">
+                      {language === 'bn' && result.name_en && (
+                        <p className="text-sm font-medium text-secondary mt-0.5">
                           {result.name_en}
                         </p>
                       )}
                     </div>
                     <div className="bg-surface rounded-xl p-3.5 border border-border sm:text-right">
-                      <span className="text-xs text-secondary font-semibold uppercase">সদস্যতা নম্বর (Member ID)</span>
-                      <div className="text-xl sm:text-2xl font-mono font-black text-primary dark:text-accent mt-0.5">
+                      <span className="text-xs text-secondary font-semibold uppercase">
+                        {t('সদস্যতা নম্বর (Member ID)', 'Member ID')}
+                      </span>
+                      <div className="text-lg sm:text-xl font-mono font-black text-primary dark:text-accent mt-0.5">
                         {result.membership_id}
                       </div>
                     </div>
@@ -287,19 +318,19 @@ export default function VerifyPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
                     <div className="p-4 rounded-xl bg-surface border border-border space-y-1">
                       <div className="flex items-center gap-2 text-secondary text-xs font-semibold">
-                        <Award size={15} className="text-primary" /> পদবী (Designation)
+                        <Award size={15} className="text-primary" /> {t('পদবী (Designation)', 'Designation')}
                       </div>
                       <p className="font-bold text-primary dark:text-white text-base">
-                        {result.designation_bn || '—'}
+                        {pick(result as any, 'designation', result.designation_bn || '—')}
                       </p>
                     </div>
 
                     <div className="p-4 rounded-xl bg-surface border border-border space-y-1">
                       <div className="flex items-center gap-2 text-secondary text-xs font-semibold">
-                        <Building2 size={15} className="text-primary" /> গ্রিড সার্কেল (Grid Circle)
+                        <Building2 size={15} className="text-primary" /> {t('গ্রিড সার্কেল (Grid Circle)', 'Grid Circle')}
                       </div>
                       <p className="font-bold text-primary dark:text-white text-base">
-                        {result.circle_bn || 'কেন্দ্রীয় সচিবালয়'}
+                        {pick(result as any, 'circle', result.circle_bn || t('কেন্দ্রীয় সচিবালয়', 'Central Secretariat'))}
                       </p>
                     </div>
 
@@ -314,7 +345,7 @@ export default function VerifyPage() {
 
                     <div className="p-4 rounded-xl bg-surface border border-border space-y-1">
                       <div className="flex items-center gap-2 text-secondary text-xs font-semibold">
-                        <Calendar size={15} className="text-primary" /> কার্ডের মেয়াদকাল (Validity)
+                        <Calendar size={15} className="text-primary" /> {t('কার্ডের মেয়াদকাল (Validity)', 'Validity')}
                       </div>
                       <p className="font-bold text-primary dark:text-white text-base">
                         {result.validity_date || '31-12-2027'}
@@ -323,7 +354,7 @@ export default function VerifyPage() {
 
                     <div className="p-4 rounded-xl bg-surface border border-border space-y-1">
                       <div className="flex items-center gap-2 text-secondary text-xs font-semibold">
-                        <Lock size={15} className="text-primary" /> যাচাই পদ্ধতি (Method)
+                        <Lock size={15} className="text-primary" /> {t('যাচাই পদ্ধতি (Method)', 'Verification Method')}
                       </div>
                       <p className="font-semibold text-primary dark:text-white text-sm">
                         {isTokenScan ? 'HMAC-SHA256 Signed QR' : 'Direct Database Verification'}
@@ -332,7 +363,7 @@ export default function VerifyPage() {
 
                     <div className="p-4 rounded-xl bg-surface border border-border space-y-1">
                       <div className="flex items-center gap-2 text-secondary text-xs font-semibold">
-                        <CheckCircle2 size={15} className="text-success" /> যাচাই সময় (Timestamp)
+                        <CheckCircle2 size={15} className="text-success" /> {t('যাচাই সময় (Timestamp)', 'Verified At')}
                       </div>
                       <p className="font-mono text-primary dark:text-white text-xs">
                         {result.verified_at || new Date().toISOString()}
@@ -344,7 +375,13 @@ export default function VerifyPage() {
                   <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 flex items-start gap-3">
                     <ShieldCheck size={20} className="text-primary flex-shrink-0 mt-0.5" />
                     <p className="text-xs text-secondary leading-relaxed">
-                      <strong className="text-primary dark:text-white font-bold">প্রাতিষ্ঠানিক স্বীকৃতি:</strong> এই ডিজিটাল পরিচয়পত্রটি পাওয়ার গ্রিড কোম্পানি অব বাংলাদেশ লিমিটেড-এর ডিপ্লোমা প্রকৌশলী সমিতি (আইডিইবি অধিভুক্ত) কেন্দ্রীয় সচিবালয় দ্বারা অনুমোদিত। এই পরিচয়পত্রের কোনো তথ্যের অমিল পাওয়া গেলে সরাসরি কেন্দ্রীয় রেজিস্ট্রারের সাথে যোগাযোগ করুন।
+                      <strong className="text-primary dark:text-white font-bold">
+                        {t('প্রাতিষ্ঠানিক স্বীকৃতি:', 'Institutional Authenticity:')}
+                      </strong>{' '}
+                      {t(
+                        'এই ডিজিটাল পরিচয়পত্রটি পাওয়ার গ্রিড কোম্পানি অব বাংলাদেশ লিমিটেড-এর ডিপ্লোমা প্রকৌশলী সমিতি (আইডিইবি অধিভুক্ত) কেন্দ্রীয় সচিবালয় দ্বারা অনুমোদিত। এই পরিচয়পত্রের কোনো তথ্যের অমিল পাওয়া গেলে সরাসরি কেন্দ্রীয় রেজিস্ট্রারের সাথে যোগাযোগ করুন।',
+                        'This digital credential is authorized by the Central Secretariat of the Diploma Engineers Association of Power Grid Company of Bangladesh PLC (IDEB affiliated). Please contact the Central Registrar if any discrepancy is found.'
+                      )}
                     </p>
                   </div>
                 </div>
@@ -356,11 +393,14 @@ export default function VerifyPage() {
         {/* How It Works Explainer Grid */}
         <div className="pt-8 border-t border-border space-y-6">
           <div className="text-center">
-            <h3 className="text-xl font-bold text-primary dark:text-white">
-              ডিজিটাল যাচাইকরণ প্রক্রিয়া
+            <h3 className="text-lg sm:text-xl font-bold text-primary dark:text-white">
+              {t('ডিজিটাল যাচাইকরণ প্রক্রিয়া', 'Digital Verification Process')}
             </h3>
             <p className="text-xs text-secondary mt-1">
-              স্বচ্ছতা ও প্রাতিষ্ঠানিক নিরাপত্তা বজায় রাখতে তিন স্তরের ক্রিপ্টোগ্রাফিক সুরক্ষা ব্যবস্থা
+              {t(
+                'স্বচ্ছতা ও প্রাতিষ্ঠানিক নিরাপত্তা বজায় রাখতে তিন স্তরের ক্রিপ্টোগ্রাফিক সুরক্ষা ব্যবস্থা',
+                'Three-tier cryptographic security architecture to ensure institutional integrity and transparency'
+              )}
             </p>
           </div>
 
@@ -369,9 +409,14 @@ export default function VerifyPage() {
               <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold">
                 1
               </div>
-              <h4 className="font-bold text-sm text-primary dark:text-white">আইডি বা কিউআর স্ক্যান</h4>
+              <h4 className="font-bold text-sm text-primary dark:text-white">
+                {t('আইডি বা কিউআর স্ক্যান', 'ID or QR Scan')}
+              </h4>
               <p className="text-xs text-secondary leading-relaxed">
-                সদস্যের ফিজিক্যাল পরিচয়পত্র বা ডিজিটাল কার্ডের কিউআর কোড স্ক্যান করে এই লিংকে প্রবেশ করুন।
+                {t(
+                  'সদস্যের ফিজিক্যাল পরিচয়পত্র বা ডিজিটাল কার্ডের কিউআর কোড স্ক্যান করে এই লিংকে প্রবেশ করুন।',
+                  'Scan the QR code on the physical or digital membership card or enter the Member ID.'
+                )}
               </p>
             </div>
 
@@ -379,9 +424,14 @@ export default function VerifyPage() {
               <div className="w-9 h-9 rounded-lg bg-accent/20 text-accent flex items-center justify-center font-bold">
                 2
               </div>
-              <h4 className="font-bold text-sm text-primary dark:text-white">স্বাক্ষর প্রমাণীকরণ</h4>
+              <h4 className="font-bold text-sm text-primary dark:text-white">
+                {t('স্বাক্ষর প্রমাণীকরণ', 'Signature Authentication')}
+              </h4>
               <p className="text-xs text-secondary leading-relaxed">
-                টোকেনের ভেতর থাকা HMAC ক্রিপ্টোগ্রাফিক ডিজিটাল হ্যাশ সার্ভারের গোপন চাবির সাথে মেলানো হয়।
+                {t(
+                  'টোকেনের ভেতর থাকা HMAC ক্রিপ্টোগ্রাফিক ডিজিটাল হ্যাশ সার্ভারের গোপন চাবির সাথে মেলানো হয়।',
+                  'The embedded HMAC cryptographic digital hash is verified against the server key.'
+                )}
               </p>
             </div>
 
@@ -389,14 +439,18 @@ export default function VerifyPage() {
               <div className="w-9 h-9 rounded-lg bg-success/20 text-success flex items-center justify-center font-bold">
                 3
               </div>
-              <h4 className="font-bold text-sm text-primary dark:text-white">লাইভ প্রাতিষ্ঠানিক সনদ</h4>
+              <h4 className="font-bold text-sm text-primary dark:text-white">
+                {t('লাইভ প্রাতিষ্ঠানিক সনদ', 'Live Institutional Status')}
+              </h4>
               <p className="text-xs text-secondary leading-relaxed">
-                লাইভ ডেটাবেস থেকে সদস্যের নাম, সার্কেল, মেয়াদ ও সক্রিয় স্ট্যাটাস রিয়েল-টাইমে প্রদর্শিত হয়।
+                {t(
+                  'লাইভ ডেটাবেস থেকে সদস্যের নাম, সার্কেল, মেয়াদ ও সক্রিয় স্ট্যাটাস রিয়েল-টাইমে প্রদর্শিত হয়।',
+                  'Member name, grid circle, validity, and active membership status are fetched in real time.'
+                )}
               </p>
             </div>
           </div>
         </div>
-
       </div>
     </div>
   );

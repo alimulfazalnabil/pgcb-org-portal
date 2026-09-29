@@ -33,6 +33,7 @@ export interface DocumentItem {
   title_en?: string;
   category: string;
   description_bn?: string;
+  description_en?: string;
   file_path: string;
   file_size?: number;
   content_type?: string;
@@ -58,6 +59,7 @@ export interface CircleItem {
   name_en: string;
   slug?: string;
   description_bn?: string;
+  description_en?: string;
   active_members?: number;
 }
 
@@ -68,6 +70,7 @@ export interface CommitteeItem {
   designation_bn: string;
   designation_en?: string;
   message_bn?: string;
+  message_en?: string;
   photo_url?: string;
   term_start?: number;
   term_end?: number;
@@ -80,6 +83,7 @@ export interface CircularItem {
   title_bn: string;
   title_en?: string;
   summary_bn?: string;
+  summary_en?: string;
   document_url?: string;
   published_at?: string;
   priority: number;
@@ -90,8 +94,10 @@ export interface EventItem {
   title_bn: string;
   title_en?: string;
   description_bn?: string;
+  description_en?: string;
   event_date?: string;
   location_bn?: string;
+  location_en?: string;
   cover_image_url?: string;
   registration_enabled: boolean;
   capacity?: number;
