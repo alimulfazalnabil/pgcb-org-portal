@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     password_reset_hours: int = 2
     email_verification_hours: int = 24
     require_email_verification: bool = False
-    max_upload_mb: int = 10
+    max_upload_mb: int = 5
     storage_backend: str = 'local'
     storage_root: str = './storage'
     mfa_encryption_key: str | None = None
