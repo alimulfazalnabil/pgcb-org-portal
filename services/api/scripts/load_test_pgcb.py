@@ -216,6 +216,61 @@ def run_realistic_db_benchmark(scale: float = 1.0) -> dict[str, Any]:
                 for i in range(1, n_audits + 1)
             ]
             cur.executemany('INSERT INTO audit_logs VALUES (?, ?, ?, ?, ?)', audit_rows)
+                CREATE TABLE membership_applications (
+                    id INTEGER PRIMARY KEY,
+                    member_id INTEGER NOT NULL,
+                    application_no TEXT UNIQUE NOT NULL,
+                    circle_id INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE memberships (
+                    id INTEGER PRIMARY KEY,
+                    member_id INTEGER NOT NULL,
+                    membership_id TEXT UNIQUE NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE payments (
+                    id INTEGER PRIMARY KEY,
+                    member_id INTEGER NOT NULL,
+                    transaction_id TEXT UNIQUE NOT NULL,
+                    amount INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX ix_membership_apps_status ON membership_applications(status);
+                CREATE INDEX ix_membership_apps_circle ON membership_applications(circle_id);
+                CREATE UNIQUE INDEX ix_memberships_mid ON memberships(membership_id);
+                CREATE UNIQUE INDEX ix_payments_canonical_tx ON payments(transaction_id);
+                """
+            )
+
+            apps_rows = [
+                (
+                    i,
+                    i,
+                    f'PGCB-APP-2026-{i:05d}',
+                    ((i - 1) % 9) + 1,
+                    'SUBMITTED' if i % 3 == 0 else ('UNDER_REVIEW' if i % 3 == 1 else 'PAYMENT_PENDING'),
+                    now_iso,
+                )
+                for i in range(1, n_apps + 1)
+            ]
+            cur.executemany('INSERT INTO membership_applications VALUES (?, ?, ?, ?, ?, ?)', apps_rows)
+
+            canonical_payments_rows = [
+                (
+                    i,
+                    ((i - 1) % n_members) + 1,
+                    f'PGCB-CAN-TXN-2026-{i:06d}',
+                    2000,
+                    'PAID' if i % 10 != 0 else 'PENDING',
+                    now_iso,
+                )
+                for i in range(1, n_payments + 1)
+            ]
+            cur.executemany('INSERT INTO payments VALUES (?, ?, ?, ?, ?, ?)', canonical_payments_rows)
             conn.commit()
 
             # Benchmark expensive queries against realistic dataset
@@ -225,8 +280,8 @@ def run_realistic_db_benchmark(scale: float = 1.0) -> dict[str, Any]:
                     "JOIN users u ON m.user_id = u.id WHERE m.circle_id = 3 AND m.status = 'ACTIVE' LIMIT 50"
                 ),
                 'pending_applications_by_circle': (
-                    "SELECT circle_id, COUNT(*) FROM members WHERE status IN ('PENDING', 'SUBMITTED', 'UNDER_REVIEW') "
-                    "GROUP BY circle_id"
+                    "SELECT circle_id, COUNT(*) FROM membership_applications "
+                    "WHERE status IN ('SUBMITTED', 'UNDER_REVIEW', 'PAYMENT_PENDING') GROUP BY circle_id"
                 ),
                 'payment_revenue_reconciliation': (
                     "SELECT COUNT(*), SUM(amount) FROM payment_transactions "
@@ -327,15 +382,31 @@ def run_concurrency_tiers(
 
         total_wall_sec = max(0.001, time.perf_counter() - t_tier_start)
         sorted_lat = sorted(latencies)
+        p50_idx = min(len(sorted_lat) - 1, int(len(sorted_lat) * 0.50))
         p95_idx = min(len(sorted_lat) - 1, int(len(sorted_lat) * 0.95))
+        p99_idx = min(len(sorted_lat) - 1, int(len(sorted_lat) * 0.99))
         tier_results[f'{tier}_concurrent_users'] = {
             'concurrent_users': tier,
             'requests_completed': len(latencies),
             'avg_response_time_ms': round(sum(latencies) / len(latencies), 2),
+            'p50_response_time_ms': round(sorted_lat[p50_idx], 2),
             'p95_response_time_ms': round(sorted_lat[p95_idx], 2),
+            'p99_response_time_ms': round(sorted_lat[p99_idx], 2),
             'error_rate': round(errors / max(1, len(latencies)), 4),
             'slow_requests_count': slow_count,
             'throughput_rps': round(len(latencies) / total_wall_sec, 1),
         }
 
     return tier_results
+
+
+if __name__ == '__main__':
+    import json
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    db_report = run_realistic_db_benchmark(scale=1.0)
+    with TestClient(app) as test_client:
+        concurrency_report = run_concurrency_tiers(test_client, concurrency_tiers=(50, 100, 250))
+    print(json.dumps({'database_benchmark': db_report, 'concurrency_benchmark': concurrency_report}, indent=2))
+
