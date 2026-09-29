@@ -711,7 +711,7 @@ def test_sprint2_member_portal_dashboard_renewal_card_wallet_and_notifications()
     with TestClient(app) as client:
         headers = _login(client, 'member@example.org')
 
-        # 1. Member Dashboard
+        # 1. Member Dashboard (including consolidated Member Portal Upgrade payload)
         dash_res = client.get('/api/v1/member/dashboard', headers=headers)
         assert dash_res.status_code == 200, dash_res.text
         dash = dash_res.json()
@@ -719,6 +719,97 @@ def test_sprint2_member_portal_dashboard_renewal_card_wallet_and_notifications()
         assert dash['hero_card']['membership_id'] == 'PGD-2026-1001'
         assert len(dash['quick_actions']) == 6
         assert isinstance(dash['recent_activity'], list)
+        assert 'member' in dash
+        assert 'application' in dash
+        assert len(dash['application']['stages']) == 6
+        assert 'payment_summary' in dash
+        assert 'profile_completion' in dash
+        assert 'profile_completion_details' in dash
+        assert dash['digital_id_available'] is True
+
+        # 1b. Editable Profile + Sensitive Field Verification Workflow + Profile Completion Engine
+        prof_update = client.patch(
+            '/api/v1/member/profile',
+            headers=headers,
+            json={
+                'organization': 'Power Grid Company of Bangladesh PLC (PGCB)',
+                'department': 'Grid Operations',
+                'profession': 'Sub-Assistant Engineer',
+                'academic_qualification': 'Diploma in Electrical Engineering',
+                'years_of_experience': 8,
+                'emergency_contact_name': 'Md. Karim Uddin',
+                'emergency_contact_relationship': 'Brother',
+                'emergency_contact_phone': '01711998877',
+                'nid_number': '1990998877665',  # Sensitive change on ACTIVE member -> creates PENDING request
+            },
+        )
+        assert prof_update.status_code == 200, prof_update.text
+        prof_data = prof_update.json()
+        assert prof_data['organization'] == 'Power Grid Company of Bangladesh PLC (PGCB)'
+        assert prof_data['emergency_contact_name'] == 'Md. Karim Uddin'
+        assert prof_data['profile_completion'] >= 80
+        assert len(prof_data.get('pending_verification_fields', [])) >= 1
+
+        # Verify Admin can review and approve the sensitive-field change request
+        admin_headers = _login(client, 'admin@example.org')
+        cr_list = client.get('/api/v1/admin/profile-change-requests?status=PENDING', headers=admin_headers)
+        assert cr_list.status_code == 200
+        cr_items = cr_list.json()['items']
+        nid_cr = next((r for r in cr_items if r['field_name'] == 'nid_number' and r['requested_value'] == '1990998877665'), None)
+        assert nid_cr is not None
+
+        cr_approve = client.post(
+            f"/api/v1/admin/profile-change-requests/{nid_cr['id']}/review",
+            headers=admin_headers,
+            json={'action': 'APPROVE', 'review_note': 'NID verified against official card'},
+        )
+        assert cr_approve.status_code == 200, cr_approve.text
+        assert cr_approve.json()['status'] == 'APPROVED'
+
+        # Re-login as member after admin login to verify updated NID and new Member Portal endpoints
+        headers = _login(client, 'member@example.org')
+        prof_after = client.get('/api/v1/member/profile', headers=headers)
+        assert prof_after.status_code == 200
+        assert prof_after.json()['nid_number'] == '1990998877665'
+
+        # 1c. Application Timeline, Member Updates (Bookmark/Read), Settings, and Login History
+        tl_res = client.get('/api/v1/member/application/timeline', headers=headers)
+        assert tl_res.status_code == 200
+        assert len(tl_res.json()['stages']) == 6
+
+        upd_res = client.get('/api/v1/member/updates', headers=headers)
+        assert upd_res.status_code == 200
+        upd_items = upd_res.json()['items']
+        if upd_items:
+            first_u = upd_items[0]
+            bm_res = client.post(
+                '/api/v1/member/updates/bookmark',
+                headers=headers,
+                json={'content_type': first_u['content_type'], 'content_id': first_u['id']},
+            )
+            assert bm_res.status_code == 200
+            assert bm_res.json()['is_bookmarked'] is True
+
+            rd_res = client.post(
+                '/api/v1/member/updates/read',
+                headers=headers,
+                json={'content_type': first_u['content_type'], 'content_id': first_u['id']},
+            )
+            assert rd_res.status_code == 200
+            assert rd_res.json()['is_read'] is True
+
+        settings_res = client.patch(
+            '/api/v1/member/settings',
+            headers=headers,
+            json={'preferred_language': 'bn', 'privacy_directory_visible': True, 'privacy_show_phone': False},
+        )
+        assert settings_res.status_code == 200
+        assert settings_res.json()['privacy']['directory_visible'] is True
+        assert settings_res.json()['privacy']['show_phone'] is False
+
+        lh_res = client.get('/api/v1/member/login-history', headers=headers)
+        assert lh_res.status_code == 200
+        assert isinstance(lh_res.json()['items'], list)
 
         # 2. Renewal options & 2-Year Renewal initiation -> payment callback -> extended validity
         opts_res = client.get('/api/v1/member/renewal-options', headers=headers)

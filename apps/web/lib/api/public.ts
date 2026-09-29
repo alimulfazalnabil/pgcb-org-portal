@@ -57,6 +57,16 @@ export const publicApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  chatKnowledge: (question: string, conversation_id?: number | null, mode: 'PUBLIC' | 'MEMBER' | 'ADMIN' = 'MEMBER') =>
+    request<any>('/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        question,
+        conversation_id: conversation_id ?? undefined,
+        mode,
+        language: 'bn',
+      }),
+    }),
   getPublicFaqs: (category?: string) =>
     request<any[]>(`/public/faqs${category ? `?category=${encodeURIComponent(category)}` : ''}`),
   submitContact: (data: { name: string; email: string; phone?: string; subject: string; message: string }) =>

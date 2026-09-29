@@ -22,6 +22,24 @@ export const membersApi = {
   getProfile: () => request<any>('/member/profile'),
   updateProfile: (data: any) =>
     request<any>('/member/profile', { method: 'PATCH', body: JSON.stringify(data) }),
+  getProfileChangeRequests: () => request<any>('/member/profile/change-requests'),
+  createProfileChangeRequest: (data: {
+    field_name: string;
+    requested_value: string;
+    reason?: string;
+    supporting_doc_url?: string;
+  }) =>
+    request<any>('/member/profile/change-requests', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getApplicationTimeline: () => request<any>('/member/application/timeline'),
+  saveApplicationDraft: () =>
+    request<any>('/member/application/draft', { method: 'POST' }),
+  submitApplication: () =>
+    request<any>('/member/application', { method: 'POST' }),
+  cancelApplication: () =>
+    request<any>('/member/application/cancel', { method: 'POST' }),
   getMemberDocuments: () => request<any[]>('/member/documents'),
   uploadMemberDocument: (documentType: string, file: File) => {
     const formData = new FormData();
@@ -59,6 +77,21 @@ export const membersApi = {
   getMemberCertificates: () => request<any[]>('/member/certificates'),
   getDigitalCardDetails: () => request<any>('/member/card/details'),
   getMemberAnnouncements: () => request<any[]>('/member/announcements'),
+  getMemberUpdates: () => request<{ items: any[]; count: number }>('/member/updates'),
+  toggleBookmarkUpdate: (contentType: string, contentId: number) =>
+    request<any>('/member/updates/bookmark', {
+      method: 'POST',
+      body: JSON.stringify({ content_type: contentType, content_id: contentId }),
+    }),
+  markUpdateRead: (contentType: string, contentId: number) =>
+    request<any>('/member/updates/read', {
+      method: 'POST',
+      body: JSON.stringify({ content_type: contentType, content_id: contentId }),
+    }),
+  getMemberSettings: () => request<any>('/member/settings'),
+  updateMemberSettings: (settingsData: Record<string, any>) =>
+    request<any>('/member/settings', { method: 'PUT', body: JSON.stringify(settingsData) }),
+  getMemberLoginHistory: () => request<any>('/member/login-history'),
   getMemberPayments: () => request<any[]>('/member/payments'),
   getMyEventRegistrations: () => request<any[]>('/events/registrations/me'),
   getDigitalCardUrl: () => `${API_BASE_URL}/api/v1/member/card`,
@@ -71,3 +104,4 @@ export const membersApi = {
   getPaymentReceiptPdfUrl: (transactionId: number) =>
     `${API_BASE_URL}/api/v1/payments/transactions/${transactionId}/receipt.pdf`,
 };
+

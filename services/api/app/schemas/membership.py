@@ -37,6 +37,9 @@ class MemberProfileUpdate(BaseModel):
     profile_visibility: str | None = None
     directory_visibility: bool | None = None
     contact_visibility: bool | None = None
+    directory_visible: bool | None = None
+    show_phone_in_directory: bool | None = None
+    show_email_in_directory: bool | None = None
     status: str | None = None
     membership_status: str | None = None
     payment_status: str | None = None
@@ -63,4 +66,6 @@ class MemberDocumentResponse(BaseModel):
     document_type: str
     filename: str
     review_status: str
+    reviewer_note: str | None = None
     created_at: datetime
+

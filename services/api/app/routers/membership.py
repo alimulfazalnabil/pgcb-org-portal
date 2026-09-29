@@ -7,28 +7,64 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.audit import log_audit_action
 from app.core.config import settings
 from app.core.deps import current_user
-from app.db.session import get_db
+from app.db.session import engine, get_db
 from app.domain.membership import RENEWAL_PERIODS, resolve_renewal_days
 from app.integrations.payments import create_checkout, normalize_provider
 from app.models import (
+    AuditLog,
+    Base,
     Certificate,
     Circular,
+    Event,
     EventRegistration,
     Member,
     MemberDocument,
+    MemberProfileChangeRequest,
+    MemberProfileMeta,
+    MemberSavedContent,
+    MembershipApplication,
     MembershipRenewal,
     Notice,
     Notification,
     PaymentTransaction,
+    SiteSetting,
     User,
+    UserSession,
 )
-from app.schemas.membership import ApplicationResponse, MemberDocumentResponse, MemberProfileUpdate
+from app.schemas.membership import (
+    ApplicationResponse,
+    MemberDocumentResponse,
+    MemberProfileUpdate,
+    ProfileChangeRequestCreate,
+)
 from app.services import ALLOWED_CONTENT_TYPES, ALLOWED_DOC_TYPES, audit, membership_dates, next_membership_id, notify
 from app.services import BASE_STORAGE
 from app.services.receipt_service import get_fee_schedule, resolve_plan_amount
 from app.utils.storage import get_file_bytes, is_local_path, save_bytes, validate_upload_bytes
 
+try:
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[
+            MemberProfileMeta.__table__,
+            MemberProfileChangeRequest.__table__,
+            MemberSavedContent.__table__,
+        ],
+        checkfirst=True,
+    )
+except Exception:
+    pass
+
 router = APIRouter(prefix='/member', tags=['membership'])
+
+SENSITIVE_PROFILE_FIELDS = {
+    'name_bn': ('Name (Bangla)', 'নাম (বাংলা)'),
+    'name_en': ('Name (English)', 'নাম (ইংরেজি)'),
+    'date_of_birth': ('Date of Birth', 'জন্ম তারিখ'),
+    'nid_number': ('NID / Passport Number', 'জাতীয় পরিচয়পত্র / পাসপোর্ট নম্বর'),
+    'membership_id': ('Membership ID', 'সদস্য আইডি'),
+    'certificate_info': ('Certificate Information', 'সনদপত্রের তথ্য'),
+}
 
 
 def get_member(user: User, db: Session) -> Member:
@@ -40,6 +76,296 @@ def get_member(user: User, db: Session) -> Member:
     if not member:
         raise HTTPException(404, 'Member profile not found')
     return member
+
+
+def _get_or_create_profile_meta(db: Session, member_id: int) -> MemberProfileMeta:
+    meta = db.scalar(select(MemberProfileMeta).where(MemberProfileMeta.member_id == member_id))
+    if not meta:
+        meta = MemberProfileMeta(
+            member_id=member_id,
+            organization='Power Grid Company of Bangladesh PLC (PGCB)',
+            profession='Diploma Engineer',
+        )
+        db.add(meta)
+        db.flush()
+    return meta
+
+
+def _compute_profile_completion(user: User, member: Member, meta: MemberProfileMeta | None) -> dict:
+    has_photo = bool(member.photo_url)
+    has_phone = bool(user.phone and user.phone.strip())
+    has_email = bool(user.email and user.email.strip())
+    has_professional = bool(
+        (member.designation_bn or member.designation_en)
+        and (
+            (meta and (meta.organization or meta.department or meta.academic_qualification))
+            or member.employee_id
+            or member.diploma_institution
+        )
+    )
+    has_emergency = bool(meta and meta.emergency_contact_name and meta.emergency_contact_phone)
+
+    items = [
+        {
+            'key': 'photo',
+            'label_en': 'Profile Photograph',
+            'label_bn': 'প্রোফাইল ছবি',
+            'completed': has_photo,
+            'weight': 20,
+        },
+        {
+            'key': 'phone',
+            'label_en': 'Mobile Number',
+            'label_bn': 'মোবাইল নম্বর',
+            'completed': has_phone,
+            'weight': 20,
+        },
+        {
+            'key': 'email',
+            'label_en': 'Email Address',
+            'label_bn': 'ইমেইল ঠিকানা',
+            'completed': has_email,
+            'weight': 20,
+        },
+        {
+            'key': 'professional',
+            'label_en': 'Professional Information',
+            'label_bn': 'পেশাগত তথ্য',
+            'completed': has_professional,
+            'weight': 20,
+        },
+        {
+            'key': 'emergency_contact',
+            'label_en': 'Emergency Contact',
+            'label_bn': 'জরুরি যোগাযোগ',
+            'completed': has_emergency,
+            'weight': 20,
+        },
+    ]
+    pct = sum(item['weight'] for item in items if item['completed'])
+    return {
+        'percentage': pct,
+        'is_complete': pct == 100,
+        'completed_count': sum(1 for item in items if item['completed']),
+        'total_count': len(items),
+        'items': items,
+    }
+
+
+def _build_application_timeline(db: Session, member: Member) -> dict:
+    app_row = db.scalar(select(MembershipApplication).where(MembershipApplication.member_id == member.id))
+    raw_status = (app_row.status if app_row and app_row.status else member.status or 'PENDING').upper()
+    if member.status == 'ACTIVE':
+        raw_status = 'ACTIVE'
+
+    docs = list(member.documents or [])
+    has_replacement_doc = any(d.review_status in ('REJECTED', 'REPLACEMENT_REQUIRED') for d in docs)
+    all_docs_approved = len(docs) > 0 and all(d.review_status == 'APPROVED' for d in docs)
+
+    paid_tx = db.scalar(
+        select(PaymentTransaction)
+        .where(
+            PaymentTransaction.member_id == member.id,
+            PaymentTransaction.status.in_(['PAID', 'SUCCESS', 'COMPLETED']),
+        )
+        .order_by(PaymentTransaction.created_at.desc())
+    )
+
+    # Determine progress index (0..6)
+    status_stage_map = {
+        'DRAFT': 0,
+        'PENDING': 1,
+        'SUBMITTED': 1,
+        'DOCUMENT_REQUIRED': 1,
+        'UNDER_REVIEW': 2,
+        'CIRCLE_REVIEW': 2,
+        'APPROVED': 4,
+        'PAYMENT_PENDING': 4,
+        'PAID': 5,
+        'ACTIVE': 6,
+        'REJECTED': -1,
+        'CANCELLED': -2,
+    }
+    stage_idx = status_stage_map.get(raw_status, 1)
+
+    stage_defs = [
+        ('SUBMITTED', 'Submitted', 'আবেদন জমা'),
+        ('DOCUMENT_VERIFICATION', 'Document Verification', 'ডকুমেন্ট যাচাই'),
+        ('CIRCLE_REVIEW', 'Circle Review', 'সার্কেল পর্যালোচনা'),
+        ('CENTRAL_REVIEW', 'Central Review', 'কেন্দ্রীয় অনুমোদন'),
+        ('PAYMENT', 'Payment', 'পেমেন্ট সম্পন্ন'),
+        ('ACTIVATION', 'Membership Activation', 'সদস্যপদ সক্রিয়করণ'),
+    ]
+
+    stages = []
+    for idx, (s_key, label_en, label_bn) in enumerate(stage_defs):
+        if raw_status in ('REJECTED', 'CANCELLED'):
+            s_state = 'COMPLETED' if idx == 0 else ('REJECTED' if idx == 1 else 'PENDING')
+        elif stage_idx >= 6 or idx < stage_idx:
+            s_state = 'COMPLETED'
+        elif idx == stage_idx:
+            if s_key == 'DOCUMENT_VERIFICATION' and (raw_status == 'DOCUMENT_REQUIRED' or has_replacement_doc):
+                s_state = 'ACTION_REQUIRED'
+            else:
+                s_state = 'IN_PROGRESS'
+        else:
+            s_state = 'PENDING'
+
+        if s_key == 'DOCUMENT_VERIFICATION' and all_docs_approved and stage_idx >= 1 and raw_status not in ('DRAFT', 'CANCELLED'):
+            s_state = 'COMPLETED'
+        if s_key == 'PAYMENT' and paid_tx is not None and raw_status not in ('DRAFT', 'CANCELLED'):
+            s_state = 'COMPLETED'
+
+        icon_map = {
+            'COMPLETED': '✓',
+            'IN_PROGRESS': '⏳',
+            'ACTION_REQUIRED': '⚠',
+            'REJECTED': '✕',
+            'PENDING': '○',
+        }
+        stages.append({
+            'step': idx + 1,
+            'key': s_key,
+            'label_en': label_en,
+            'label_bn': label_bn,
+            'status': s_state,
+            'icon': icon_map.get(s_state, '○'),
+        })
+
+    required_actions = []
+    if raw_status == 'DRAFT':
+        required_actions.append({
+            'code': 'SUBMIT_APPLICATION',
+            'message_en': 'Your application is saved as a draft. Please review and submit it.',
+            'message_bn': 'আপনার আবেদন খসড়া হিসেবে সংরক্ষিত আছে। অনুগ্রহ করে যাচাই করে জমা দিন।',
+        })
+    if len(docs) == 0 and raw_status != 'ACTIVE':
+        required_actions.append({
+            'code': 'UPLOAD_DOCUMENTS',
+            'message_en': 'Please upload your NID, Diploma Certificate, and Employee ID / Photo for verification.',
+            'message_bn': 'যাচাইকরণের জন্য অনুগ্রহ করে আপনার এনআইডি, ডিপ্লোমা সনদ এবং ছবি আপলোড করুন।',
+        })
+    if has_replacement_doc or raw_status == 'DOCUMENT_REQUIRED':
+        required_actions.append({
+            'code': 'REPLACE_DOCUMENT',
+            'message_en': 'One or more uploaded documents require replacement. Check Document Center.',
+            'message_bn': 'এক বা একাধিক ডকুমেন্ট পুনরায় আপলোড করা প্রয়োজন। ডকুমেন্ট সেন্টার দেখুন।',
+        })
+    if raw_status in ('APPROVED', 'PAYMENT_PENDING') and not paid_tx:
+        required_actions.append({
+            'code': 'COMPLETE_PAYMENT',
+            'message_en': 'Your application is approved. Complete your membership fee payment to activate membership.',
+            'message_bn': 'আপনার আবেদন অনুমোদিত হয়েছে। সদস্যপদ সক্রিয় করতে নির্ধারিত ফি পরিশোধ করুন।',
+        })
+
+    status_labels = {
+        'DRAFT': ('Draft', 'খসড়া'),
+        'PENDING': ('Submitted / Pending Review', 'জমা দেওয়া হয়েছে / পর্যালোচনাধীন'),
+        'SUBMITTED': ('Submitted', 'আবেদন জমা হয়েছে'),
+        'UNDER_REVIEW': ('Under Review', 'পর্যালোচনাধীন'),
+        'DOCUMENT_REQUIRED': ('Document Required', 'ডকুমেন্ট প্রয়োজন'),
+        'CIRCLE_REVIEW': ('Circle Review', 'সার্কেল পর্যালোচনাধীন'),
+        'APPROVED': ('Approved (Awaiting Payment)', 'অনুমোদিত (পেমেন্টের অপেক্ষায়)'),
+        'PAYMENT_PENDING': ('Payment Pending', 'পেমেন্ট অপেক্ষমাণ'),
+        'PAID': ('Paid (Awaiting Activation)', 'পেমেন্ট সম্পন্ন'),
+        'ACTIVE': ('Active Member', 'সক্রিয় সদস্য'),
+        'REJECTED': ('Rejected', 'প্রত্যাখ্যাত'),
+        'CANCELLED': ('Cancelled', 'বাতিল'),
+    }
+    lbl_en, lbl_bn = status_labels.get(raw_status, (raw_status, raw_status))
+
+    return {
+        'id': app_row.id if app_row else member.id,
+        'member_id': member.id,
+        'application_no': (app_row.application_no if app_row and app_row.application_no else member.application_no) or f'PGCB-APP-2026-{member.id:04d}',
+        'membership_id': member.membership_id,
+        'membership_type': member.membership_type or 'GENERAL',
+        'status': raw_status,
+        'status_label_en': lbl_en,
+        'status_label_bn': lbl_bn,
+        'circle_id': member.circle_id,
+        'circle_bn': member.circle.name_bn if member.circle else None,
+        'circle_en': member.circle.name_en if member.circle else None,
+        'submitted_at': (app_row.submitted_at if app_row and app_row.submitted_at else member.created_at),
+        'approved_at': (app_row.approved_at if app_row and app_row.approved_at else member.issue_date),
+        'reviewer_notes': (app_row.rejection_reason if app_row and app_row.rejection_reason else member.application_note),
+        'stages': stages,
+        'required_actions': required_actions,
+    }
+
+
+def _serialize_full_profile(user: User, m: Member, meta: MemberProfileMeta, exp: dict, completion: dict, pending_requests: list[dict]) -> dict:
+    is_verified_member = (m.status or '').upper() == 'ACTIVE'
+    return {
+        'id': m.id,
+        'user_id': user.id,
+        # Personal Information
+        'name_bn': user.name_bn,
+        'name_en': user.name_en,
+        'father_name': meta.father_name,
+        'mother_name': meta.mother_name,
+        'date_of_birth': m.date_of_birth,
+        'gender': meta.gender,
+        'blood_group': meta.blood_group,
+        'nid_number': m.nid_number,
+        'photo_url': m.photo_url,
+        # Professional Information
+        'designation_bn': m.designation_bn,
+        'designation_en': m.designation_en,
+        'organization': meta.organization or 'Power Grid Company of Bangladesh PLC (PGCB)',
+        'department': meta.department,
+        'profession': meta.profession or 'Diploma Engineer',
+        'academic_qualification': meta.academic_qualification,
+        'professional_qualification': meta.professional_qualification,
+        'years_of_experience': meta.years_of_experience,
+        'employee_id': m.employee_id,
+        'diploma_institution': m.diploma_institution,
+        'graduation_year': m.graduation_year,
+        # Contact Information
+        'email': user.email,
+        'phone': user.phone,
+        'alternate_phone': meta.alternate_phone,
+        'current_address': m.current_address,
+        'permanent_address': m.permanent_address,
+        'district': meta.district,
+        'circle_id': m.circle_id,
+        'circle_bn': m.circle.name_bn if m.circle else None,
+        'circle_en': m.circle.name_en if m.circle else None,
+        # Emergency Contact
+        'emergency_contact_name': meta.emergency_contact_name,
+        'emergency_contact_relationship': meta.emergency_contact_relationship,
+        'emergency_contact_phone': meta.emergency_contact_phone,
+        'emergency_contact_address': meta.emergency_contact_address,
+        # Privacy & Directory
+        'preferred_language': meta.preferred_language or 'bn',
+        'profile_visibility': meta.profile_visibility or 'MEMBERS_ONLY',
+        'directory_visibility': bool(meta.directory_visibility),
+        'contact_visibility': bool(meta.contact_visibility),
+        'directory_visible': bool(meta.directory_visibility),
+        'show_phone_in_directory': bool(meta.contact_visibility),
+        'show_email_in_directory': bool(meta.contact_visibility),
+        # Membership Metadata
+        'membership_id': m.membership_id,
+        'membership_type': m.membership_type or 'GENERAL',
+        'status': m.status,
+        'issue_date': m.issue_date,
+        'validity_date': m.validity_date,
+        # Verification & Completion
+        'is_verified_member': is_verified_member,
+        'editable_fields': [
+            'phone', 'email', 'alternate_phone', 'current_address', 'permanent_address', 'district', 'circle_id',
+            'father_name', 'mother_name', 'gender', 'blood_group',
+            'designation_bn', 'designation_en', 'organization', 'department', 'profession',
+            'academic_qualification', 'professional_qualification', 'years_of_experience',
+            'employee_id', 'diploma_institution', 'graduation_year',
+            'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone', 'emergency_contact_address',
+        ],
+        'verification_required_fields': list(SENSITIVE_PROFILE_FIELDS.keys()),
+        'profile_completion': completion['percentage'],
+        'profile_completion_details': completion,
+        'pending_change_requests': pending_requests,
+        **exp,
+    }
 
 
 def _compute_expiry_info(member: Member, now: datetime | None = None) -> dict:
@@ -114,59 +440,243 @@ def response(member: Member) -> ApplicationResponse:
 @router.get('/profile')
 def profile(user: User = Depends(current_user), db: Session = Depends(get_db)):
     m = get_member(user, db)
+    meta = _get_or_create_profile_meta(db, m.id)
     exp = _compute_expiry_info(m)
-    return {
-        'id': m.id,
-        'name_bn': user.name_bn,
-        'name_en': user.name_en,
-        'email': user.email,
-        'phone': user.phone,
-        'membership_id': m.membership_id,
-        'membership_type': m.membership_type or 'GENERAL',
-        'status': m.status,
-        'designation_bn': m.designation_bn,
-        'designation_en': m.designation_en,
-        'employee_id': m.employee_id,
-        'diploma_institution': m.diploma_institution,
-        'graduation_year': m.graduation_year,
-        'nid_number': m.nid_number,
-        'date_of_birth': m.date_of_birth,
-        'current_address': m.current_address,
-        'permanent_address': m.permanent_address,
-        'circle_id': m.circle_id,
-        'circle_bn': m.circle.name_bn if m.circle else None,
-        'circle_en': m.circle.name_en if m.circle else None,
-        'issue_date': m.issue_date,
-        'validity_date': m.validity_date,
-        'photo_url': m.photo_url,
-        **exp,
-    }
+    completion = _compute_profile_completion(user, m, meta)
+    change_rows = db.scalars(
+        select(MemberProfileChangeRequest)
+        .where(MemberProfileChangeRequest.member_id == m.id)
+        .order_by(MemberProfileChangeRequest.created_at.desc())
+        .limit(20)
+    ).all()
+    pending_requests = [
+        {
+            'id': r.id,
+            'field_name': r.field_name,
+            'field_label_en': SENSITIVE_PROFILE_FIELDS.get(r.field_name, (r.field_name, r.field_name))[0],
+            'field_label_bn': SENSITIVE_PROFILE_FIELDS.get(r.field_name, (r.field_name, r.field_name))[1],
+            'current_value': r.current_value,
+            'requested_value': r.requested_value,
+            'reason': r.reason,
+            'supporting_doc_url': r.supporting_doc_url,
+            'status': r.status,
+            'reviewer_note': r.review_note,
+            'review_note': r.review_note,
+            'created_at': r.created_at,
+            'reviewed_at': r.reviewed_at,
+        }
+        for r in change_rows
+    ]
+    db.commit()
+    return _serialize_full_profile(user, m, meta, exp, completion, pending_requests)
 
 
 @router.get('/dashboard')
 def member_dashboard(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """Comprehensive Member Dashboard 2.0 summary: membership status, quick stats, and recent activity feed."""
+    """Consolidated Member Portal Dashboard API: returns complete member status, profile completion, timeline, payments, documents, certificates, events, circulars, and notifications in one call."""
+    from app.services.certificate_service import CertificateService
+
     m = get_member(user, db)
+    meta = _get_or_create_profile_meta(db, m.id)
     now = datetime.utcnow()
     exp = _compute_expiry_info(m, now)
+    completion = _compute_profile_completion(user, m, meta)
+    application_timeline = _build_application_timeline(db, m)
 
     unread_count = db.scalar(
         select(func.count(Notification.id)).where(Notification.user_id == user.id, Notification.read_at.is_(None))
     ) or 0
-    certs_count = db.scalar(
-        select(func.count(Certificate.id)).where(Certificate.member_id == m.id)
-    ) or 0
-    if m.status == 'ACTIVE' and m.membership_id and certs_count == 0:
-        certs_count = 1
-    docs_count = len(m.documents or [])
-    payments_count = db.scalar(
-        select(func.count(PaymentTransaction.id)).where(
-            (PaymentTransaction.member_id == m.id) | (PaymentTransaction.user_id == user.id)
-        )
-    ) or 0
-    events_count = db.scalar(
-        select(func.count(EventRegistration.id)).where(EventRegistration.user_id == user.id)
-    ) or 0
+    certs_list = CertificateService.ensure_member_wallet_certificates(db, user, m)
+    certs_count = len(certs_list)
+    docs_list = [
+        {
+            'id': d.id,
+            'document_type': d.document_type,
+            'filename': d.filename,
+            'review_status': d.review_status,
+            'reviewer_note': getattr(d, 'reviewer_note', None),
+            'created_at': d.created_at,
+            'download_url': f'/api/v1/member/documents/{d.id}/download',
+        }
+        for d in (m.documents or [])
+    ]
+    docs_count = len(docs_list)
+
+    all_payments = db.scalars(
+        select(PaymentTransaction)
+        .where((PaymentTransaction.member_id == m.id) | (PaymentTransaction.user_id == user.id))
+        .order_by(PaymentTransaction.created_at.desc())
+        .limit(20)
+    ).all()
+    payments_count = len(all_payments)
+    paid_payments = [p for p in all_payments if (p.status or '').upper() in ('PAID', 'SUCCESS', 'COMPLETED')]
+    pending_payments = [p for p in all_payments if (p.status or '').upper() in ('PENDING', 'INITIATED', 'PROCESSING')]
+    total_paid_bdt = sum(float(p.amount or 0) for p in paid_payments)
+    latest_payment_obj = all_payments[0] if all_payments else None
+
+    payment_summary = {
+        'total_paid': total_paid_bdt,
+        'total_paid_formatted': f'৳{int(total_paid_bdt):,}',
+        'payments_count': payments_count,
+        'paid_count': len(paid_payments),
+        'pending_count': len(pending_payments),
+        'latest_payment': {
+            'id': latest_payment_obj.id,
+            'amount': float(latest_payment_obj.amount),
+            'amount_formatted': f'৳{int(latest_payment_obj.amount):,}',
+            'currency': latest_payment_obj.currency,
+            'purpose': latest_payment_obj.purpose,
+            'provider': latest_payment_obj.provider,
+            'status': latest_payment_obj.status,
+            'receipt_no': latest_payment_obj.receipt_no,
+            'transaction_ref': latest_payment_obj.transaction_ref,
+            'created_at': latest_payment_obj.created_at,
+            'receipt_pdf_url': f'/api/v1/member/payments/{latest_payment_obj.id}/receipt.pdf'
+            if (latest_payment_obj.status or '').upper() in ('PAID', 'SUCCESS', 'COMPLETED')
+            else None,
+        }
+        if latest_payment_obj
+        else None,
+        'recent_payments': [
+            {
+                'id': p.id,
+                'amount': float(p.amount),
+                'amount_formatted': f'৳{int(p.amount):,}',
+                'currency': p.currency,
+                'purpose': p.purpose,
+                'provider': p.provider,
+                'status': p.status,
+                'receipt_no': p.receipt_no,
+                'transaction_ref': p.transaction_ref,
+                'created_at': p.created_at,
+                'receipt_pdf_url': f'/api/v1/member/payments/{p.id}/receipt.pdf'
+                if (p.status or '').upper() in ('PAID', 'SUCCESS', 'COMPLETED')
+                else None,
+            }
+            for p in all_payments[:5]
+        ],
+    }
+
+    # Member event registrations & upcoming events
+    reg_rows = db.scalars(
+        select(EventRegistration).where(EventRegistration.user_id == user.id)
+    ).all()
+    reg_by_event = {r.event_id: r for r in reg_rows}
+    events_count = len(reg_rows)
+
+    upcoming_events_rows = db.scalars(
+        select(Event).where(Event.is_published == True).order_by(Event.event_date.desc()).limit(6)
+    ).all()
+    events_payload = [
+        {
+            'id': ev.id,
+            'slug': getattr(ev, 'slug', str(ev.id)),
+            'title_bn': ev.title_bn,
+            'title_en': ev.title_en,
+            'summary_bn': getattr(ev, 'summary_bn', None) or ev.description_bn,
+            'location_bn': ev.location_bn,
+            'event_date': ev.event_date,
+            'event_date_formatted': ev.event_date.strftime('%d %b %Y') if ev.event_date else None,
+            'registration_Required': bool(getattr(ev, 'registration_enabled', False)),
+            'is_registered': ev.id in reg_by_event,
+            'registration_status': reg_by_event[ev.id].attendance_status if ev.id in reg_by_event else None,
+        }
+        for ev in upcoming_events_rows
+    ]
+
+    # Saved/Read state for circulars & notices
+    saved_rows = db.scalars(
+        select(MemberSavedContent).where(MemberSavedContent.user_id == user.id)
+    ).all()
+    saved_map = {(s.entity_type.upper(), s.entity_id): s for s in saved_rows}
+
+    recent_circulars = db.scalars(
+        select(Circular).where(Circular.is_published == True).order_by(Circular.created_at.desc()).limit(5)
+    ).all()
+    recent_notices = db.scalars(
+        select(Notice).where(Notice.is_published == True).order_by(Notice.created_at.desc()).limit(5)
+    ).all()
+
+    circulars_payload = []
+    for cir in recent_circulars:
+        st = saved_map.get(('CIRCULAR', cir.id))
+        circulars_payload.append({
+            'id': cir.id,
+            'content_type': 'CIRCULAR',
+            'slug': getattr(cir, 'slug', str(cir.id)),
+            'title_bn': cir.title_bn,
+            'title_en': cir.title_en,
+            'summary_bn': cir.summary_bn,
+            'category': cir.category,
+            'reference_no': cir.reference_no,
+            'attachment_url': getattr(cir, 'attachment_url', None) or cir.document_url,
+            'published_at': cir.published_at or cir.created_at,
+            'is_bookmarked': bool(st and st.is_bookmarked),
+            'is_read': bool(st and st.is_read),
+        })
+    for ntc in recent_notices:
+        st = saved_map.get(('NOTICE', ntc.id))
+        circulars_payload.append({
+            'id': ntc.id,
+            'content_type': 'NOTICE',
+            'slug': getattr(ntc, 'slug', str(ntc.id)),
+            'title_bn': ntc.title_bn,
+            'title_en': ntc.title_en,
+            'summary_bn': getattr(ntc, 'summary_bn', None) or ntc.content_bn,
+            'category': ntc.category,
+            'reference_no': None,
+            'attachment_url': ntc.attachment_url,
+            'published_at': ntc.published_at or ntc.created_at,
+            'is_bookmarked': bool(st and st.is_bookmarked),
+            'is_read': bool(st and st.is_read),
+        })
+
+    notif_rows = db.scalars(
+        select(Notification)
+        .where(Notification.user_id == user.id)
+        .order_by(Notification.created_at.desc())
+        .limit(10)
+    ).all()
+    notifications_payload = [
+        {
+            'id': n.id,
+            'title_bn': n.title_bn,
+            'body_bn': n.body_bn,
+            'type': n.notification_type,
+            'read_at': n.read_at,
+            'is_read': bool(n.read_at),
+            'indicator': '○' if n.read_at else '●',
+            'created_at': n.created_at,
+            'relative_time_en': _relative_time(n.created_at, now)[0],
+            'relative_time_bn': _relative_time(n.created_at, now)[1],
+        }
+        for n in notif_rows
+    ]
+
+    change_rows = db.scalars(
+        select(MemberProfileChangeRequest)
+        .where(MemberProfileChangeRequest.member_id == m.id)
+        .order_by(MemberProfileChangeRequest.created_at.desc())
+        .limit(10)
+    ).all()
+    change_requests_payload = [
+        {
+            'id': r.id,
+            'field_name': r.field_name,
+            'field_label_en': SENSITIVE_PROFILE_FIELDS.get(r.field_name, (r.field_name, r.field_name))[0],
+            'field_label_bn': SENSITIVE_PROFILE_FIELDS.get(r.field_name, (r.field_name, r.field_name))[1],
+            'current_value': r.current_value,
+            'requested_value': r.requested_value,
+            'reason': r.reason,
+            'supporting_doc_url': r.supporting_doc_url,
+            'status': r.status,
+            'reviewer_note': r.review_note,
+            'review_note': r.review_note,
+            'created_at': r.created_at,
+            'reviewed_at': r.reviewed_at,
+        }
+        for r in change_rows
+    ]
 
     activities: list[dict] = []
 
@@ -184,32 +694,25 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
         })
 
     # 2. Recent certificates
-    recent_certs = db.scalars(
-        select(Certificate).where(Certificate.member_id == m.id).order_by(Certificate.issue_date.desc()).limit(3)
-    ).all()
-    for c in recent_certs:
+    for c in certs_list[:3]:
+        c_date = c.get('issue_date') if isinstance(c, dict) else getattr(c, 'issue_date', None)
+        c_no = c.get('certificate_no') if isinstance(c, dict) else getattr(c, 'certificate_no', '')
+        c_title = c.get('title_bn') if isinstance(c, dict) else getattr(c, 'title_bn', '')
+        c_id = c.get('id') if isinstance(c, dict) else getattr(c, 'id', 0)
+        dt_val = c_date if isinstance(c_date, datetime) else now
         activities.append({
-            'id': f'cert-{c.id}',
+            'id': f'cert-{c_id}',
             'type': 'CERTIFICATE',
             'title_en': 'Certificate issued',
-            'title_bn': f'সনদপত্র ইস্যু হয়েছে ({c.certificate_no})',
-            'subtitle_bn': c.title_bn,
-            'timestamp': (c.issue_date or c.created_at or now).isoformat(),
-            'relative_time_en': _relative_time(c.issue_date or c.created_at, now)[0],
-            'relative_time_bn': _relative_time(c.issue_date or c.created_at, now)[1],
+            'title_bn': f'সনদপত্র ইস্যু হয়েছে ({c_no})',
+            'subtitle_bn': c_title,
+            'timestamp': dt_val.isoformat(),
+            'relative_time_en': _relative_time(dt_val, now)[0],
+            'relative_time_bn': _relative_time(dt_val, now)[1],
         })
 
     # 3. Recent paid payments
-    recent_payments = db.scalars(
-        select(PaymentTransaction)
-        .where(
-            ((PaymentTransaction.member_id == m.id) | (PaymentTransaction.user_id == user.id)),
-            PaymentTransaction.status.in_(['PAID', 'SUCCESS', 'COMPLETED']),
-        )
-        .order_by(PaymentTransaction.created_at.desc())
-        .limit(3)
-    ).all()
-    for p in recent_payments:
+    for p in paid_payments[:3]:
         activities.append({
             'id': f'pay-{p.id}',
             'type': 'PAYMENT',
@@ -222,10 +725,7 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
         })
 
     # 4. Recent published circulars & notices
-    recent_circulars = db.scalars(
-        select(Circular).where(Circular.is_published == True).order_by(Circular.created_at.desc()).limit(2)
-    ).all()
-    for cir in recent_circulars:
+    for cir in recent_circulars[:2]:
         activities.append({
             'id': f'cir-{cir.id}',
             'type': 'CIRCULAR',
@@ -262,6 +762,9 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
         {'id': 'EVENTS', 'label_bn': 'ইভেন্ট নিবন্ধন', 'label_en': 'Events', 'href': '/events'},
     ]
 
+    full_member_profile = _serialize_full_profile(user, m, meta, exp, completion, change_requests_payload)
+    digital_id_available = bool(m.status == 'ACTIVE' and m.membership_id)
+
     return {
         'user': {
             'id': user.id,
@@ -271,8 +774,20 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
             'phone': user.phone,
             'role': user.role,
         },
+        'member': full_member_profile,
         'hero_card': membership_info,
         'membership': membership_info,
+        'application': application_timeline,
+        'payment_summary': payment_summary,
+        'documents': docs_list,
+        'certificates': certs_list,
+        'events': events_payload,
+        'circulars': circulars_payload,
+        'notifications': notifications_payload,
+        'profile_completion': completion['percentage'],
+        'profile_completion_details': completion,
+        'digital_id_available': digital_id_available,
+        'change_requests': change_requests_payload,
         'quick_actions': quick_actions,
         'quick_stats': {
             'unread_notifications': unread_count,
@@ -280,6 +795,9 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
             'documents_count': docs_count,
             'payments_count': payments_count,
             'events_count': events_count,
+            'profile_completion': completion['percentage'],
+            'pending_applications': 0 if m.status == 'ACTIVE' else 1,
+            'digital_id_available': digital_id_available,
         },
         'recent_activity': activities[:8],
     }
@@ -510,6 +1028,23 @@ def initiate_membership_renewal(
     }
 
 
+def _parse_dob(val: datetime | str | None) -> datetime | None:
+    if val is None or val == '':
+        return None
+    if isinstance(val, datetime):
+        return val
+    raw = str(val).strip()
+    for fmt in ('%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f', '%d/%m/%Y'):
+        try:
+            return datetime.strptime(raw[:19] if 'T' in fmt else raw[:10], fmt)
+        except Exception:
+            continue
+    try:
+        return datetime.fromisoformat(raw.replace('Z', '+00:00'))
+    except Exception:
+        return None
+
+
 @router.patch('/profile')
 @router.put('/profile')
 def update_profile(payload: MemberProfileUpdate, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -519,20 +1054,264 @@ def update_profile(payload: MemberProfileUpdate, request: Request, user: User = 
     ):
         raise HTTPException(403, 'Browser cannot directly modify membership_status, payment_status, or membership_id')
     m = get_member(user, db)
+    meta = _get_or_create_profile_meta(db, m.id)
+
     if payload.employee_id:
         existing_emp = db.scalar(
             select(Member).where(Member.employee_id == payload.employee_id, Member.id != m.id)
         )
         if existing_emp:
             raise HTTPException(409, 'Duplicate membership: employee_id is already registered to another member')
-    user.name_bn = payload.name_bn; user.name_en = payload.name_en; user.phone = payload.phone
-    for field in ['designation_bn', 'designation_en', 'employee_id', 'diploma_institution', 'graduation_year', 'nid_number', 'date_of_birth', 'current_address', 'permanent_address', 'circle_id']:
-        setattr(m, field, getattr(payload, field))
+
+    if payload.email and payload.email.strip() and payload.email.strip().lower() != (user.email or '').lower():
+        existing_email = db.scalar(
+            select(User).where(func.lower(User.email) == payload.email.strip().lower(), User.id != user.id)
+        )
+        if existing_email:
+            raise HTTPException(409, 'Email address is already registered to another account')
+        user.email = payload.email.strip().lower()
+
+    if payload.phone is not None:
+        user.phone = payload.phone
+
+    is_verified = (m.status or '').upper() == 'ACTIVE'
+    created_change_requests: list[dict] = []
+
+    parsed_dob = _parse_dob(payload.date_of_birth)
+    if not is_verified:
+        if payload.name_bn is not None:
+            user.name_bn = payload.name_bn
+        if payload.name_en is not None:
+            user.name_en = payload.name_en
+        if payload.nid_number is not None:
+            m.nid_number = payload.nid_number
+        if payload.date_of_birth is not None:
+            m.date_of_birth = parsed_dob
+    else:
+        # Verified ACTIVE member: sensitive fields require approval if modified
+        sensitive_checks = [
+            ('name_bn', user.name_bn, payload.name_bn),
+            ('name_en', user.name_en, payload.name_en),
+            ('nid_number', m.nid_number, payload.nid_number),
+            (
+                'date_of_birth',
+                m.date_of_birth.strftime('%Y-%m-%d') if m.date_of_birth else None,
+                parsed_dob.strftime('%Y-%m-%d') if parsed_dob else None,
+            ),
+        ]
+        for f_name, cur_val, new_val in sensitive_checks:
+            if new_val is not None and str(new_val).strip() != '' and str(new_val).strip() != str(cur_val or '').strip():
+                existing_req = db.scalar(
+                    select(MemberProfileChangeRequest).where(
+                        MemberProfileChangeRequest.member_id == m.id,
+                        MemberProfileChangeRequest.field_name == f_name,
+                        MemberProfileChangeRequest.status == 'PENDING',
+                    )
+                )
+                if existing_req:
+                    existing_req.requested_value = str(new_val).strip()
+                    req_obj = existing_req
+                else:
+                    req_obj = MemberProfileChangeRequest(
+                        member_id=m.id,
+                        user_id=user.id,
+                        field_name=f_name,
+                        current_value=str(cur_val) if cur_val is not None else None,
+                        requested_value=str(new_val).strip(),
+                        reason='Profile verification change request from Member Portal',
+                        status='PENDING',
+                    )
+                    db.add(req_obj)
+                    db.flush()
+                created_change_requests.append({
+                    'id': req_obj.id,
+                    'field_name': f_name,
+                    'requested_value': req_obj.requested_value,
+                    'status': req_obj.status,
+                })
+
+    for field in [
+        'designation_bn',
+        'designation_en',
+        'employee_id',
+        'diploma_institution',
+        'graduation_year',
+        'current_address',
+        'permanent_address',
+        'circle_id',
+    ]:
+        val = getattr(payload, field, None)
+        if val is not None:
+            setattr(m, field, val)
+
     if payload.membership_type:
         m.membership_type = payload.membership_type
+
+    for meta_field in [
+        'father_name',
+        'mother_name',
+        'gender',
+        'blood_group',
+        'organization',
+        'department',
+        'profession',
+        'academic_qualification',
+        'professional_qualification',
+        'years_of_experience',
+        'alternate_phone',
+        'district',
+        'emergency_contact_name',
+        'emergency_contact_relationship',
+        'emergency_contact_phone',
+        'emergency_contact_address',
+        'preferred_language',
+        'profile_visibility',
+    ]:
+        val = getattr(payload, meta_field, None)
+        if val is not None:
+            setattr(meta, meta_field, val)
+
+    if payload.directory_visibility is not None:
+        meta.directory_visibility = bool(payload.directory_visibility)
+    elif payload.directory_visible is not None:
+        meta.directory_visibility = bool(payload.directory_visible)
+
+    if payload.contact_visibility is not None:
+        meta.contact_visibility = bool(payload.contact_visibility)
+    elif payload.show_phone_in_directory is not None:
+        meta.contact_visibility = bool(payload.show_phone_in_directory)
+
     audit(db, user, 'UPDATE_PROFILE', 'MEMBER', m.id, request.client.host if request.client else None)
     db.commit()
-    return {'ok': True, 'id': m.id}
+    exp = _compute_expiry_info(m)
+    completion = _compute_profile_completion(user, m, meta)
+    serialized = _serialize_full_profile(user, m, meta, exp, completion, created_change_requests)
+    return {
+        **serialized,
+        'ok': True,
+        'pending_change_requests': created_change_requests,
+        'pending_verification_fields': [r['field_name'] for r in created_change_requests],
+    }
+
+
+@router.get('/profile/change-requests')
+def list_profile_change_requests(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    m = get_member(user, db)
+    rows = db.scalars(
+        select(MemberProfileChangeRequest)
+        .where(MemberProfileChangeRequest.member_id == m.id)
+        .order_by(MemberProfileChangeRequest.created_at.desc())
+        .limit(30)
+    ).all()
+    items = [
+        {
+            'id': r.id,
+            'field_name': r.field_name,
+            'field_label_en': SENSITIVE_PROFILE_FIELDS.get(r.field_name, (r.field_name, r.field_name))[0],
+            'field_label_bn': SENSITIVE_PROFILE_FIELDS.get(r.field_name, (r.field_name, r.field_name))[1],
+            'current_value': r.current_value,
+            'requested_value': r.requested_value,
+            'reason': r.reason,
+            'supporting_doc_url': r.supporting_doc_url,
+            'status': r.status,
+            'reviewer_note': r.review_note,
+            'review_note': r.review_note,
+            'created_at': r.created_at,
+            'reviewed_at': r.reviewed_at,
+        }
+        for r in rows
+    ]
+    return {'items': items, 'change_requests': items, 'count': len(items)}
+
+
+@router.post('/profile/change-requests')
+def create_profile_change_request(
+    payload: ProfileChangeRequestCreate,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    m = get_member(user, db)
+    f_name = payload.field_name.strip().lower()
+    if f_name not in SENSITIVE_PROFILE_FIELDS:
+        raise HTTPException(
+            400,
+            f'Unsupported verification field "{f_name}". Supported fields: {", ".join(SENSITIVE_PROFILE_FIELDS.keys())}',
+        )
+
+    current_val_map = {
+        'name_bn': user.name_bn,
+        'name_en': user.name_en,
+        'date_of_birth': m.date_of_birth.strftime('%Y-%m-%d') if m.date_of_birth else None,
+        'nid_number': m.nid_number,
+        'membership_id': m.membership_id,
+        'certificate_info': m.diploma_institution,
+    }
+    cur_val = current_val_map.get(f_name)
+
+    existing_req = db.scalar(
+        select(MemberProfileChangeRequest).where(
+            MemberProfileChangeRequest.member_id == m.id,
+            MemberProfileChangeRequest.field_name == f_name,
+            MemberProfileChangeRequest.status == 'PENDING',
+        )
+    )
+    if existing_req:
+        existing_req.requested_value = payload.requested_value.strip()
+        existing_req.reason = payload.reason
+        if payload.supporting_doc_url:
+            existing_req.supporting_doc_url = payload.supporting_doc_url
+        req_obj = existing_req
+    else:
+        req_obj = MemberProfileChangeRequest(
+            member_id=m.id,
+            user_id=user.id,
+            field_name=f_name,
+            current_value=str(cur_val) if cur_val is not None else None,
+            requested_value=payload.requested_value.strip(),
+            reason=payload.reason or 'Requested via Member Portal',
+            supporting_doc_url=payload.supporting_doc_url,
+            status='PENDING',
+        )
+        db.add(req_obj)
+        db.flush()
+
+    audit(db, user, 'REQUEST_PROFILE_CHANGE', 'MEMBER_PROFILE_CHANGE', req_obj.id, request.client.host if request.client else None)
+    officers = db.scalars(
+        select(User).where(
+            User.role.in_(['MEMBERSHIP_OFFICER', 'MEMBERSHIP_ADMIN', 'CENTRAL_ADMIN', 'SUPER_ADMIN']),
+            User.is_active == True,
+        )
+    ).all()
+    field_lbl_bn = SENSITIVE_PROFILE_FIELDS[f_name][1]
+    for officer in officers:
+        notify(
+            db,
+            officer.id,
+            'প্রোফাইল তথ্য সংশোধনের আবেদন',
+            f'{user.name_bn} তার "{field_lbl_bn}" পরিবর্তনের জন্য যাচাইকরণের আবেদন করেছেন।',
+            'MEMBERSHIP',
+        )
+    db.commit()
+    db.refresh(req_obj)
+    return {
+        'ok': True,
+        'id': req_obj.id,
+        'field_name': req_obj.field_name,
+        'field_label_en': SENSITIVE_PROFILE_FIELDS[f_name][0],
+        'field_label_bn': SENSITIVE_PROFILE_FIELDS[f_name][1],
+        'current_value': req_obj.current_value,
+        'requested_value': req_obj.requested_value,
+        'reason': req_obj.reason,
+        'status': req_obj.status,
+        'created_at': req_obj.created_at,
+    }
+
+
+@router.get('/application/timeline')
+def get_member_application_timeline(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    m = get_member(user, db)
+    return _build_application_timeline(db, m)
 
 
 @router.post('/application/draft', response_model=ApplicationResponse)
@@ -654,13 +1433,30 @@ def upload_document(request: Request, document_type: str, file: UploadFile = Fil
         member.photo_url = stored
     audit(db, user, 'UPLOAD_DOCUMENT', 'MEMBER_DOCUMENT', member.id, request.client.host if request.client else None)
     db.commit(); db.refresh(doc)
-    return MemberDocumentResponse(id=doc.id, document_type=doc.document_type, filename=doc.filename, review_status=doc.review_status, created_at=doc.created_at)
+    return MemberDocumentResponse(
+        id=doc.id,
+        document_type=doc.document_type,
+        filename=doc.filename,
+        review_status=doc.review_status,
+        reviewer_note=getattr(doc, 'reviewer_note', None),
+        created_at=doc.created_at,
+    )
 
 
 @router.get('/documents', response_model=list[MemberDocumentResponse])
 def list_documents(user: User = Depends(current_user), db: Session = Depends(get_db)):
     m = get_member(user, db)
-    return [MemberDocumentResponse(id=d.id, document_type=d.document_type, filename=d.filename, review_status=d.review_status, created_at=d.created_at) for d in m.documents]
+    return [
+        MemberDocumentResponse(
+            id=d.id,
+            document_type=d.document_type,
+            filename=d.filename,
+            review_status=d.review_status,
+            reviewer_note=getattr(d, 'reviewer_note', None),
+            created_at=d.created_at,
+        )
+        for d in m.documents
+    ]
 
 
 @router.get('/documents/{document_id}/download')
@@ -774,6 +1570,205 @@ def list_member_certificates(user: User = Depends(current_user), db: Session = D
     from app.services.certificate_service import CertificateService
     m = get_member(user, db)
     return CertificateService.ensure_member_wallet_certificates(db, user, m)
+
+
+@router.get('/updates')
+def list_member_updates(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Return circulars and notices inside the Member Portal with bookmark and read state."""
+    saved_rows = db.scalars(
+        select(MemberSavedContent).where(MemberSavedContent.user_id == user.id)
+    ).all()
+    saved_map = {(s.entity_type.upper(), s.entity_id): s for s in saved_rows}
+
+    circulars = db.scalars(
+        select(Circular).where(Circular.is_published == True).order_by(Circular.created_at.desc()).limit(25)
+    ).all()
+    notices = db.scalars(
+        select(Notice).where(Notice.is_published == True).order_by(Notice.created_at.desc()).limit(25)
+    ).all()
+
+    items: list[dict] = []
+    for cir in circulars:
+        st = saved_map.get(('CIRCULAR', cir.id))
+        items.append({
+            'id': cir.id,
+            'content_type': 'CIRCULAR',
+            'slug': getattr(cir, 'slug', str(cir.id)),
+            'title_bn': cir.title_bn,
+            'title_en': cir.title_en,
+            'summary_bn': cir.summary_bn,
+            'category': cir.category or 'GENERAL',
+            'reference_no': cir.reference_no,
+            'attachment_url': getattr(cir, 'attachment_url', None) or cir.document_url,
+            'published_at': cir.published_at or cir.created_at,
+            'is_bookmarked': bool(st and st.is_bookmarked),
+            'is_read': bool(st and st.is_read),
+        })
+    for ntc in notices:
+        st = saved_map.get(('NOTICE', ntc.id))
+        items.append({
+            'id': ntc.id,
+            'content_type': 'NOTICE',
+            'slug': getattr(ntc, 'slug', str(ntc.id)),
+            'title_bn': ntc.title_bn,
+            'title_en': ntc.title_en,
+            'summary_bn': getattr(ntc, 'summary_bn', None) or ntc.content_bn,
+            'category': ntc.category or 'NOTICE',
+            'reference_no': None,
+            'attachment_url': ntc.attachment_url,
+            'published_at': ntc.published_at or ntc.created_at,
+            'is_bookmarked': bool(st and st.is_bookmarked),
+            'is_read': bool(st and st.is_read),
+        })
+    return {'items': items, 'count': len(items)}
+
+
+@router.post('/updates/bookmark')
+def toggle_member_update_bookmark(payload: dict, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    entity_type = str(payload.get('content_type') or payload.get('entity_type') or 'CIRCULAR').strip().upper()
+    entity_id = int(payload.get('content_id') or payload.get('entity_id') or 0)
+    if entity_type not in ('CIRCULAR', 'NOTICE', 'EVENT') or entity_id <= 0:
+        raise HTTPException(400, 'Invalid content_type or content_id')
+    row = db.scalar(
+        select(MemberSavedContent).where(
+            MemberSavedContent.user_id == user.id,
+            MemberSavedContent.entity_type == entity_type,
+            MemberSavedContent.entity_id == entity_id,
+        )
+    )
+    if not row:
+        row = MemberSavedContent(
+            user_id=user.id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            is_bookmarked=True,
+            is_read=True,
+        )
+        db.add(row)
+    else:
+        row.is_bookmarked = not bool(row.is_bookmarked)
+    db.commit()
+    return {'ok': True, 'entity_type': entity_type, 'entity_id': entity_id, 'is_bookmarked': bool(row.is_bookmarked)}
+
+
+@router.post('/updates/read')
+def mark_member_update_read(payload: dict, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    entity_type = str(payload.get('content_type') or payload.get('entity_type') or 'CIRCULAR').strip().upper()
+    entity_id = int(payload.get('content_id') or payload.get('entity_id') or 0)
+    if entity_type not in ('CIRCULAR', 'NOTICE', 'EVENT') or entity_id <= 0:
+        raise HTTPException(400, 'Invalid content_type or content_id')
+    row = db.scalar(
+        select(MemberSavedContent).where(
+            MemberSavedContent.user_id == user.id,
+            MemberSavedContent.entity_type == entity_type,
+            MemberSavedContent.entity_id == entity_id,
+        )
+    )
+    if not row:
+        row = MemberSavedContent(
+            user_id=user.id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            is_bookmarked=False,
+            is_read=True,
+        )
+        db.add(row)
+    else:
+        row.is_read = True
+    db.commit()
+    return {'ok': True, 'entity_type': entity_type, 'entity_id': entity_id, 'is_read': True}
+
+
+@router.get('/settings')
+def get_member_settings(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    m = get_member(user, db)
+    meta = _get_or_create_profile_meta(db, m.id)
+    notif_prefs = get_notification_preferences(user, db)
+    db.commit()
+    return {
+        'preferred_language': meta.preferred_language or 'bn',
+        'profile_visibility': meta.profile_visibility or 'MEMBERS_ONLY',
+        'directory_visibility': bool(meta.directory_visibility),
+        'contact_visibility': bool(meta.contact_visibility),
+        'privacy': {
+            'directory_visible': bool(meta.directory_visibility),
+            'show_phone': bool(meta.contact_visibility),
+            'show_email': bool(meta.contact_visibility),
+            'profile_visibility': meta.profile_visibility or 'MEMBERS_ONLY',
+        },
+        'notification_preferences': notif_prefs,
+        'two_factor_enabled': bool(getattr(user, 'two_factor_enabled', False)),
+    }
+
+
+@router.put('/settings')
+@router.patch('/settings')
+def update_member_settings(payload: dict, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    m = get_member(user, db)
+    meta = _get_or_create_profile_meta(db, m.id)
+    if 'preferred_language' in payload and payload['preferred_language'] in ('bn', 'en'):
+        meta.preferred_language = payload['preferred_language']
+    if 'profile_visibility' in payload and payload['profile_visibility'] in ('PUBLIC', 'MEMBERS_ONLY', 'PRIVATE'):
+        meta.profile_visibility = payload['profile_visibility']
+    if 'directory_visibility' in payload:
+        meta.directory_visibility = bool(payload['directory_visibility'])
+    elif 'privacy_directory_visible' in payload:
+        meta.directory_visibility = bool(payload['privacy_directory_visible'])
+    if 'contact_visibility' in payload:
+        meta.contact_visibility = bool(payload['contact_visibility'])
+    elif 'privacy_show_phone' in payload:
+        meta.contact_visibility = bool(payload['privacy_show_phone'])
+    elif 'privacy_show_email' in payload:
+        meta.contact_visibility = bool(payload['privacy_show_email'])
+    if any(k in payload for k in ('email_enabled', 'sms_enabled', 'in_app_enabled')):
+        update_notification_preferences(payload, user, db)
+    audit(db, user, 'UPDATE_MEMBER_SETTINGS', 'MEMBER', m.id, request.client.host if request.client else None)
+    db.commit()
+    return get_member_settings(user, db)
+
+
+@router.get('/login-history')
+def get_member_login_history(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    sessions = db.scalars(
+        select(UserSession)
+        .where(UserSession.user_id == user.id)
+        .order_by(UserSession.created_at.desc())
+        .limit(10)
+    ).all()
+    logs = db.scalars(
+        select(AuditLog)
+        .where(AuditLog.user_id == user.id, AuditLog.action.in_(['LOGIN', 'UPDATE_PROFILE', 'CHANGE_PASSWORD', 'INITIATE_RENEWAL']))
+        .order_by(AuditLog.created_at.desc())
+        .limit(15)
+    ).all()
+    sessions_list = [
+        {
+            'id': s.id,
+            'ip_address': getattr(s, 'ip_address', None) or '127.0.0.1',
+            'user_agent': getattr(s, 'user_agent', None) or 'Web Browser',
+            'created_at': s.created_at,
+            'expires_at': s.expires_at,
+            'is_active': s.revoked_at is None and (s.expires_at is None or s.expires_at > datetime.utcnow()),
+        }
+        for s in sessions
+    ]
+    events_list = [
+        {
+            'id': lg.id,
+            'action': lg.action,
+            'entity_type': lg.entity,
+            'ip_address': lg.ip_address or '127.0.0.1',
+            'created_at': lg.created_at,
+        }
+        for lg in logs
+    ]
+    return {
+        'items': events_list,
+        'sessions': sessions_list,
+        'security_events': events_list,
+    }
+
+
 
 
 

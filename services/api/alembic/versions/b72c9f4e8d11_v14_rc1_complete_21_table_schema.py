@@ -183,6 +183,72 @@ def upgrade():
         )
         op.create_index('ix_ai_messages_conversation_id', 'ai_messages', ['conversation_id'], unique=False)
 
+    if 'member_profile_meta' not in existing_tables:
+        op.create_table(
+            'member_profile_meta',
+            sa.Column('id', sa.Integer(), primary_key=True, nullable=False),
+            sa.Column('member_id', sa.Integer(), sa.ForeignKey('members.id', ondelete='CASCADE'), nullable=False),
+            sa.Column('father_name', sa.String(length=200), nullable=True),
+            sa.Column('mother_name', sa.String(length=200), nullable=True),
+            sa.Column('gender', sa.String(length=30), nullable=True),
+            sa.Column('blood_group', sa.String(length=20), nullable=True),
+            sa.Column('organization', sa.String(length=250), nullable=True),
+            sa.Column('department', sa.String(length=200), nullable=True),
+            sa.Column('profession', sa.String(length=200), nullable=True),
+            sa.Column('academic_qualification', sa.String(length=300), nullable=True),
+            sa.Column('professional_qualification', sa.String(length=300), nullable=True),
+            sa.Column('years_of_experience', sa.Integer(), nullable=True),
+            sa.Column('alternate_phone', sa.String(length=50), nullable=True),
+            sa.Column('district', sa.String(length=120), nullable=True),
+            sa.Column('emergency_contact_name', sa.String(length=200), nullable=True),
+            sa.Column('emergency_contact_relationship', sa.String(length=100), nullable=True),
+            sa.Column('emergency_contact_phone', sa.String(length=50), nullable=True),
+            sa.Column('emergency_contact_address', sa.Text(), nullable=True),
+            sa.Column('preferred_language', sa.String(length=10), nullable=False, server_default='bn'),
+            sa.Column('profile_visibility', sa.String(length=30), nullable=False, server_default='MEMBERS_ONLY'),
+            sa.Column('directory_visibility', sa.Boolean(), nullable=False, server_default=sa.text('true')),
+            sa.Column('contact_visibility', sa.Boolean(), nullable=False, server_default=sa.text('false')),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.Column('updated_at', sa.DateTime(), nullable=False),
+        )
+        op.create_index('ix_member_profile_meta_member_id', 'member_profile_meta', ['member_id'], unique=True)
+
+    if 'member_profile_change_requests' not in existing_tables:
+        op.create_table(
+            'member_profile_change_requests',
+            sa.Column('id', sa.Integer(), primary_key=True, nullable=False),
+            sa.Column('member_id', sa.Integer(), sa.ForeignKey('members.id', ondelete='CASCADE'), nullable=False),
+            sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
+            sa.Column('field_name', sa.String(length=80), nullable=False),
+            sa.Column('current_value', sa.Text(), nullable=True),
+            sa.Column('requested_value', sa.Text(), nullable=False),
+            sa.Column('reason', sa.Text(), nullable=True),
+            sa.Column('supporting_doc_url', sa.String(length=1000), nullable=True),
+            sa.Column('status', sa.String(length=30), nullable=False, server_default='PENDING'),
+            sa.Column('reviewer_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
+            sa.Column('review_note', sa.Text(), nullable=True),
+            sa.Column('reviewed_at', sa.DateTime(), nullable=True),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.Column('updated_at', sa.DateTime(), nullable=False),
+        )
+        op.create_index('ix_member_profile_change_requests_member_id', 'member_profile_change_requests', ['member_id'], unique=False)
+        op.create_index('ix_member_profile_change_requests_status', 'member_profile_change_requests', ['status'], unique=False)
+
+    if 'member_saved_content' not in existing_tables:
+        op.create_table(
+            'member_saved_content',
+            sa.Column('id', sa.Integer(), primary_key=True, nullable=False),
+            sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
+            sa.Column('entity_type', sa.String(length=40), nullable=False),
+            sa.Column('entity_id', sa.Integer(), nullable=False),
+            sa.Column('is_bookmarked', sa.Boolean(), nullable=False, server_default=sa.text('false')),
+            sa.Column('is_read', sa.Boolean(), nullable=False, server_default=sa.text('false')),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.Column('updated_at', sa.DateTime(), nullable=False),
+            sa.UniqueConstraint('user_id', 'entity_type', 'entity_id', name='uq_member_saved_content'),
+        )
+        op.create_index('ix_member_saved_content_user_id', 'member_saved_content', ['user_id'], unique=False)
+
 
 def downgrade():
     bind = op.get_bind()
@@ -190,6 +256,9 @@ def downgrade():
     existing_tables = set(inspector.get_table_names())
 
     for tbl in (
+        'member_saved_content',
+        'member_profile_change_requests',
+        'member_profile_meta',
         'ai_messages',
         'ai_conversations',
         'notification_templates',
@@ -202,3 +271,4 @@ def downgrade():
     ):
         if tbl in existing_tables:
             op.drop_table(tbl)
+

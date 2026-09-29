@@ -206,11 +206,19 @@ export interface DigitalCardDetails {
 export interface RenewalOptionItem {
   code: string;
   plan_id?: string;
-  label_en: string;
-  label_bn: string;
+  period?: string;
+  label_en?: string;
+  label_bn?: string;
+  title_en?: string;
+  title_bn?: string;
   years: number;
-  fee: number;
+  days?: number;
+  fee?: number;
+  amount?: number;
   amount_bdt?: number;
+  amount_formatted?: string;
+  projected_validity_date?: string;
+  projected_validity_formatted?: string;
   currency: string;
 }
 
@@ -223,23 +231,90 @@ export interface NotificationPreferences {
 
 export interface MemberDashboardData {
   greeting?: string;
+  user?: Record<string, any>;
+  member?: Record<string, any>;
   hero_card?: Record<string, any>;
   membership?: {
-    member_id: string;
+    id?: number;
+    member_id?: string;
+    membership_id?: string;
+    membership_type?: string;
     status: string;
     valid_until?: string;
+    validity_date?: string;
+    issue_date?: string;
     valid_until_formatted?: string;
     days_remaining?: number | null;
+    days_until_expiry?: number | null;
+    circle_id?: number | null;
+    circle_bn?: string;
+    circle_en?: string;
     circle_name_bn?: string;
     designation_bn?: string;
+    designation_en?: string;
   };
+  application?: {
+    id: number;
+    application_no: string;
+    membership_id?: string | null;
+    membership_type: string;
+    status: string;
+    status_label_en: string;
+    status_label_bn: string;
+    circle_bn?: string | null;
+    circle_en?: string | null;
+    submitted_at?: string | null;
+    approved_at?: string | null;
+    reviewer_notes?: string | null;
+    stages: Array<{
+      step: number;
+      key: string;
+      label_en: string;
+      label_bn: string;
+      status: string;
+      icon: string;
+    }>;
+    required_actions: Array<{
+      code: string;
+      message_en: string;
+      message_bn: string;
+    }>;
+  };
+  payment_summary?: Record<string, any>;
+  documents?: Array<Record<string, any>>;
+  certificates?: CertificateWalletItem[];
+  events?: Array<Record<string, any>>;
+  circulars?: Array<Record<string, any>>;
+  notifications?: Array<Record<string, any>>;
+  profile_completion?: number;
+  profile_completion_details?: {
+    percentage: number;
+    is_complete: boolean;
+    completed_count: number;
+    total_count: number;
+    items: Array<{
+      key: string;
+      label_en: string;
+      label_bn: string;
+      completed: boolean;
+      weight: number;
+    }>;
+  };
+  digital_id_available?: boolean;
+  change_requests?: Array<Record<string, any>>;
   quick_actions?: Array<Record<string, any>>;
   quick_stats?: Record<string, any>;
   recent_activity?: Array<{
+    id?: string;
+    type?: string;
     title?: string;
+    title_en?: string;
     title_bn?: string;
+    subtitle_bn?: string;
     status?: string;
     timestamp?: string;
+    relative_time_en?: string;
+    relative_time_bn?: string;
   }>;
 }
 

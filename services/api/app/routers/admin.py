@@ -1211,8 +1211,24 @@ async def review_membership_application_action(
 
 
 @router.post('/documents/{document_id}/review')
-def review_document(document_id: int, action: str, request: Request, admin: User = Depends(require_permission('document.review')), db: Session = Depends(get_db)):
-    if action not in {'APPROVE', 'REJECT', 'PENDING'}:
+def review_document(
+    document_id: int,
+    action: str,
+    request: Request,
+    note: str | None = None,
+    admin: User = Depends(require_permission('document.review')),
+    db: Session = Depends(get_db),
+):
+    norm_action = action.strip().upper()
+    action_map = {
+        'APPROVE': 'APPROVE',
+        'APPROVED': 'APPROVED',
+        'REJECT': 'REJECT',
+        'REJECTED': 'REJECTED',
+        'PENDING': 'PENDING',
+        'REPLACEMENT_REQUIRED': 'REPLACEMENT_REQUIRED',
+    }
+    if norm_action not in action_map:
         raise HTTPException(400, 'Invalid document action')
     d = db.get(MemberDocument, document_id)
     if not d:
@@ -1222,10 +1238,108 @@ def review_document(document_id: int, action: str, request: Request, admin: User
         m = db.get(Member, d.member_id)
         if not m or m.circle_id != scope:
             raise HTTPException(403, 'Circle Administrator cannot review documents outside their assigned Grid Circle')
-    d.review_status = action
-    audit(db, admin, f'{action}_DOCUMENT', 'MEMBER_DOCUMENT', d.id, _actor_ip(request))
+    d.review_status = action_map[norm_action]
+    resolved_note = note.strip() if note else None
+    if hasattr(d, 'reviewer_note') and note is not None:
+        d.reviewer_note = resolved_note
+    if hasattr(d, 'reviewed_by'):
+        d.reviewed_by = admin.id
+    if hasattr(d, 'reviewed_at'):
+        d.reviewed_at = datetime.utcnow()
+    audit(db, admin, f'{norm_action}_DOCUMENT', 'MEMBER_DOCUMENT', d.id, _actor_ip(request))
     db.commit()
-    return {'ok': True, 'review_status': d.review_status}
+    return {'ok': True, 'review_status': d.review_status, 'reviewer_note': getattr(d, 'reviewer_note', resolved_note)}
+
+
+@router.get('/profile-change-requests')
+def list_admin_profile_change_requests(
+    status: str | None = None,
+    admin: User = Depends(require_permission('member.read')),
+    db: Session = Depends(get_db),
+):
+    from app.models import MemberProfileChangeRequest
+    stmt = select(MemberProfileChangeRequest).order_by(MemberProfileChangeRequest.created_at.desc())
+    if status and status.upper() != 'ALL':
+        stmt = stmt.where(MemberProfileChangeRequest.status == status.strip().upper())
+    rows = db.scalars(stmt.limit(100)).all()
+    items = []
+    for r in rows:
+        m = db.get(Member, r.member_id)
+        u = db.get(User, r.user_id)
+        items.append({
+            'id': r.id,
+            'member_id': r.member_id,
+            'membership_id': m.membership_id if m else None,
+            'user_id': r.user_id,
+            'member_name_bn': u.name_bn if u else None,
+            'member_name_en': u.name_en if u else None,
+            'field_name': r.field_name,
+            'current_value': r.current_value,
+            'requested_value': r.requested_value,
+            'reason': r.reason,
+            'supporting_doc_url': r.supporting_doc_url,
+            'status': r.status,
+            'review_note': r.review_note,
+            'reviewer_id': r.reviewer_id,
+            'created_at': r.created_at,
+            'reviewed_at': r.reviewed_at,
+        })
+    return {'items': items, 'count': len(items)}
+
+
+@router.post('/profile-change-requests/{request_id}/review')
+def review_admin_profile_change_request(
+    request_id: int,
+    payload: dict,
+    request: Request,
+    admin: User = Depends(require_permission('member.review')),
+    db: Session = Depends(get_db),
+):
+    from app.models import MemberProfileChangeRequest
+    from app.routers.membership import _parse_dob
+
+    req_obj = db.get(MemberProfileChangeRequest, request_id)
+    if not req_obj:
+        raise HTTPException(404, 'Profile change request not found')
+    action = str(payload.get('action') or 'APPROVE').strip().upper()
+    note = str(payload.get('note') or payload.get('review_note') or '').strip() or None
+    if action not in ('APPROVE', 'APPROVED', 'REJECT', 'REJECTED'):
+        raise HTTPException(400, 'Action must be APPROVE or REJECT')
+
+    m = db.get(Member, req_obj.member_id)
+    u = db.get(User, req_obj.user_id)
+    if not m or not u:
+        raise HTTPException(404, 'Target member not found')
+
+    if action in ('APPROVE', 'APPROVED'):
+        req_obj.status = 'APPROVED'
+        f_name = req_obj.field_name
+        val = req_obj.requested_value
+        if f_name == 'name_bn':
+            u.name_bn = val
+        elif f_name == 'name_en':
+            u.name_en = val
+        elif f_name == 'nid_number':
+            m.nid_number = val
+        elif f_name == 'date_of_birth':
+            m.date_of_birth = _parse_dob(val)
+        elif f_name == 'membership_id':
+            m.membership_id = val
+        elif f_name == 'certificate_info':
+            m.diploma_institution = val
+        notify_msg = f'আপনার প্রোফাইল তথ্য সংশোধনের আবেদন ({f_name}) অনুমোদিত হয়েছে।'
+    else:
+        req_obj.status = 'REJECTED'
+        notify_msg = f'আপনার প্রোফাইল তথ্য সংশোধনের আবেদন ({req_obj.field_name}) প্রত্যাখ্যাত হয়েছে।'
+
+    req_obj.reviewer_id = admin.id
+    req_obj.review_note = note
+    req_obj.reviewed_at = datetime.utcnow()
+    audit(db, admin, f'{req_obj.status}_PROFILE_CHANGE', 'MEMBER_PROFILE_CHANGE', req_obj.id, _actor_ip(request))
+    notify(db, u.id, 'প্রোফাইল যাচাইকরণ আপডেট', notify_msg, 'MEMBERSHIP')
+    db.commit()
+    return {'ok': True, 'id': req_obj.id, 'status': req_obj.status, 'review_note': req_obj.review_note}
+
 
 
 @router.get('/documents/{document_id}/download')
