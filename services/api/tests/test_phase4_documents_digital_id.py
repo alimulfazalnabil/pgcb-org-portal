@@ -327,6 +327,17 @@ def test_certificate_center_and_revocation():
     cert_id = cert["id"]
     cert_no = cert["certificate_no"]
 
+    from app.models.core import Certificate
+    from app.db.session import SessionLocal
+    with SessionLocal() as db_session:
+        db_cert = db_session.get(Certificate, cert_id)
+        if db_cert and db_cert.status != "VALID":
+            db_cert.status = "VALID"
+            db_cert.revoked_at = None
+            db_cert.revoked_by_id = None
+            db_cert.revocation_reason = None
+            db_session.commit()
+
     # 2. Cross-member access blocked
     res_other = client.get(f"/api/v1/member/certificates/{cert_id}", headers=headers_other)
     assert res_other.status_code == 403

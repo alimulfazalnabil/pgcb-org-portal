@@ -809,19 +809,27 @@ def _execute_member_tools(
         return tools_used, ans_en, ans_bn, actions
 
     # 2. Payment Assistant
-    if any(
+    if not any(d_w in q_lower for d_w in ('document', 'documents', 'নথি', 'কাগজপত্র')) and any(
         k in q_lower
         for k in (
             'my payment',
             'my receipt',
             'last payment',
-            'paid',
+            'pending payment',
+            'বকেয়া পেমেন্ট',
+            'পেন্ডিং পেমেন্ট',
+            'পেমেন্ট',
             'আমার পেমেন্ট',
             'আমার রসিদ',
             'শেষ payment',
             'শেষ পেমেন্ট',
+            'বকেয়া',
+            'বকেয়া',
             'কত ছিল',
             'কবে করেছি',
+            'রসিদ ডাউনলোড',
+            'download receipt',
+            'receipt',
         )
     ):
         txs: list[PaymentTransaction] = []
@@ -829,12 +837,27 @@ def _execute_member_tools(
             txs = list(
                 db.scalars(
                     select(PaymentTransaction)
-                    .where(PaymentTransaction.member_id == member.id)
+                    .where(
+                        or_(
+                            PaymentTransaction.member_id == member.id,
+                            PaymentTransaction.user_id == user.id,
+                        )
+                    )
                     .order_by(PaymentTransaction.id.desc())
-                    .limit(5)
                 ).all()
             )
-        paid_txs = [t for t in txs if t.status == 'PAID']
+        else:
+            txs = list(
+                db.scalars(
+                    select(PaymentTransaction)
+                    .where(PaymentTransaction.user_id == user.id)
+                    .order_by(PaymentTransaction.id.desc())
+                ).all()
+            )
+
+        is_pending_query = any(w in q_lower for w in ('pending', 'বকেয়া', 'বকেয়া', 'অপেক্ষমান'))
+        pending_txs = [t for t in txs if t.status in ('PENDING', 'INITIATED', 'PROCESSING')]
+        paid_txs = [t for t in txs if t.status in ('PAID', 'SUCCESS', 'COMPLETED')]
         total_paid = sum(int(t.amount or 0) for t in paid_txs)
         latest_tx = paid_txs[0] if paid_txs else (txs[0] if txs else None)
         latest_ref = latest_tx.transaction_ref if latest_tx else 'None'
@@ -849,6 +872,7 @@ def _execute_member_tools(
         result_payload = {
             'transactions_count': len(txs),
             'paid_count': len(paid_txs),
+            'pending_count': len(pending_txs),
             'total_paid_bdt': total_paid,
             'latest_transaction_ref': latest_ref,
             'latest_amount_bdt': latest_amt,
@@ -871,14 +895,52 @@ def _execute_member_tools(
         )
         actions.append(
             {
-                'type': 'OPEN_RECEIPT',
-                'action': 'OPEN_RECEIPT',
-                'label': 'View Receipt',
-                'label_bn': 'রসিদ দেখুন (View Receipt)',
-                'url': '/portal#payments',
+                'type': 'OPEN_PAYMENTS',
+                'action': 'OPEN_PAYMENTS',
+                'label': 'View Payment Center',
+                'label_bn': 'পেমেন্ট সেন্টার দেখুন',
+                'url': '/member/payments',
             }
         )
-        if latest_tx:
+        if latest_tx and latest_tx.status in ('PAID', 'SUCCESS', 'COMPLETED'):
+            actions.append(
+                {
+                    'type': 'DOWNLOAD_RECEIPT',
+                    'action': 'DOWNLOAD_RECEIPT',
+                    'label': 'Download Receipt PDF',
+                    'label_bn': 'রসিদ ডাউনলোড করুন (PDF)',
+                    'url': f'/api/v1/member/payments/{latest_tx.id}/receipt.pdf',
+                }
+            )
+
+        if is_pending_query:
+            if pending_txs:
+                p_item = pending_txs[0]
+                p_amt = int(p_item.amount or 0)
+                p_ref = p_item.transaction_ref or f"PAY-{p_item.id}"
+                ans_en = (
+                    f"You have a pending payment of ৳{p_amt:,} (Reference: {p_ref}).\n"
+                    f"Purpose: {p_item.purpose or 'Membership'}.\n"
+                    f"Please complete your payment via the Member Payment Center."
+                )
+                ans_bn = (
+                    f"আপনার একটি পেন্ডিং পেমেন্ট রয়েছে: ৳{p_amt:,} (রেফারেন্স: {p_ref})।\n"
+                    f"উদ্দেশ্য: {p_item.purpose or 'সদস্যপদ ফি'}।\n"
+                    f"অনুগ্রহ করে মেম্বার পেমেন্ট সেন্টার থেকে পেমেন্ট সম্পন্ন করুন।"
+                )
+                actions.append(
+                    {
+                        'type': 'PAY_NOW',
+                        'action': 'PAY_NOW',
+                        'label': 'Pay Now',
+                        'label_bn': 'এখনই পরিশোধ করুন',
+                        'url': f'/member/payments/{p_item.id}',
+                    }
+                )
+            else:
+                ans_en = "You have no pending payments. Your membership account is fully up to date."
+                ans_bn = "আপনার কোনো বকেয়া বা পেন্ডিং পেমেন্ট নেই। আপনার সদস্যপদ অ্যাকাউন্ট সম্পূর্ণ হালনাগাদ রয়েছে।"
+        elif latest_tx:
             ans_en = (
                 f"Your latest verified payment:\n\n"
                 f"Amount: ৳{latest_amt:,}\n"
@@ -895,6 +957,9 @@ def _execute_member_tools(
                 f"Date: {latest_date}\n\n"
                 f"(মোট যাচাইকৃত পেমেন্ট: {len(paid_txs)} টি, সর্বমোট পরিশোধিত: ৳{total_paid:,} টাকা)"
             )
+            if any(w in q_lower for w in ('রসিদ', 'receipt', 'ডাউনলোড', 'download')):
+                ans_en += f"\n\nYou can download your official receipt using the link below."
+                ans_bn += f"\n\nআপনি নিচের লিংক থেকে আপনার অফিশিয়াল পেমেন্ট রসিদ ডাউনলোড করতে পারেন।"
         else:
             ans_en = 'No verified payment transactions were found for your membership account yet.'
             ans_bn = 'আপনার সদস্যপদ অ্যাকাউন্টে এখনো কোনো যাচাইকৃত পেমেন্ট লেনদেন পাওয়া যায়নি।'

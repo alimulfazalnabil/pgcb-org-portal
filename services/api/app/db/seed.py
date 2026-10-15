@@ -186,6 +186,18 @@ def main(synthetic_count: int = 0, production_only: bool = False, import_officia
 
     if not is_prod_like:
         Base.metadata.create_all(bind=engine)
+        if str(engine.url).startswith('sqlite'):
+            try:
+                from sqlalchemy import inspect as sqla_inspect, text as sqla_text
+                insp = sqla_inspect(engine)
+                if 'member_profile_change_requests' in insp.get_table_names():
+                    cols = {c['name'] for c in insp.get_columns('member_profile_change_requests')}
+                    if 'supporting_document_id' not in cols:
+                        with engine.connect() as conn:
+                            conn.execute(sqla_text("ALTER TABLE member_profile_change_requests ADD COLUMN supporting_document_id INTEGER"))
+                            conn.commit()
+            except Exception:
+                pass
 
     db = SessionLocal()
     try:

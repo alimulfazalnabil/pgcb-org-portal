@@ -9,6 +9,7 @@ import {
   MembershipRenewalRequest,
   MembershipRenewalResult,
   ApplicationCenterDetails,
+  PaymentSummary,
 } from './types';
 
 export const membersApi = {
@@ -182,7 +183,7 @@ export const membersApi = {
   // Phase 5 — Payments & Receipts
   getPaymentSummary: (statusFilter?: string) => {
     const q = statusFilter && statusFilter.toUpperCase() !== 'ALL' ? `?status=${encodeURIComponent(statusFilter.toUpperCase())}` : '';
-    return request<any>(`/member/payments${q}`);
+    return request<PaymentSummary>(`/member/payments/summary${q}`);
   },
   getPaymentDetail: (id: number) => request<any>(`/member/payments/${id}`),
   getPaymentReceipt: (id: number) => request<any>(`/member/payments/${id}/receipt`),

@@ -76,6 +76,10 @@ async def lifespan(app: FastAPI):
                         conn.execute(text("ALTER TABLE certificates ADD COLUMN revoked_by_id INTEGER"))
                     if 'revocation_reason' not in cols:
                         conn.execute(text("ALTER TABLE certificates ADD COLUMN revocation_reason TEXT"))
+                if 'member_profile_change_requests' in inspector.get_table_names():
+                    cols = {c['name'] for c in inspector.get_columns('member_profile_change_requests')}
+                    if 'supporting_document_id' not in cols:
+                        conn.execute(text("ALTER TABLE member_profile_change_requests ADD COLUMN supporting_document_id INTEGER"))
                 conn.commit()
         except Exception as exc:
             logger.debug("SQLite table initialization notice: %s", exc)
@@ -236,12 +240,12 @@ from app.routers.member_documents import router as member_documents_router
 app.include_router(member_documents_router, prefix='/api/v1')
 app.include_router(membership.router, prefix='/api/v1')
 app.include_router(card.router, prefix='/api/v1')
+app.include_router(payments_router, prefix='/api/v1')
 app.include_router(admin.router, prefix='/api/v1')
 app.include_router(secretariat_router, prefix='/api/v1')
 app.include_router(helpdesk_router, prefix='/api/v1')
 app.include_router(event_registration_router, prefix='/api/v1')
 app.include_router(event_public_router, prefix='/api/v1')
-app.include_router(payments_router, prefix='/api/v1')
 app.include_router(payment_webhooks_router, prefix='/api/v1')
 app.include_router(certificates_router, prefix='/api/v1')
 app.include_router(workflows_router, prefix='/api/v1')

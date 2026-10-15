@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -596,8 +597,133 @@ def callback_payment_transaction(
     }
 
 
-@router.get("/member/payments")
-def list_payments(user: User = Depends(current_user), db: Session = Depends(get_db)):
+PAYMENT_PURPOSE_EN_MAP = {
+    'MEMBERSHIP': 'Membership Fee',
+    'MEMBERSHIP_FEE': 'Membership Fee',
+    'RENEWAL': 'Membership Renewal Fee',
+    'MEMBERSHIP_RENEWAL': 'Membership Renewal Fee',
+    'APPLICATION': 'Membership Application Fee',
+    'EVENT': 'Event Registration Fee',
+    'DONATION': 'Welfare Contribution',
+}
+
+PAYMENT_PURPOSE_BN_MAP = {
+    'MEMBERSHIP': 'সদস্যপদ ফি',
+    'MEMBERSHIP_FEE': 'সদস্যপদ ফি',
+    'RENEWAL': 'সদস্যপদ নবায়ন ফি',
+    'MEMBERSHIP_RENEWAL': 'সদস্যপদ নবায়ন ফি',
+    'APPLICATION': 'সদস্যপদ আবেদন ফি',
+    'EVENT': 'ইভেন্ট নিবন্ধন ফি',
+    'DONATION': 'কল্যাণ তহবিল অনুদান',
+}
+
+PAYMENT_STATUS_BN_MAP = {
+    'INITIATED': 'শুরু করা হয়েছে',
+    'PENDING': 'অপেক্ষমান (Pending)',
+    'PROCESSING': 'প্রক্রিয়াধীন',
+    'PAID': 'পরিশোধিত (Paid)',
+    'SUCCESS': 'পরিশোধিত (Success)',
+    'FAILED': 'ব্যর্থ (Failed)',
+    'CANCELLED': 'বাতিল (Cancelled)',
+    'EXPIRED': 'মেয়াদোত্তীর্ণ (Expired)',
+    'REFUNDED': 'রিফান্ডকৃত (Refunded)',
+    'PARTIALLY_REFUNDED': 'আংশিক রিফান্ডকৃত',
+}
+
+FINANCE_ADMIN_ROLES = {
+    'SUPER_ADMIN',
+    'CENTRAL_ADMIN',
+    'FINANCE_OFFICER',
+    'FINANCE_ADMIN',
+}
+
+
+def _format_payment_item(p: CorePaymentTransaction) -> dict[str, Any]:
+    purpose_key = (p.purpose or 'MEMBERSHIP').upper()
+    is_paid = p.status in ('PAID', 'SUCCESS', 'COMPLETED')
+    created_dt = p.created_at or datetime.utcnow()
+    ref = p.transaction_ref or f"PGCB-PAY-{created_dt.year}-{p.id:06d}"
+    completed_dt = p.completed_at or p.updated_at if is_paid else None
+
+    return {
+        'id': p.id,
+        'reference': ref,
+        'transaction_ref': ref,
+        'member_id': p.member_id,
+        'user_id': p.user_id,
+        'date': created_dt.strftime('%Y-%m-%d'),
+        'purpose': purpose_key,
+        'purpose_label': PAYMENT_PURPOSE_EN_MAP.get(purpose_key, 'Membership Fee'),
+        'purpose_label_en': PAYMENT_PURPOSE_EN_MAP.get(purpose_key, 'Membership Fee'),
+        'purpose_label_bn': PAYMENT_PURPOSE_BN_MAP.get(purpose_key, 'সদস্যপদ ফি'),
+        'membership_plan_id': p.membership_plan_id,
+        'amount': float(p.amount),
+        'amount_formatted': f"৳{int(p.amount):,}",
+        'currency': p.currency or 'BDT',
+        'provider': p.provider,
+        'gateway': p.provider,
+        'provider_tran_id': p.provider_transaction_id or p.transaction_ref,
+        'gateway_transaction_id': p.provider_transaction_id or p.transaction_ref,
+        'receipt_no': p.receipt_no,
+        'status': 'PAID' if is_paid else p.status,
+        'status_label_en': 'PAID' if is_paid else p.status,
+        'status_label_bn': PAYMENT_STATUS_BN_MAP.get(p.status, p.status),
+        'receipt_available': is_paid,
+        'has_receipt': is_paid,
+        'receipt_url': f"/api/v1/member/payments/{p.id}/receipt" if is_paid else None,
+        'receipt_pdf_url': f"/api/v1/member/payments/{p.id}/receipt.pdf" if is_paid else None,
+        'created_at': created_dt.isoformat(),
+        'paid_at': completed_dt.isoformat() if completed_dt else None,
+    }
+
+
+def _compute_payment_summary(user: User, db: Session, status_filter: str | None = None) -> dict[str, Any]:
+    member = db.scalar(select(Member).where(Member.user_id == user.id))
+    member_id = member.id if member else None
+
+    stmt = (
+        select(CorePaymentTransaction)
+        .where(
+            (CorePaymentTransaction.member_id == member_id) if member_id else (CorePaymentTransaction.user_id == user.id)
+        )
+        .order_by(CorePaymentTransaction.created_at.desc())
+    )
+    all_rows = db.scalars(stmt).all()
+
+    total_paid = sum(float(p.amount) for p in all_rows if p.status in ('PAID', 'SUCCESS', 'COMPLETED'))
+    successful_count = sum(1 for p in all_rows if p.status in ('PAID', 'SUCCESS', 'COMPLETED'))
+    pending_count = sum(1 for p in all_rows if p.status in ('PENDING', 'INITIATED', 'PROCESSING'))
+    failed_count = sum(1 for p in all_rows if p.status in ('FAILED', 'CANCELLED', 'EXPIRED'))
+    refunded_count = sum(1 for p in all_rows if p.status in ('REFUNDED', 'PARTIALLY_REFUNDED'))
+
+    filtered_rows = all_rows
+    if status_filter:
+        s_upper = status_filter.strip().upper()
+        if s_upper in ('PAID', 'SUCCESS', 'SUCCESSFUL'):
+            filtered_rows = [p for p in all_rows if p.status in ('PAID', 'SUCCESS', 'COMPLETED')]
+        elif s_upper == 'PENDING':
+            filtered_rows = [p for p in all_rows if p.status in ('PENDING', 'INITIATED', 'PROCESSING')]
+        elif s_upper == 'FAILED':
+            filtered_rows = [p for p in all_rows if p.status in ('FAILED', 'CANCELLED', 'EXPIRED')]
+        elif s_upper == 'REFUNDED':
+            filtered_rows = [p for p in all_rows if p.status in ('REFUNDED', 'PARTIALLY_REFUNDED')]
+        else:
+            filtered_rows = [p for p in all_rows if p.status == s_upper]
+
+    transactions = [_format_payment_item(p) for p in filtered_rows]
+
+    return {
+        "total_paid": total_paid,
+        "total_paid_formatted": f"৳{int(total_paid):,}",
+        "successful_count": successful_count,
+        "pending_count": pending_count,
+        "failed_count": failed_count,
+        "refunded_count": refunded_count,
+        "transactions": transactions,
+    }
+
+
+def _get_payment_items_list(user: User, db: Session, status_filter: str | None = None) -> list[dict[str, Any]]:
     member = db.scalar(select(Member).where(Member.user_id == user.id))
     member_id = member.id if member else None
 
@@ -609,51 +735,69 @@ def list_payments(user: User = Depends(current_user), db: Session = Depends(get_
         .order_by(CorePaymentTransaction.created_at.desc())
     )
     rows = db.scalars(stmt).all()
+    if status_filter:
+        s_upper = status_filter.strip().upper()
+        if s_upper in ('PAID', 'SUCCESS', 'SUCCESSFUL'):
+            rows = [p for p in rows if p.status in ('PAID', 'SUCCESS', 'COMPLETED')]
+        elif s_upper == 'PENDING':
+            rows = [p for p in rows if p.status in ('PENDING', 'INITIATED', 'PROCESSING')]
+        elif s_upper == 'FAILED':
+            rows = [p for p in rows if p.status in ('FAILED', 'CANCELLED', 'EXPIRED')]
+        elif s_upper == 'REFUNDED':
+            rows = [p for p in rows if p.status in ('REFUNDED', 'PARTIALLY_REFUNDED')]
+        else:
+            rows = [p for p in rows if p.status == s_upper]
 
-    purpose_en_map = {
-        'MEMBERSHIP': 'Membership Fee',
-        'MEMBERSHIP_FEE': 'Membership Fee',
-        'RENEWAL': 'Membership Renewal Fee',
-        'APPLICATION': 'Membership Application Fee',
-        'EVENT': 'Event Registration Fee',
-        'DONATION': 'Welfare Contribution',
-    }
-    purpose_bn_map = {
-        'MEMBERSHIP': 'সদস্যপদ ফি',
-        'MEMBERSHIP_FEE': 'সদস্যপদ ফি',
-        'RENEWAL': 'সদস্যপদ নবায়ন ফি',
-        'APPLICATION': 'সদস্যপদ আবেদন ফি',
-        'EVENT': 'ইভেন্ট নিবন্ধন ফি',
-        'DONATION': 'কল্যাণ তহবিল অনুদান',
-    }
+    return [_format_payment_item(p) for p in rows]
 
-    result = []
-    for p in rows:
-        purpose_key = (p.purpose or 'MEMBERSHIP').upper()
-        is_paid = p.status in ('PAID', 'SUCCESS', 'COMPLETED')
-        created_dt = p.created_at or datetime.utcnow()
-        result.append(
-            {
-                'id': p.id,
-                'date': created_dt.strftime('%Y-%m-%d'),
-                'purpose': purpose_key,
-                'purpose_label': purpose_en_map.get(purpose_key, 'Membership Fee'),
-                'purpose_label_bn': purpose_bn_map.get(purpose_key, 'সদস্যপদ ফি'),
-                'membership_plan_id': p.membership_plan_id,
-                'amount': float(p.amount),
-                'amount_formatted': f"৳{int(p.amount):,}",
-                'currency': p.currency,
-                'provider': p.provider,
-                'transaction_ref': p.transaction_ref,
-                'receipt_no': p.receipt_no,
-                'status': 'PAID' if is_paid else p.status,
-                'has_receipt': is_paid,
-                'receipt_url': f"/api/v1/member/payments/{p.id}/receipt" if is_paid else None,
-                'receipt_pdf_url': f"/api/v1/member/payments/{p.id}/receipt.pdf" if is_paid else None,
-                'created_at': p.created_at,
-            }
+
+@router.get("/member/payments/summary")
+def member_payments_summary(
+    status: str | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    return _compute_payment_summary(user, db, status_filter=status)
+
+
+@router.get("/member/payments")
+def list_payments(
+    summary: bool = False,
+    status: str | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if summary:
+        return _compute_payment_summary(user, db, status_filter=status)
+    return _get_payment_items_list(user, db, status_filter=status)
+
+
+@router.get("/member/payments/{payment_id}")
+def get_payment_detail(
+    payment_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    payment = None
+    if str(payment_id).isdigit():
+        payment = db.get(CorePaymentTransaction, int(payment_id))
+    if not payment:
+        payment = db.scalar(
+            select(CorePaymentTransaction).where(CorePaymentTransaction.transaction_ref == str(payment_id))
         )
-    return result
+    if not payment:
+        raise HTTPException(404, "Payment transaction not found")
+
+    member = db.scalar(select(Member).where(Member.user_id == user.id))
+    is_owner = (payment.user_id == user.id) or (member and payment.member_id == member.id)
+    is_admin = user.role in FINANCE_ADMIN_ROLES or user.role in ("SUPER_ADMIN", "CENTRAL_ADMIN")
+    if not is_owner and not is_admin:
+        raise HTTPException(403, "Not authorized to access this payment transaction")
+
+    item = _format_payment_item(payment)
+    if payment.status in ("PAID", "SUCCESS", "COMPLETED"):
+        item["receipt"] = build_receipt_payload(db, payment)
+    return item
 
 
 @router.get("/member/payments/{payment_id}/receipt")
@@ -667,7 +811,8 @@ def get_payment_receipt(payment_id: str, user: User = Depends(current_user), db:
     if not payment:
         raise HTTPException(404, "Payment transaction not found")
     is_owner = (payment.user_id == user.id) or (member and payment.member_id == member.id)
-    if not is_owner and user.role == "MEMBER":
+    is_admin = user.role in FINANCE_ADMIN_ROLES or user.role in ("SUPER_ADMIN", "CENTRAL_ADMIN")
+    if not is_owner and not is_admin:
         raise HTTPException(403, "Not authorized to view this receipt")
     if payment.status not in {"PAID", "SUCCESS", "COMPLETED"}:
         raise HTTPException(409, "Receipt is only available for completed/paid transactions")
@@ -692,31 +837,282 @@ def download_payment_receipt_pdf(payment_id: str, user: User = Depends(current_u
     )
 
 
-@router.get("/public/receipts/verify/{token_or_receipt_no}")
-def verify_payment_receipt(token_or_receipt_no: str, db: Session = Depends(get_db)):
-    valid_sig, receipt_no = verify_receipt_token(token_or_receipt_no)
-    if not valid_sig or not receipt_no.startswith("PGCB-RCP-"):
-        raise HTTPException(400, "Invalid receipt verification token")
-    parts = receipt_no.split("-")
-    if len(parts) < 4 or not parts[-1].isdigit():
-        raise HTTPException(400, "Malformed receipt number")
-    payment_id = int(parts[-1])
-    payment = db.get(CorePaymentTransaction, payment_id)
-    if not payment or payment.status not in {"PAID", "SUCCESS", "COMPLETED"}:
-        raise HTTPException(404, "Verified payment receipt not found")
+@router.get("/public/verify/payment/{reference}")
+@router.get("/verify/payment/{reference}")
+@router.get("/public/receipts/verify/{reference}")
+def verify_payment_public(reference: str, db: Session = Depends(get_db)):
+    ref = reference.strip()
+    payment = None
+
+    # 1. Try HMAC signature token
+    if "." in ref:
+        valid_sig, receipt_no = verify_receipt_token(ref)
+        if valid_sig and receipt_no.startswith("PGCB-RCP-"):
+            parts = receipt_no.split("-")
+            if len(parts) >= 4 and parts[-1].isdigit():
+                payment = db.get(CorePaymentTransaction, int(parts[-1]))
+
+    # 2. Try receipt_no match in provider_payload
+    if not payment:
+        try:
+            payment = db.scalar(
+                select(CorePaymentTransaction).where(
+                    or_(
+                        CorePaymentTransaction.provider_payload["receipt_no"].as_string() == ref,
+                        CorePaymentTransaction.provider_payload["receipt_token"].as_string() == ref,
+                    )
+                )
+            )
+        except Exception:
+            pass
+
+    # 3. Try transaction_ref or provider_transaction_id
+    if not payment:
+        payment = db.scalar(
+            select(CorePaymentTransaction).where(
+                or_(
+                    CorePaymentTransaction.transaction_ref == ref,
+                    CorePaymentTransaction.provider_transaction_id_col == ref,
+                )
+            )
+        )
+
+    # 4. Try receipt number format PGCB-RCP-YYYY-NNNNNN or PGCB-PAY-YYYY-NNNNNN
+    if not payment and (ref.startswith("PGCB-RCP-") or ref.startswith("PGCB-REC-") or ref.startswith("PGCB-PAY-")):
+        parts = ref.split("-")
+        if len(parts) >= 4 and parts[-1].isdigit():
+            payment = db.get(CorePaymentTransaction, int(parts[-1]))
+
+    # 5. Try plain numeric ID
+    if not payment and ref.isdigit():
+        payment = db.get(CorePaymentTransaction, int(ref))
+
+    if not payment:
+        raise HTTPException(404, "Verified payment record not found")
+
+    is_paid = payment.status in {"PAID", "SUCCESS", "COMPLETED"}
+    if not is_paid:
+        member = db.get(Member, payment.member_id) if payment.member_id else None
+        user = db.get(User, payment.user_id) if payment.user_id else (db.get(User, member.user_id) if member and member.user_id else None)
+        return {
+            "verified": False,
+            "is_valid": False,
+            "status": payment.status,
+            "transaction_ref": payment.transaction_ref,
+            "receipt_no": None,
+            "member_name": (user.name_en if user else None) or "Member",
+            "member_name_bn": user.name_bn if user else None,
+            "membership_id": member.membership_id if member else None,
+            "amount": float(payment.amount),
+            "amount_formatted": f"৳{int(payment.amount):,}",
+            "currency": payment.currency or "BDT",
+            "message": f"Payment is in {payment.status} state, not verified as completed.",
+        }
+
     data = build_receipt_payload(db, payment)
     return {
         "verified": True,
+        "is_valid": True,
+        "payment_id": payment.id,
         "receipt_no": data["receipt_no"],
         "transaction_ref": data["transaction_ref"],
+        "member_name": data["member_name_en"],
         "member_name_bn": data["member_name_bn"],
         "membership_id": data["membership_id"],
         "purpose": data["purpose"],
+        "purpose_title_en": data["purpose_label"],
+        "purpose_title_bn": PAYMENT_PURPOSE_BN_MAP.get((data["purpose"] or '').upper(), "সদস্যপদ ফি"),
         "amount": data["amount"],
+        "amount_formatted": data["amount_formatted"],
         "currency": data["currency"],
         "payment_method": data["payment_method"],
-        "status": data["status"],
+        "provider": data["payment_method"],
+        "provider_tran_id": payment.provider_transaction_id or payment.transaction_ref,
+        "status": "PAID",
         "paid_at": data["paid_at"],
+        "payment_date": data["paid_at"],
+        "verification_url": data["verification_url"],
+        "verification_qr_data": data["verification_url"],
+        "download_pdf_url": f"/api/v1/member/payments/{payment.id}/receipt.pdf",
+    }
+
+
+# ==========================================================
+# 3. Admin Payment Management & Reconciliation Operations
+# ==========================================================
+
+@router.get("/admin/payments")
+def list_admin_payments(
+    status: str | None = None,
+    member_id: int | None = None,
+    search: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    admin: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if admin.role not in FINANCE_ADMIN_ROLES and admin.role not in ("SUPER_ADMIN", "CENTRAL_ADMIN"):
+        raise HTTPException(403, "Admin privileges required to view payment console")
+
+    stmt = select(CorePaymentTransaction).order_by(CorePaymentTransaction.created_at.desc())
+    if member_id:
+        stmt = stmt.where(CorePaymentTransaction.member_id == member_id)
+    if status:
+        s_upper = status.strip().upper()
+        if s_upper in ('PAID', 'SUCCESS', 'SUCCESSFUL'):
+            stmt = stmt.where(CorePaymentTransaction.status.in_(['PAID', 'SUCCESS', 'COMPLETED']))
+        elif s_upper == 'PENDING':
+            stmt = stmt.where(CorePaymentTransaction.status.in_(['PENDING', 'INITIATED', 'PROCESSING']))
+        elif s_upper == 'FAILED':
+            stmt = stmt.where(CorePaymentTransaction.status.in_(['FAILED', 'CANCELLED', 'EXPIRED']))
+        elif s_upper == 'REFUNDED':
+            stmt = stmt.where(CorePaymentTransaction.status.in_(['REFUNDED', 'PARTIALLY_REFUNDED']))
+        else:
+            stmt = stmt.where(CorePaymentTransaction.status == s_upper)
+
+    all_rows = db.scalars(stmt).all()
+
+    total_collected = sum(float(p.amount) for p in all_rows if p.status in ('PAID', 'SUCCESS', 'COMPLETED'))
+    successful_count = sum(1 for p in all_rows if p.status in ('PAID', 'SUCCESS', 'COMPLETED'))
+    pending_count = sum(1 for p in all_rows if p.status in ('PENDING', 'INITIATED', 'PROCESSING'))
+    failed_count = sum(1 for p in all_rows if p.status in ('FAILED', 'CANCELLED', 'EXPIRED'))
+    refunded_count = sum(1 for p in all_rows if p.status in ('REFUNDED', 'PARTIALLY_REFUNDED'))
+
+    paginated_rows = all_rows[offset : offset + limit]
+    transactions = [_format_payment_item(p) for p in paginated_rows]
+
+    return {
+        "total_collected": total_collected,
+        "total_collected_formatted": f"৳{int(total_collected):,}",
+        "successful_count": successful_count,
+        "pending_count": pending_count,
+        "failed_count": failed_count,
+        "refunded_count": refunded_count,
+        "total_count": len(all_rows),
+        "transactions": transactions,
+    }
+
+
+@router.post("/admin/payments/{payment_id}/reconcile")
+def admin_reconcile_payment(
+    payment_id: int,
+    payload: dict,
+    request: Request,
+    admin: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if admin.role not in FINANCE_ADMIN_ROLES and admin.role not in ("SUPER_ADMIN", "CENTRAL_ADMIN"):
+        raise HTTPException(403, "Admin privileges required to reconcile payments")
+
+    payment = db.get(CorePaymentTransaction, payment_id)
+    if not payment:
+        raise HTTPException(404, "Payment transaction not found")
+
+    if payment.status in ("PAID", "SUCCESS", "COMPLETED"):
+        return {
+            "ok": True,
+            "status": "already_reconciled",
+            "payment": _format_payment_item(payment),
+            "message": "Payment is already marked as PAID.",
+        }
+
+    if not validate_payment_transition(payment.status, "PAID"):
+        raise HTTPException(409, f"Illegal state transition from {payment.status} to PAID")
+
+    prov_ref = (payload.get("provider_transaction_id") or payload.get("bank_reference") or f"MANUAL-REC-{admin.id}-{payment.id}").strip()
+    existing_prov = db.scalar(
+        select(CorePaymentTransaction).where(
+            CorePaymentTransaction.provider_transaction_id == prov_ref,
+            CorePaymentTransaction.id != payment.id,
+        )
+    )
+    if existing_prov:
+        prov_ref = f"{prov_ref}-{payment.id}"
+
+    note = (payload.get("note") or payload.get("reconciliation_note") or "Manually reconciled by finance admin").strip()
+
+    payment.provider_transaction_id = prov_ref
+    if not payment.transaction_ref:
+        payment.transaction_ref = prov_ref
+    payment.provider = payload.get("method") or payment.provider or "MANUAL"
+
+    transition_payment_status(payment, "PAID")
+    ensure_receipt_metadata(payment)
+    activate_membership_from_payment(db, payment)
+
+    payload_data = dict(payment.provider_payload or {})
+    payload_data["reconciled_by"] = admin.id
+    payload_data["reconciliation_note"] = note
+    payload_data["reconciled_at"] = datetime.utcnow().isoformat()
+    payment.provider_payload = payload_data
+
+    log_audit_action(
+        db, request,
+        action="PAYMENT_RECONCILED",
+        entity="PAYMENT",
+        entity_id=str(payment.id),
+        user=admin,
+        new_value={"trx_id": prov_ref, "amount": float(payment.amount), "note": note},
+    )
+    db.commit()
+    db.refresh(payment)
+
+    return {
+        "ok": True,
+        "payment": _format_payment_item(payment),
+        "message": "Payment successfully reconciled and membership updated.",
+    }
+
+
+@router.post("/admin/payments/{payment_id}/refund")
+def admin_refund_payment(
+    payment_id: int,
+    payload: dict,
+    request: Request,
+    admin: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if admin.role not in FINANCE_ADMIN_ROLES and admin.role not in ("SUPER_ADMIN", "CENTRAL_ADMIN"):
+        raise HTTPException(403, "Admin privileges required to refund payments")
+
+    payment = db.get(CorePaymentTransaction, payment_id)
+    if not payment:
+        raise HTTPException(404, "Payment transaction not found")
+
+    if payment.status not in ("PAID", "SUCCESS", "COMPLETED"):
+        raise HTTPException(400, f"Cannot refund a payment in {payment.status} status. Only PAID transactions can be refunded.")
+
+    reason = (payload.get("reason") or "Administrative refund request").strip()
+    refund_ref = (payload.get("refund_ref") or f"REFUND-{payment.id}-{int(datetime.utcnow().timestamp())}").strip()
+    refund_amount = payload.get("amount")
+
+    target_status = "PARTIALLY_REFUNDED" if refund_amount and float(refund_amount) < float(payment.amount) else "REFUNDED"
+    transition_payment_status(payment, target_status)
+
+    payload_data = dict(payment.provider_payload or {})
+    payload_data["refund_ref"] = refund_ref
+    payload_data["refund_reason"] = reason
+    payload_data["refunded_by"] = admin.id
+    payload_data["refunded_at"] = datetime.utcnow().isoformat()
+    payload_data["refund_amount"] = float(refund_amount) if refund_amount else float(payment.amount)
+    payment.provider_payload = payload_data
+
+    log_audit_action(
+        db, request,
+        action="PAYMENT_REFUNDED",
+        entity="PAYMENT",
+        entity_id=str(payment.id),
+        user=admin,
+        new_value={"refund_ref": refund_ref, "reason": reason, "status": target_status},
+    )
+    db.commit()
+    db.refresh(payment)
+
+    return {
+        "ok": True,
+        "status": target_status,
+        "payment": _format_payment_item(payment),
+        "message": f"Payment {payment.id} has been marked as {target_status}.",
     }
 
 
@@ -791,7 +1187,14 @@ def simulate_sandbox_payment_webhook(
     db.add(webhook_log)
 
     from app.models import Membership, Payment as CanonicalPayment
-    if not db.scalar(select(CanonicalPayment).where(CanonicalPayment.transaction_id == sim_trx_id)):
+    if not db.scalar(
+        select(CanonicalPayment).where(
+            or_(
+                CanonicalPayment.transaction_id == sim_trx_id,
+                CanonicalPayment.receipt_no == core_tx.receipt_no,
+            )
+        )
+    ):
         db.add(
             CanonicalPayment(
                 user_id=core_tx.user_id,
