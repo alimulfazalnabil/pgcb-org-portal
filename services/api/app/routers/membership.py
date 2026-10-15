@@ -92,9 +92,8 @@ def _get_or_create_profile_meta(db: Session, member_id: int) -> MemberProfileMet
 
 
 def _compute_profile_completion(user: User, member: Member, meta: MemberProfileMeta | None) -> dict:
-    has_photo = bool(member.photo_url)
-    has_phone = bool(user.phone and user.phone.strip())
-    has_email = bool(user.email and user.email.strip())
+    has_basic = bool((user.name_bn or user.name_en) and member.nid_number)
+    has_contact = bool(user.phone and user.phone.strip() and user.email and user.email.strip())
     has_professional = bool(
         (member.designation_bn or member.designation_en)
         and (
@@ -103,28 +102,22 @@ def _compute_profile_completion(user: User, member: Member, meta: MemberProfileM
             or member.diploma_institution
         )
     )
+    has_photo = bool(member.photo_url)
     has_emergency = bool(meta and meta.emergency_contact_name and meta.emergency_contact_phone)
 
     items = [
         {
-            'key': 'photo',
-            'label_en': 'Profile Photograph',
-            'label_bn': 'প্রোফাইল ছবি',
-            'completed': has_photo,
+            'key': 'basic',
+            'label_en': 'Basic Information',
+            'label_bn': 'প্রাথমিক তথ্য (নাম, এনআইডি)',
+            'completed': has_basic,
             'weight': 20,
         },
         {
-            'key': 'phone',
-            'label_en': 'Mobile Number',
-            'label_bn': 'মোবাইল নম্বর',
-            'completed': has_phone,
-            'weight': 20,
-        },
-        {
-            'key': 'email',
-            'label_en': 'Email Address',
-            'label_bn': 'ইমেইল ঠিকানা',
-            'completed': has_email,
+            'key': 'contact',
+            'label_en': 'Contact Information',
+            'label_bn': 'যোগাযোগের তথ্য (ফোন, ইমেইল)',
+            'completed': has_contact,
             'weight': 20,
         },
         {
@@ -132,6 +125,13 @@ def _compute_profile_completion(user: User, member: Member, meta: MemberProfileM
             'label_en': 'Professional Information',
             'label_bn': 'পেশাগত তথ্য',
             'completed': has_professional,
+            'weight': 20,
+        },
+        {
+            'key': 'photo',
+            'label_en': 'Profile Photograph',
+            'label_bn': 'প্রোফাইল ছবি',
+            'completed': has_photo,
             'weight': 20,
         },
         {
@@ -150,6 +150,7 @@ def _compute_profile_completion(user: User, member: Member, meta: MemberProfileM
         'total_count': len(items),
         'items': items,
     }
+
 
 
 def _build_application_timeline(db: Session, member: Member) -> dict:
@@ -514,9 +515,13 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
     total_paid_bdt = sum(float(p.amount or 0) for p in paid_payments)
     latest_payment_obj = all_payments[0] if all_payments else None
 
+    failed_payments = [p for p in all_payments if (p.status or '').upper() in ('FAILED', 'CANCELLED', 'REJECTED')]
     payment_summary = {
         'total_paid': total_paid_bdt,
         'total_paid_formatted': f'৳{int(total_paid_bdt):,}',
+        'successful': len(paid_payments),
+        'pending': len(pending_payments),
+        'failed': len(failed_payments),
         'payments_count': payments_count,
         'paid_count': len(paid_payments),
         'pending_count': len(pending_payments),
@@ -567,22 +572,33 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
     upcoming_events_rows = db.scalars(
         select(Event).where(Event.is_published == True).order_by(Event.event_date.desc()).limit(6)
     ).all()
-    events_payload = [
-        {
+    month_names_en = ['', 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+    events_payload = []
+    for ev in upcoming_events_rows:
+        ev_dt = ev.event_date
+        ev_day = f'{ev_dt.day:02d}' if ev_dt else '15'
+        ev_month = month_names_en[ev_dt.month] if ev_dt and 1 <= ev_dt.month <= 12 else 'OCT'
+        ev_time = ev_dt.strftime('%I:%M %p') if ev_dt else '10:00 AM'
+        events_payload.append({
             'id': ev.id,
             'slug': getattr(ev, 'slug', str(ev.id)),
+            'title': ev.title_en or ev.title_bn,
             'title_bn': ev.title_bn,
             'title_en': ev.title_en,
             'summary_bn': getattr(ev, 'summary_bn', None) or ev.description_bn,
-            'location_bn': ev.location_bn,
+            'location': ev.location_bn or 'Dhaka',
+            'location_bn': ev.location_bn or 'ঢাকা',
+            'location_en': ev.location_bn or 'Dhaka',
+            'time': ev_time,
+            'day': ev_day,
+            'month': ev_month,
             'event_date': ev.event_date,
             'event_date_formatted': ev.event_date.strftime('%d %b %Y') if ev.event_date else None,
             'registration_Required': bool(getattr(ev, 'registration_enabled', False)),
+            'registration_enabled': bool(getattr(ev, 'registration_enabled', False)),
             'is_registered': ev.id in reg_by_event,
             'registration_status': reg_by_event[ev.id].attendance_status if ev.id in reg_by_event else None,
-        }
-        for ev in upcoming_events_rows
-    ]
+        })
 
     # Saved/Read state for circulars & notices
     saved_rows = db.scalars(
@@ -637,21 +653,41 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
         .order_by(Notification.created_at.desc())
         .limit(10)
     ).all()
-    notifications_payload = [
-        {
+    notifications_payload = []
+    for n in notif_rows:
+        n_type = (n.notification_type or 'SYSTEM').upper()
+        if n_type in ('CIRCULAR', 'NOTICE'):
+            dot_color = 'blue'
+            indicator_icon = '🔵'
+        elif n_type in ('PAYMENT', 'RECEIPT'):
+            dot_color = 'green'
+            indicator_icon = '🟢'
+        elif n_type in ('CERTIFICATE', 'MEMBERSHIP'):
+            dot_color = 'amber'
+            indicator_icon = '📄'
+        else:
+            dot_color = 'purple'
+            indicator_icon = '🔔'
+
+        rel_en, rel_bn = _relative_time(n.created_at, now)
+        notifications_payload.append({
             'id': n.id,
+            'title': n.title_bn,
             'title_bn': n.title_bn,
+            'body': n.body_bn,
             'body_bn': n.body_bn,
             'type': n.notification_type,
+            'dot_color': dot_color,
+            'indicator_icon': indicator_icon,
             'read_at': n.read_at,
             'is_read': bool(n.read_at),
             'indicator': '○' if n.read_at else '●',
             'created_at': n.created_at,
-            'relative_time_en': _relative_time(n.created_at, now)[0],
-            'relative_time_bn': _relative_time(n.created_at, now)[1],
-        }
-        for n in notif_rows
-    ]
+            'relative_time': rel_en,
+            'relative_time_en': rel_en,
+            'relative_time_bn': rel_bn,
+            'href': '/portal?tab=notifications',
+        })
 
     change_rows = db.scalars(
         select(MemberProfileChangeRequest)
@@ -680,20 +716,57 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
 
     activities: list[dict] = []
 
-    # 1. Membership approval / status milestone
+    # 1. Membership milestone
     if m.status == 'ACTIVE' and m.membership_id:
         activities.append({
             'id': f'mem-{m.id}',
             'type': 'MEMBERSHIP',
+            'title': 'Membership approved',
             'title_en': 'Membership approved',
             'title_bn': f'সদস্যপদ অনুমোদিত ({m.membership_id})',
+            'description': f'Membership ID: {m.membership_id} · {m.circle.name_en if m.circle else "PGCB"}',
             'subtitle_bn': f'বৈধতা: {exp["valid_until_formatted"] or "সক্রিয়"}',
             'timestamp': (m.issue_date or m.updated_at or m.created_at or now).isoformat(),
             'relative_time_en': _relative_time(m.issue_date or m.updated_at, now)[0],
             'relative_time_bn': _relative_time(m.issue_date or m.updated_at, now)[1],
+            'href': '/portal?tab=membership',
         })
 
-    # 2. Recent certificates
+    # 2. Application milestone
+    app_row = db.scalar(select(MembershipApplication).where(MembershipApplication.member_id == m.id))
+    if app_row:
+        app_status_clean = (app_row.status or 'SUBMITTED').replace('_', ' ').lower()
+        activities.append({
+            'id': f'app-{app_row.id}',
+            'type': 'APPLICATION',
+            'title': f'Membership application {app_status_clean}',
+            'title_en': f'Membership application {app_status_clean}',
+            'title_bn': f'সদস্যপদ আবেদন: {application_timeline.get("status_label_bn", app_status_clean)}',
+            'description': f'Application #{application_timeline.get("application_no", app_row.application_no)}',
+            'subtitle_bn': f'রেফারেন্স: {application_timeline.get("application_no", app_row.application_no)}',
+            'timestamp': (app_row.reviewed_at or app_row.submitted_at or m.created_at or now).isoformat(),
+            'relative_time_en': _relative_time(app_row.reviewed_at or app_row.submitted_at, now)[0],
+            'relative_time_bn': _relative_time(app_row.reviewed_at or app_row.submitted_at, now)[1],
+            'href': '/portal?tab=application',
+        })
+
+    # 3. Payments
+    for p in paid_payments[:3]:
+        activities.append({
+            'id': f'pay-{p.id}',
+            'type': 'PAYMENT',
+            'title': 'Payment successfully received',
+            'title_en': 'Payment successfully received',
+            'title_bn': f'পেমেন্ট সফল হয়েছে (৳{int(p.amount):,})',
+            'description': f'{(p.purpose or "Membership Renewal").replace("_", " ").title()} · ৳{int(p.amount):,}',
+            'subtitle_bn': f'রসিদ: {p.receipt_no or p.transaction_ref or p.id}',
+            'timestamp': (p.updated_at or p.created_at or now).isoformat(),
+            'relative_time_en': _relative_time(p.updated_at or p.created_at, now)[0],
+            'relative_time_bn': _relative_time(p.updated_at or p.created_at, now)[1],
+            'href': '/portal?tab=payments',
+        })
+
+    # 4. Certificates
     for c in certs_list[:3]:
         c_date = c.get('issue_date') if isinstance(c, dict) else getattr(c, 'issue_date', None)
         c_no = c.get('certificate_no') if isinstance(c, dict) else getattr(c, 'certificate_no', '')
@@ -703,56 +776,82 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
         activities.append({
             'id': f'cert-{c_id}',
             'type': 'CERTIFICATE',
-            'title_en': 'Certificate issued',
+            'title': 'Membership certificate issued',
+            'title_en': 'Membership certificate issued',
             'title_bn': f'সনদপত্র ইস্যু হয়েছে ({c_no})',
+            'description': c_title or f'Certificate #{c_no}',
             'subtitle_bn': c_title,
             'timestamp': dt_val.isoformat(),
             'relative_time_en': _relative_time(dt_val, now)[0],
             'relative_time_bn': _relative_time(dt_val, now)[1],
+            'href': '/portal?tab=certificates',
         })
 
-    # 3. Recent paid payments
-    for p in paid_payments[:3]:
+    # 5. Documents
+    for d in (m.documents or [])[:2]:
         activities.append({
-            'id': f'pay-{p.id}',
-            'type': 'PAYMENT',
-            'title_en': 'Payment successful',
-            'title_bn': f'পেমেন্ট সফল হয়েছে (৳{int(p.amount):,})',
-            'subtitle_bn': f'রসিদ: {p.receipt_no or p.transaction_ref or p.id}',
-            'timestamp': (p.updated_at or p.created_at or now).isoformat(),
-            'relative_time_en': _relative_time(p.updated_at or p.created_at, now)[0],
-            'relative_time_bn': _relative_time(p.updated_at or p.created_at, now)[1],
+            'id': f'doc-{d.id}',
+            'type': 'DOCUMENT',
+            'title': f'{d.document_type.replace("_", " ").title()} document {d.review_status.lower()}',
+            'title_en': f'{d.document_type} document {d.review_status.lower()}',
+            'title_bn': f'{d.document_type} ডকুমেন্ট অবস্থা: {d.review_status}',
+            'description': f'File: {d.filename}',
+            'subtitle_bn': d.filename,
+            'timestamp': (d.created_at or now).isoformat(),
+            'relative_time_en': _relative_time(d.created_at, now)[0],
+            'relative_time_bn': _relative_time(d.created_at, now)[1],
+            'href': '/portal?tab=documents',
         })
 
-    # 4. Recent published circulars & notices
-    for cir in recent_circulars[:2]:
+    # 6. Profile
+    if meta.updated_at or m.updated_at:
+        upd_time = meta.updated_at or m.updated_at
         activities.append({
-            'id': f'cir-{cir.id}',
-            'type': 'CIRCULAR',
-            'title_en': 'New circular published',
-            'title_bn': f'নতুন সার্কুলার প্রকাশিত: {cir.title_bn}',
-            'subtitle_bn': cir.reference_no or cir.category,
-            'timestamp': (cir.published_at or cir.created_at or now).isoformat(),
-            'relative_time_en': _relative_time(cir.published_at or cir.created_at, now)[0],
-            'relative_time_bn': _relative_time(cir.published_at or cir.created_at, now)[1],
+            'id': f'prof-{m.id}',
+            'type': 'PROFILE',
+            'title': 'Profile information updated',
+            'title_en': 'Profile information updated',
+            'title_bn': 'প্রোফাইল তথ্য হালনাগাদ করা হয়েছে',
+            'description': f'{m.designation_en or "Engineer"} · {m.circle.name_en if m.circle else "PGCB"}',
+            'subtitle_bn': m.designation_bn or 'প্রকৌশলী',
+            'timestamp': upd_time.isoformat(),
+            'relative_time_en': _relative_time(upd_time, now)[0],
+            'relative_time_bn': _relative_time(upd_time, now)[1],
+            'href': '/portal?tab=profile',
         })
 
     activities.sort(key=lambda item: item.get('timestamp') or '', reverse=True)
 
+    verified_docs = len([d for d in docs_list if d.get('review_status') == 'APPROVED'])
+    pending_docs = len([d for d in docs_list if d.get('review_status') in ('PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'DOCUMENT_REQUIRED')])
+    documents_summary = {
+        'total': docs_count,
+        'verified': verified_docs,
+        'pending': pending_docs,
+        'items': docs_list,
+    }
+
     membership_info = {
         'id': m.id,
+        'member_id': m.id,
         'membership_id': m.membership_id,
-        'membership_type': m.membership_type or 'GENERAL',
-        'status': m.status,
+        'status': m.status or 'PENDING',
+        'type': m.membership_type or 'PROFESSIONAL',
+        'membership_type': m.membership_type or 'PROFESSIONAL',
+        'joined_at': (m.issue_date or m.created_at).strftime('%Y-%m-%d') if (m.issue_date or m.created_at) else None,
+        'valid_until': m.validity_date.strftime('%Y-%m-%d') if m.validity_date else None,
+        'validity_date': m.validity_date,
+        'issue_date': m.issue_date,
+        'valid_until_formatted': exp.get('valid_until_formatted'),
         'designation_bn': m.designation_bn,
         'designation_en': m.designation_en,
         'circle_id': m.circle_id,
-        'circle_bn': m.circle.name_bn if m.circle else None,
-        'circle_en': m.circle.name_en if m.circle else None,
-        'issue_date': m.issue_date,
-        'validity_date': m.validity_date,
+        'circle': m.circle.name_en if m.circle else 'Dhaka',
+        'circle_bn': m.circle.name_bn if m.circle else 'ঢাকা',
+        'circle_en': m.circle.name_en if m.circle else 'Dhaka',
         **exp,
     }
+
     quick_actions = [
         {'id': 'DIGITAL_ID', 'label_bn': 'ডিজিটাল আইডি', 'label_en': 'Digital ID', 'href': '/portal/id-card'},
         {'id': 'RENEW_MEMBERSHIP', 'label_bn': 'সদস্যপদ নবায়ন', 'label_en': 'Renew Membership', 'href': '/portal?tab=renewal'},
@@ -766,26 +865,56 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
     digital_id_available = bool(m.status == 'ACTIVE' and m.membership_id)
 
     return {
-        'user': {
-            'id': user.id,
+        'member': {
+            'id': m.id,
             'name_bn': user.name_bn,
             'name_en': user.name_en,
+            'membership_id': m.membership_id,
+            'photo_url': m.photo_url,
+            'circle': m.circle.name_en if m.circle else 'Dhaka',
+            'circle_bn': m.circle.name_bn if m.circle else 'ঢাকা',
+            'circle_en': m.circle.name_en if m.circle else 'Dhaka',
+            'designation_bn': m.designation_bn,
+            'designation_en': m.designation_en,
+            'organization': meta.organization or 'Power Grid Company of Bangladesh PLC (PGCB)',
+            'department': meta.department,
+            'profession': meta.profession,
             'email': user.email,
             'phone': user.phone,
-            'role': user.role,
+            'emergency_contact_name': meta.emergency_contact_name,
+            'emergency_contact_phone': meta.emergency_contact_phone,
+            'profile_completion': completion['percentage'],
+            **full_member_profile,
         },
-        'member': full_member_profile,
-        'hero_card': membership_info,
         'membership': membership_info,
-        'application': application_timeline,
-        'payment_summary': payment_summary,
-        'documents': docs_list,
-        'certificates': certs_list,
-        'events': events_payload,
-        'circulars': circulars_payload,
-        'notifications': notifications_payload,
+        'application': {
+            'id': application_timeline['id'],
+            'status': application_timeline['status'],
+            'reference': application_timeline['application_no'],
+            'application_no': application_timeline['application_no'],
+            'membership_id': m.membership_id,
+            'membership_type': application_timeline['membership_type'],
+            'status_label_en': application_timeline['status_label_en'],
+            'status_label_bn': application_timeline['status_label_bn'],
+            'stages': application_timeline['stages'],
+            'required_actions': application_timeline['required_actions'],
+            'circle_bn': application_timeline['circle_bn'],
+            'circle_en': application_timeline['circle_en'],
+            'submitted_at': application_timeline['submitted_at'],
+            'approved_at': application_timeline['approved_at'],
+            'reviewer_notes': application_timeline['reviewer_notes'],
+        },
         'profile_completion': completion['percentage'],
         'profile_completion_details': completion,
+        'payment_summary': payment_summary,
+        'documents': documents_summary,
+        'documents_list': docs_list,
+        'certificates': certs_list,
+        'upcoming_events': events_payload[:5],
+        'events': events_payload,
+        'notifications': notifications_payload[:5],
+        'recent_activity': activities[:10],
+        'unread_notifications_count': unread_count,
         'digital_id_available': digital_id_available,
         'change_requests': change_requests_payload,
         'quick_actions': quick_actions,
@@ -799,7 +928,16 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
             'pending_applications': 0 if m.status == 'ACTIVE' else 1,
             'digital_id_available': digital_id_available,
         },
-        'recent_activity': activities[:8],
+        'hero_card': membership_info,
+        'user': {
+            'id': user.id,
+            'name_bn': user.name_bn,
+            'name_en': user.name_en,
+            'email': user.email,
+            'phone': user.phone,
+            'role': user.role,
+        },
+        'circulars': circulars_payload,
     }
 
 
@@ -1641,12 +1779,15 @@ def toggle_member_update_bookmark(payload: dict, user: User = Depends(current_us
             user_id=user.id,
             entity_type=entity_type,
             entity_id=entity_id,
-            is_bookmarked=True,
+            is_bookmarked=bool(payload.get('is_bookmarked', True)),
             is_read=True,
         )
         db.add(row)
     else:
-        row.is_bookmarked = not bool(row.is_bookmarked)
+        if 'is_bookmarked' in payload and payload['is_bookmarked'] is not None:
+            row.is_bookmarked = bool(payload['is_bookmarked'])
+        else:
+            row.is_bookmarked = not bool(row.is_bookmarked)
     db.commit()
     return {'ok': True, 'entity_type': entity_type, 'entity_id': entity_id, 'is_bookmarked': bool(row.is_bookmarked)}
 

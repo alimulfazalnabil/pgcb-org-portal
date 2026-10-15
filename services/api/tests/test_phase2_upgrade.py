@@ -720,14 +720,45 @@ def test_sprint2_member_portal_dashboard_renewal_card_wallet_and_notifications()
         assert len(dash['quick_actions']) == 6
         assert isinstance(dash['recent_activity'], list)
         assert 'member' in dash
+        assert dash['member']['circle'] == 'Dhaka'
+        assert 'membership' in dash
+        assert dash['membership']['status'] == 'ACTIVE'
+        assert dash['membership']['type'] in ('GENERAL', 'PROFESSIONAL')
+        assert 'joined_at' in dash['membership']
         assert 'application' in dash
+        assert 'reference' in dash['application']
         assert len(dash['application']['stages']) == 6
         assert 'payment_summary' in dash
-        assert 'profile_completion' in dash
-        assert 'profile_completion_details' in dash
-        assert dash['digital_id_available'] is True
+        assert 'successful' in dash['payment_summary']
+        assert 'pending' in dash['payment_summary']
+        assert 'failed' in dash['payment_summary']
+        assert 'documents' in dash
+        assert 'total' in dash['documents']
+        assert 'verified' in dash['documents']
+        assert 'pending' in dash['documents']
+        assert 'upcoming_events' in dash
+        assert isinstance(dash['upcoming_events'], list)
+        assert 'notifications' in dash
+        assert isinstance(dash['notifications'], list)
+        assert 'recent_activity' in dash
+        assert isinstance(dash['recent_activity'], list)
+        for act in dash['recent_activity']:
+            assert act['type'] in ('MEMBERSHIP', 'APPLICATION', 'PAYMENT', 'DOCUMENT', 'CERTIFICATE', 'EVENT', 'PROFILE', 'SYSTEM')
+            assert 'title' in act
+            assert 'description' in act
+            assert 'timestamp' in act
+            assert 'href' in act
+
+        # Critical Security Rule: ?member_id=999999 query tampering must be ignored and return current member
+        tampered_dash = client.get('/api/v1/member/dashboard?member_id=999999', headers=headers)
+        assert tampered_dash.status_code == 200
+        assert tampered_dash.json()['member']['membership_id'] == 'PGD-2026-1001'
 
         # 1b. Editable Profile + Sensitive Field Verification Workflow + Profile Completion Engine
+        cur_prof = client.get('/api/v1/member/profile', headers=headers).json()
+        cur_nid = cur_prof.get('nid_number') or '1990000000000'
+        new_test_nid = '1990998877666' if cur_nid != '1990998877666' else '1990998877667'
+
         prof_update = client.patch(
             '/api/v1/member/profile',
             headers=headers,
@@ -740,7 +771,7 @@ def test_sprint2_member_portal_dashboard_renewal_card_wallet_and_notifications()
                 'emergency_contact_name': 'Md. Karim Uddin',
                 'emergency_contact_relationship': 'Brother',
                 'emergency_contact_phone': '01711998877',
-                'nid_number': '1990998877665',  # Sensitive change on ACTIVE member -> creates PENDING request
+                'nid_number': new_test_nid,  # Sensitive change on ACTIVE member -> creates PENDING request
             },
         )
         assert prof_update.status_code == 200, prof_update.text
@@ -755,7 +786,7 @@ def test_sprint2_member_portal_dashboard_renewal_card_wallet_and_notifications()
         cr_list = client.get('/api/v1/admin/profile-change-requests?status=PENDING', headers=admin_headers)
         assert cr_list.status_code == 200
         cr_items = cr_list.json()['items']
-        nid_cr = next((r for r in cr_items if r['field_name'] == 'nid_number' and r['requested_value'] == '1990998877665'), None)
+        nid_cr = next((r for r in cr_items if r['field_name'] == 'nid_number' and r['requested_value'] == new_test_nid), None)
         assert nid_cr is not None
 
         cr_approve = client.post(
@@ -770,7 +801,7 @@ def test_sprint2_member_portal_dashboard_renewal_card_wallet_and_notifications()
         headers = _login(client, 'member@example.org')
         prof_after = client.get('/api/v1/member/profile', headers=headers)
         assert prof_after.status_code == 200
-        assert prof_after.json()['nid_number'] == '1990998877665'
+        assert prof_after.json()['nid_number'] == new_test_nid
 
         # 1c. Application Timeline, Member Updates (Bookmark/Read), Settings, and Login History
         tl_res = client.get('/api/v1/member/application/timeline', headers=headers)
@@ -785,7 +816,7 @@ def test_sprint2_member_portal_dashboard_renewal_card_wallet_and_notifications()
             bm_res = client.post(
                 '/api/v1/member/updates/bookmark',
                 headers=headers,
-                json={'content_type': first_u['content_type'], 'content_id': first_u['id']},
+                json={'content_type': first_u['content_type'], 'content_id': first_u['id'], 'is_bookmarked': True},
             )
             assert bm_res.status_code == 200
             assert bm_res.json()['is_bookmarked'] is True

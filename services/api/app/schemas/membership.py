@@ -69,3 +69,17 @@ class MemberDocumentResponse(BaseModel):
     reviewer_note: str | None = None
     created_at: datetime
 
+
+class MemberDashboardResponse(BaseModel):
+    member: dict
+    membership: dict
+    application: dict
+    profile_completion: int
+    payment_summary: dict
+    documents: dict
+    certificates: list[dict] = []
+    upcoming_events: list[dict] = []
+    notifications: list[dict] = []
+    recent_activity: list[dict] = []
+
+
