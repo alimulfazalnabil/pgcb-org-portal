@@ -1,3 +1,4 @@
-import MemberPortal from '@/app/portal/page';
+import MemberDashboardPage from './dashboard/page';
 
-export default MemberPortal;
+export default MemberDashboardPage;
+

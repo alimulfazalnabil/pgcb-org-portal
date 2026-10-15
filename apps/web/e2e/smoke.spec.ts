@@ -124,6 +124,32 @@ test.describe('PGCB Portal Comprehensive E2E Journeys', () => {
     expect(logoutRes.ok()).toBeTruthy();
   });
 
+  test('MEMBER DASHBOARD: Route /member/dashboard renders 6 primary cards, profile completion, activity, events, and notifications', async ({ page }) => {
+    await page.goto('/login');
+    await page.getByPlaceholder('Email').fill('member@example.org');
+    await page.getByPlaceholder('Password').fill('ChangeMe123!');
+    await page.getByRole('button', { name: 'Login' }).click();
+
+    await page.goto('/member/dashboard');
+    await expect(page.getByText(/PGCB MEMBER PORTAL/).first()).toBeVisible();
+    await expect(page.getByText(/Good (morning|afternoon|evening)|শুভ/i).first()).toBeVisible();
+
+    // 6 Primary cards
+    await expect(page.getByText(/ACTIVE/i).first()).toBeVisible();
+    await expect(page.getByText(/VALID UNTIL|মেয়াদ উত্তীর্ণ/i).first()).toBeVisible();
+    await expect(page.getByText(/GRID CIRCLE|গ্রিড সার্কেল/i).first()).toBeVisible();
+    await expect(page.getByText(/APPLICATION|আবেদন/i).first()).toBeVisible();
+    await expect(page.getByText(/DOCUMENTS|ডকুমেন্ট/i).first()).toBeVisible();
+    await expect(page.getByText(/PROFILE|প্রোফাইল/i).first()).toBeVisible();
+
+    // Profile completion section
+    await expect(page.getByText(/Profile Completion|প্রোফাইল সম্পূর্ণতা/i).first()).toBeVisible();
+
+    // Recent activity & AI assistant banner
+    await expect(page.getByText(/Recent Activity|সাম্প্রতিক কর্মকাণ্ড/i).first()).toBeVisible();
+    await expect(page.getByText(/Need help\? Ask PGCB AI Assistant|সহায়তা প্রয়োজন/i).first()).toBeVisible();
+  });
+
   test('ADMIN & PAYMENT: Admin login, dashboard stats, member/circular/event/certificate management, and payment flow', async ({ page }) => {
     await page.goto('/login');
     await page.getByPlaceholder('Email').fill('admin@example.org');

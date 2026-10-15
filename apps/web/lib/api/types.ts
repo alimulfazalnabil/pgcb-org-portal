@@ -232,14 +232,31 @@ export interface NotificationPreferences {
 export interface MemberDashboardData {
   greeting?: string;
   user?: Record<string, any>;
-  member?: Record<string, any>;
+  member?: {
+    id?: number;
+    name_bn?: string;
+    name_en?: string;
+    membership_id?: string;
+    photo_url?: string;
+    circle?: string;
+    circle_bn?: string;
+    circle_en?: string;
+    designation_bn?: string;
+    designation_en?: string;
+    email?: string;
+    phone?: string;
+    profile_completion?: number;
+    [key: string]: any;
+  };
   hero_card?: Record<string, any>;
   membership?: {
     id?: number;
-    member_id?: string;
+    member_id?: string | number;
     membership_id?: string;
     membership_type?: string;
     status: string;
+    type?: string;
+    joined_at?: string;
     valid_until?: string;
     validity_date?: string;
     issue_date?: string;
@@ -247,14 +264,17 @@ export interface MemberDashboardData {
     days_remaining?: number | null;
     days_until_expiry?: number | null;
     circle_id?: number | null;
+    circle?: string;
     circle_bn?: string;
     circle_en?: string;
     circle_name_bn?: string;
     designation_bn?: string;
     designation_en?: string;
+    [key: string]: any;
   };
   application?: {
     id: number;
+    reference?: string;
     application_no: string;
     membership_id?: string | null;
     membership_type: string;
@@ -279,13 +299,72 @@ export interface MemberDashboardData {
       message_en: string;
       message_bn: string;
     }>;
+    [key: string]: any;
   };
-  payment_summary?: Record<string, any>;
-  documents?: Array<Record<string, any>>;
+  payment_summary?: {
+    total_paid?: number;
+    total_paid_formatted?: string;
+    successful?: number;
+    pending?: number;
+    failed?: number;
+    payments_count?: number;
+    paid_count?: number;
+    pending_count?: number;
+    latest_payment?: Record<string, any>;
+    recent_payments?: Array<Record<string, any>>;
+    [key: string]: any;
+  };
+  documents?: {
+    total: number;
+    verified: number;
+    pending: number;
+    items?: Array<Record<string, any>>;
+    [key: string]: any;
+  } | Array<Record<string, any>>;
+  documents_list?: Array<Record<string, any>>;
   certificates?: CertificateWalletItem[];
+  upcoming_events?: Array<{
+    id: number;
+    slug?: string;
+    title: string;
+    title_bn?: string;
+    title_en?: string;
+    summary_bn?: string;
+    location?: string;
+    location_bn?: string;
+    location_en?: string;
+    time?: string;
+    day?: string;
+    month?: string;
+    event_date?: string;
+    event_date_formatted?: string;
+    is_registered?: boolean;
+    registration_status?: string | null;
+    registration_enabled?: boolean;
+    [key: string]: any;
+  }>;
   events?: Array<Record<string, any>>;
   circulars?: Array<Record<string, any>>;
-  notifications?: Array<Record<string, any>>;
+  notifications?: Array<{
+    id: number;
+    title?: string;
+    title_bn?: string;
+    body?: string;
+    body_bn?: string;
+    type?: string;
+    dot_color?: string;
+    indicator_icon?: string;
+    read_at?: string | null;
+    is_read?: boolean;
+    indicator?: string;
+    created_at?: string;
+    relative_time?: string;
+    relative_time_en?: string;
+    relative_time_bn?: string;
+    href?: string;
+    [key: string]: any;
+  }>;
+  unread_notifications_count?: number;
   profile_completion?: number;
   profile_completion_details?: {
     percentage: number;
@@ -310,11 +389,15 @@ export interface MemberDashboardData {
     title?: string;
     title_en?: string;
     title_bn?: string;
+    description?: string;
     subtitle_bn?: string;
     status?: string;
     timestamp?: string;
+    relative_time?: string;
     relative_time_en?: string;
     relative_time_bn?: string;
+    href?: string;
+    [key: string]: any;
   }>;
 }
 

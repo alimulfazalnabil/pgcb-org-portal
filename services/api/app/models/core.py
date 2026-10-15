@@ -856,15 +856,38 @@ class MemberProfileChangeRequest(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     member_id: Mapped[int] = mapped_column(ForeignKey('members.id', ondelete='CASCADE'), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
-    field_name: Mapped[str] = mapped_column(String(80), index=True)  # name_bn, name_en, date_of_birth, nid_number, membership_id, certificate_info
+    field_name: Mapped[str] = mapped_column(String(80), index=True)  # name_bn, name_en, date_of_birth, nid_number, membership_id, certificate_info, grid_circle
     current_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     requested_value: Mapped[str] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     supporting_doc_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    status: Mapped[str] = mapped_column(String(30), default='PENDING', index=True)  # PENDING, APPROVED, REJECTED
+    supporting_document_id: Mapped[int | None] = mapped_column(ForeignKey('member_documents.id', ondelete='SET NULL'), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), default='PENDING', index=True)  # PENDING, UNDER_REVIEW, APPROVED, REJECTED, CANCELLED
     reviewer_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    member = relationship('Member')
+    user = relationship('User', foreign_keys=[user_id])
+    reviewer = relationship('User', foreign_keys=[reviewer_id])
+    supporting_document = relationship('MemberDocument')
+
+    @property
+    def reviewed_by(self) -> int | None:
+        return self.reviewer_id
+
+    @reviewed_by.setter
+    def reviewed_by(self, val: int | None) -> None:
+        self.reviewer_id = val
+
+    @property
+    def reviewer_comment(self) -> str | None:
+        return self.review_note
+
+    @reviewer_comment.setter
+    def reviewer_comment(self, val: str | None) -> None:
+        self.review_note = val
+
 
 
 class MemberSavedContent(Base, TimestampMixin):
