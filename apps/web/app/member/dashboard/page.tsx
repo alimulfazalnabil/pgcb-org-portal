@@ -191,7 +191,7 @@ export default function MemberDashboardPage() {
             </Link>
 
             <Link
-              href="/portal?tab=profile"
+              href="/member/profile"
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-sm text-slate-300 hover:text-white hover:bg-slate-800/60 transition-colors"
             >
               <User size={18} />
@@ -199,7 +199,7 @@ export default function MemberDashboardPage() {
             </Link>
 
             <Link
-              href="/portal?tab=membership"
+              href="/member/membership"
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-sm text-slate-300 hover:text-white hover:bg-slate-800/60 transition-colors"
             >
               <ShieldCheck size={18} />
@@ -207,7 +207,7 @@ export default function MemberDashboardPage() {
             </Link>
 
             <Link
-              href="/portal?tab=application"
+              href="/member/application"
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-sm text-slate-300 hover:text-white hover:bg-slate-800/60 transition-colors"
             >
               <FileText size={18} />
@@ -323,7 +323,7 @@ export default function MemberDashboardPage() {
                   <span>{isEn ? 'Dashboard' : 'ড্যাশবোর্ড'}</span>
                 </Link>
                 <Link
-                  href="/portal?tab=profile"
+                  href="/member/profile"
                   onClick={() => setMobileMenuOpen(false)}
                   className="p-3 rounded-xl bg-slate-900 text-slate-200 font-bold text-xs flex items-center gap-2 border border-slate-800"
                 >
@@ -331,7 +331,7 @@ export default function MemberDashboardPage() {
                   <span>{isEn ? 'My Profile' : 'প্রোফাইল'}</span>
                 </Link>
                 <Link
-                  href="/portal?tab=membership"
+                  href="/member/membership"
                   onClick={() => setMobileMenuOpen(false)}
                   className="p-3 rounded-xl bg-slate-900 text-slate-200 font-bold text-xs flex items-center gap-2 border border-slate-800"
                 >

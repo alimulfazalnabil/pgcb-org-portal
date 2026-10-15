@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -1341,6 +1341,277 @@ def list_member_renewals(user: User = Depends(current_user), db: Session = Depen
     return {'renewals': result, 'items': result, 'count': len(result)}
 
 
+@router.get('/membership', response_model=MembershipSummaryResponse)
+def get_member_membership_summary(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Phase 3: Membership Summary API.
+    Returns authoritative server-calculated membership status, validity, circle,
+    and eligibility flags without requiring any client-supplied member ID.
+    """
+    m = get_member(user, db)
+    return compute_authoritative_membership_status(m, db)
+
+
+@router.get('/membership/history')
+def get_member_membership_history(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Phase 3: Chronological membership history including initial joining,
+    renewals, status modifications, payment and certificate linkages.
+    """
+    m = get_member(user, db)
+    history_items: list[dict] = []
+
+    # 1. Status history records
+    status_records = db.scalars(
+        select(MembershipStatusHistory)
+        .where(MembershipStatusHistory.member_id == m.id)
+        .order_by(MembershipStatusHistory.effective_at.desc())
+    ).all()
+
+    for h in status_records:
+        action_label_map = {
+            'RENEWAL': ('নবায়ন সম্পন্ন', 'Renewal Completed'),
+            'ACTIVATED': ('সদস্যপদ সক্রিয়করণ', 'Membership Activated'),
+            'SUSPENDED': ('সদস্যপদ স্থগিতকরণ', 'Membership Suspended'),
+            'REACTIVATED': ('সদস্যপদ পুনঃসক্রিয়করণ', 'Membership Reactivated'),
+            'CREATED': ('সদস্যপদ নিবন্ধন', 'Membership Created'),
+            'EXPIRED': ('মেয়াদোত্তীর্ণ', 'Membership Expired'),
+        }
+        action_lbl = action_label_map.get(h.action, (h.action, h.action))
+        performed_name = None
+        if h.performed_by:
+            performed_name = h.performed_by.name_en or h.performed_by.name_bn
+        elif h.action == 'RENEWAL':
+            performed_name = 'Member Self-Service'
+        else:
+            performed_name = 'Central Executive Committee'
+
+        pay_ref = None
+        if h.payment:
+            pay_ref = h.payment.receipt_no or h.payment.transaction_ref
+        cert_ref = None
+        if h.certificate:
+            cert_ref = h.certificate.certificate_no
+
+        history_items.append({
+            'id': f'hist-{h.id}',
+            'reference': h.reference,
+            'date': h.effective_at.strftime('%d %b %Y'),
+            'action': h.action,
+            'action_label_bn': action_lbl[0],
+            'action_label_en': action_lbl[1],
+            'period': str(h.effective_at.year),
+            'old_validity': h.old_validity.strftime('%d %b %Y') if h.old_validity else '—',
+            'new_validity': h.new_validity.strftime('%d %b %Y') if h.new_validity else '—',
+            'status': h.new_status,
+            'status_label_bn': 'সম্পন্ন' if h.new_status in ('ACTIVE', 'COMPLETED') else h.new_status,
+            'payment_reference': pay_ref,
+            'certificate_reference': cert_ref,
+            'performed_by': performed_name,
+            'timestamp': h.effective_at.isoformat(),
+        })
+
+    # 2. Membership Renewal records
+    renewals = db.scalars(
+        select(MembershipRenewal)
+        .where(MembershipRenewal.member_id == m.id)
+        .order_by(MembershipRenewal.created_at.desc())
+    ).all()
+
+    for r in renewals:
+        if any(item.get('reference') == r.reference for item in history_items):
+            continue
+        p = db.get(PaymentTransaction, r.payment_id) if r.payment_id else None
+        history_items.append({
+            'id': f'ren-{r.id}',
+            'reference': r.reference,
+            'date': r.created_at.strftime('%d %b %Y'),
+            'action': 'RENEWAL',
+            'action_label_bn': 'নবায়ন সম্পন্ন',
+            'action_label_en': 'Renewal Completed',
+            'period': str(r.new_validity_date.year) if r.new_validity_date else str(r.created_at.year),
+            'old_validity': r.previous_validity_date.strftime('%d %b %Y') if r.previous_validity_date else '—',
+            'new_validity': r.new_validity_date.strftime('%d %b %Y') if r.new_validity_date else '—',
+            'status': r.status.upper(),
+            'status_label_bn': 'সম্পন্ন' if r.status in ('COMPLETED', 'ACTIVE') else 'প্রক্রিয়াধীন',
+            'payment_reference': p.receipt_no or p.transaction_ref if p else None,
+            'certificate_reference': None,
+            'performed_by': 'Member Self-Service',
+            'timestamp': r.created_at.isoformat(),
+        })
+
+    # 3. Initial joined record
+    join_date = m.issue_date or m.created_at or datetime.utcnow()
+    initial_cert = db.scalar(select(Certificate).where(Certificate.member_id == m.id).order_by(Certificate.id.asc()))
+    initial_payment = db.scalar(
+        select(PaymentTransaction)
+        .where(PaymentTransaction.member_id == m.id, PaymentTransaction.status.in_(['PAID', 'SUCCESS', 'COMPLETED']))
+        .order_by(PaymentTransaction.id.asc())
+    )
+
+    history_items.append({
+        'id': f'init-{m.id}',
+        'reference': f'PGCB-MEM-{join_date.year}-{m.id:05d}',
+        'date': join_date.strftime('%d %b %Y'),
+        'action': 'CREATED',
+        'action_label_bn': 'সদস্যপদ সংযোজন',
+        'action_label_en': 'Membership Created',
+        'period': str(join_date.year),
+        'old_validity': '—',
+        'new_validity': m.validity_date.strftime('%d %b %Y') if m.validity_date else str(join_date.year),
+        'status': 'ACTIVE' if m.status == 'ACTIVE' else m.status,
+        'status_label_bn': 'সক্রিয়' if m.status == 'ACTIVE' else m.status,
+        'payment_reference': initial_payment.receipt_no if initial_payment else None,
+        'certificate_reference': initial_cert.certificate_no if initial_cert else None,
+        'performed_by': 'Central Executive Committee',
+        'timestamp': join_date.isoformat(),
+    })
+
+    history_items.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+    return {'items': history_items, 'history': history_items, 'count': len(history_items)}
+
+
+@router.get('/membership/renewal/options', response_model=MembershipRenewalOptionsResponse)
+@router.get('/membership/renew/options', response_model=MembershipRenewalOptionsResponse)
+def get_member_renewal_options(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Phase 3: Official renewal options with server-calculated fees and eligibility.
+    """
+    m = get_member(user, db)
+    status_info = compute_authoritative_membership_status(m, db)
+    plans = get_membership_renewal_pricing(m, db)
+
+    return {
+        'eligible': status_info['renewal_available'],
+        'ineligible_reason': status_info['renewal_ineligible_reason'],
+        'current_validity': status_info['valid_until_formatted'] or 'N/A',
+        'plans': plans,
+    }
+
+
+@router.post('/membership/renew', response_model=MembershipRenewalResponse)
+def submit_member_renewal(
+    payload: dict,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Phase 3: Submit renewal application with server-calculated fee and target expiry date.
+    """
+    m = get_member(user, db)
+    status_info = compute_authoritative_membership_status(m, db)
+
+    if not status_info['renewal_available']:
+        raise HTTPException(
+            400,
+            status_info['renewal_ineligible_reason'] or 'Membership renewal is currently ineligible.',
+        )
+
+    duration_years = int(payload.get('duration_years') or 1)
+    if duration_years not in (1, 2, 3):
+        raise HTTPException(400, 'Renewal duration must be 1, 2, or 3 years.')
+
+    pricing_plans = get_membership_renewal_pricing(m, db)
+    selected_plan = next((p for p in pricing_plans if p['duration_years'] == duration_years), pricing_plans[0])
+    official_fee = selected_plan['fee_bdt']
+
+    client_amount = payload.get('amount')
+    if client_amount is not None and int(client_amount) != official_fee:
+        raise HTTPException(
+            400,
+            f'Client amount (৳{client_amount}) does not match server fee (৳{official_fee}) for {duration_years} year renewal.',
+        )
+
+    now = datetime.utcnow()
+    base_date = m.validity_date if (m.validity_date and m.validity_date > now) else now
+    target_validity = base_date + timedelta(days=duration_years * 365)
+
+    renewal = MembershipRenewal(
+        member_id=m.id,
+        previous_validity_date=m.validity_date,
+        new_validity_date=target_validity,
+        amount=official_fee,
+        currency='BDT',
+        duration_years=duration_years,
+        notes=payload.get('notes'),
+        status='PENDING',
+    )
+    db.add(renewal)
+    db.flush()
+
+    tx_ref = f'PGCB-REN-{now.year}-{renewal.id:06d}'
+    payment = PaymentTransaction(
+        user_id=user.id,
+        member_id=m.id,
+        purpose='MEMBERSHIP_RENEWAL',
+        membership_plan_id=f'RENEWAL_{duration_years}YR',
+        amount=official_fee,
+        currency='BDT',
+        provider='SSLCOMMERZ',
+        status='PENDING',
+        transaction_ref=tx_ref,
+    )
+    db.add(payment)
+    db.flush()
+
+    renewal.payment_id = payment.id
+
+    log_audit_action(
+        db=db,
+        request=request,
+        action='RENEWAL_CREATED',
+        entity='MEMBERSHIP_RENEWAL',
+        entity_id=str(renewal.id),
+        user=user,
+        new_value={
+            'renewal_id': renewal.id,
+            'duration_years': duration_years,
+            'amount': official_fee,
+            'target_validity': target_validity.strftime('%Y-%m-%d'),
+            'transaction_ref': tx_ref,
+        },
+    )
+
+    db.add(
+        Notification(
+            user_id=user.id,
+            title_bn='সদস্যপদ নবায়ন আবেদন জমা হয়েছে',
+            body_bn=(
+                f'আপনার {duration_years} বছরের সদস্যপদ নবায়ন আবেদন সফলভাবে জমা হয়েছে। '
+                f'মোট প্রদেয় ফি: ৳{official_fee:,}। সক্রিয় করতে পেমেন্ট সম্পন্ন করুন।'
+            ),
+            notification_type='MEMBERSHIP',
+        )
+    )
+
+    db.commit()
+
+    return {
+        'ok': True,
+        'renewal_id': renewal.id,
+        'reference': renewal.reference,
+        'duration_years': duration_years,
+        'amount': official_fee,
+        'amount_formatted': f'৳{official_fee:,}',
+        'currency': 'BDT',
+        'new_validity': target_validity.strftime('%Y-%m-%d'),
+        'status': 'PENDING',
+        'transaction_id': tx_ref,
+        'payment_url': f'/payments/checkout?transaction_id={tx_ref}',
+        'message': f'{duration_years} বছরের নবায়ন আবেদন সফলভাবে তৈরি হয়েছে। অনুগ্রহ করে পেমেন্ট সম্পন্ন করুন।',
+    }
+
+
 @router.post('/renewal/initiate')
 def initiate_membership_renewal(
     payload: dict,
@@ -1918,6 +2189,301 @@ def cancel_profile_change_request(
     db.commit()
     return {'ok': True, 'id': req_obj.id, 'status': 'CANCELLED', 'message': 'Change request cancelled successfully'}
 
+
+
+@router.get('/application')
+def get_unified_application_center(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Phase 3: Unified Application Center API.
+    Provides structured multi-step timeline (Submitted, Document Verification,
+    Circle Review, Central Review, Payment, Activation), document requirements,
+    and inline payment checkout triggers.
+    """
+    m = get_member(user, db)
+    app_row = db.scalar(select(MembershipApplication).where(MembershipApplication.member_id == m.id))
+    app_no = (
+        app_row.application_no
+        if app_row and app_row.application_no
+        else (m.application_no or f'PGCB-APP-{m.created_at.year}-{m.id:05d}')
+    )
+
+    status_raw = (m.status or 'PENDING').upper()
+    submitted_date = (app_row.created_at if app_row else m.created_at) or datetime.utcnow()
+
+    docs = m.documents or []
+    doc_type_status = {d.document_type.upper(): d.review_status.upper() for d in docs}
+    has_rejected_docs = any(d.review_status.upper() == 'REJECTED' for d in docs)
+    all_docs_approved = len(docs) >= 1 and all(d.review_status.upper() == 'APPROVED' for d in docs)
+
+    # 6-step timeline calculation
+    t1_status = 'COMPLETED'
+    if has_rejected_docs or status_raw == 'DOCUMENTS_REQUIRED':
+        t2_status = 'REQUIRED'
+    elif all_docs_approved or status_raw in ('UNDER_REVIEW', 'PAYMENT_PENDING', 'ACTIVE'):
+        t2_status = 'COMPLETED'
+    else:
+        t2_status = 'CURRENT'
+
+    if status_raw in ('PAYMENT_PENDING', 'ACTIVE'):
+        t3_status = 'COMPLETED'
+    elif status_raw in ('UNDER_REVIEW', 'CIRCLE_REVIEW'):
+        t3_status = 'CURRENT'
+    elif t2_status == 'COMPLETED':
+        t3_status = 'CURRENT'
+    else:
+        t3_status = 'UPCOMING'
+
+    if status_raw in ('PAYMENT_PENDING', 'ACTIVE'):
+        t4_status = 'COMPLETED'
+    elif status_raw in ('CENTRAL_REVIEW',) or (status_raw == 'UNDER_REVIEW' and t3_status == 'COMPLETED'):
+        t4_status = 'CURRENT'
+    elif t3_status == 'COMPLETED':
+        t4_status = 'CURRENT'
+    else:
+        t4_status = 'UPCOMING'
+
+    has_paid_payment = bool(
+        db.scalar(
+            select(PaymentTransaction).where(
+                PaymentTransaction.member_id == m.id,
+                PaymentTransaction.status.in_(['PAID', 'SUCCESS', 'COMPLETED']),
+            )
+        )
+    )
+    if status_raw == 'ACTIVE' or has_paid_payment:
+        t5_status = 'COMPLETED'
+    elif status_raw in ('PAYMENT_PENDING', 'APPROVED'):
+        t5_status = 'CURRENT'
+    else:
+        t5_status = 'UPCOMING'
+
+    if status_raw == 'ACTIVE' and m.membership_id:
+        t6_status = 'COMPLETED'
+    elif status_raw == 'ACTIVE' or (t5_status == 'COMPLETED' and status_raw != 'REJECTED'):
+        t6_status = 'CURRENT'
+    else:
+        t6_status = 'UPCOMING'
+
+    timeline = [
+        {
+            'step_key': 'SUBMITTED',
+            'title_bn': 'আবেদন জমা সম্পন্ন',
+            'title_en': 'Application Submitted',
+            'status': t1_status,
+            'description': f'রেফারেন্স: {app_no}',
+            'timestamp': submitted_date.strftime('%d %b %Y, %I:%M %p'),
+            'actor_type': 'APPLICANT',
+        },
+        {
+            'step_key': 'DOCUMENTS_VERIFIED',
+            'title_bn': 'ডকুমেন্ট যাচাইকরণ',
+            'title_en': 'Document Verification',
+            'status': t2_status,
+            'description': 'সহায়ক সনদ ও জাতীয় পরিচয়পত্র যাচাই' if t2_status != 'REQUIRED' else 'অতিরিক্ত বা স্পষ্ট ডকুমেন্ট সংযোজন আবশ্যক',
+            'timestamp': (m.updated_at.strftime('%d %b %Y') if m.updated_at else None) if t2_status == 'COMPLETED' else None,
+            'actor_type': 'VERIFICATION_OFFICER',
+        },
+        {
+            'step_key': 'CIRCLE_REVIEW',
+            'title_bn': 'গ্রিড সার্কেল পর্যালোচনা',
+            'title_en': 'Circle Review',
+            'status': t3_status,
+            'description': f'সার্কেল: {m.circle.name_bn if m.circle else "PGCB"}',
+            'timestamp': None,
+            'actor_type': 'CIRCLE_ADMIN',
+        },
+        {
+            'step_key': 'CENTRAL_REVIEW',
+            'title_bn': 'কেন্দ্রীয় চূড়ান্ত অনুমোদন',
+            'title_en': 'Central Review',
+            'status': t4_status,
+            'description': 'কেন্দ্রীয় কার্যনির্বাহী কমিটির আনুষ্ঠানিক পর্যালোচনা',
+            'timestamp': None,
+            'actor_type': 'CENTRAL_ADMIN',
+        },
+        {
+            'step_key': 'PAYMENT',
+            'title_bn': 'ফি পরিশোধ',
+            'title_en': 'Fee Payment',
+            'status': t5_status,
+            'description': 'সদস্যপদ ফি বা নবায়ন ফি পরিশোধ' if t5_status != 'CURRENT' else 'ফি পরিশোধ আবশ্যক (পেমেন্ট করুন)',
+            'timestamp': None,
+            'actor_type': 'FINANCE',
+        },
+        {
+            'step_key': 'ACTIVATION',
+            'title_bn': 'সদস্যপদ সক্রিয়করণ',
+            'title_en': 'Membership Activation',
+            'status': t6_status,
+            'description': f'মেম্বার আইডি: {m.membership_id or "প্রক্রিয়াধীন"}',
+            'timestamp': (m.issue_date.strftime('%d %b %Y') if m.issue_date else None) if t6_status == 'COMPLETED' else None,
+            'actor_type': 'SYSTEM',
+        },
+    ]
+
+    required_docs = []
+    if not doc_type_status.get('NID'):
+        required_docs.append({'type': 'NID', 'label_bn': 'জাতীয় পরিচয়পত্র / পাসপোর্ট', 'reason': 'পরিচয় যাচাইকরণ'})
+    if not doc_type_status.get('ACADEMIC') and not doc_type_status.get('DIPLOMA_CERTIFICATE'):
+        required_docs.append({'type': 'ACADEMIC', 'label_bn': 'ডিপ্লোমা ইন ইঞ্জিনিয়ারিং সনদপত্র', 'reason': 'শিক্ষাগত যোগ্যতা যাচাই'})
+    for d in docs:
+        if d.review_status.upper() == 'REJECTED':
+            required_docs.append({
+                'type': d.document_type,
+                'label_bn': d.document_type,
+                'reason': d.reviewer_note or 'পূর্বের আপলোডকৃত ফাইলটি অস্পষ্ট বা অসম্পূর্ণ ছিল। অনুগ্রহ করে পুনরায় আপলোড করুন।',
+            })
+
+    pending_payment = None
+    if status_raw in ('PAYMENT_PENDING', 'APPROVED') or t5_status == 'CURRENT':
+        p_row = db.scalar(
+            select(PaymentTransaction)
+            .where(PaymentTransaction.member_id == m.id, PaymentTransaction.status == 'PENDING')
+            .order_by(PaymentTransaction.created_at.desc())
+        )
+        if p_row:
+            pending_payment = {
+                'id': p_row.id,
+                'transaction_ref': p_row.transaction_ref,
+                'amount': float(p_row.amount),
+                'amount_formatted': f'৳{int(p_row.amount):,}',
+                'purpose': p_row.purpose,
+                'checkout_url': f'/payments/checkout?transaction_id={p_row.transaction_ref}',
+            }
+
+    circle_dict = None
+    if m.circle:
+        circle_dict = {
+            'id': m.circle.id,
+            'name_bn': m.circle.name_bn,
+            'name_en': m.circle.name_en,
+        }
+
+    return {
+        'application_no': app_no,
+        'membership_type': m.membership_type or 'PROFESSIONAL',
+        'status': status_raw,
+        'status_label_bn': {
+            'SUBMITTED': 'জমা হয়েছে',
+            'DOCUMENTS_REQUIRED': 'ডকুমেন্ট প্রয়োজন',
+            'UNDER_REVIEW': 'পর্যালোচনাধীন',
+            'PAYMENT_PENDING': 'পেমেন্ট অপেক্ষমাণ',
+            'ACTIVE': 'অনুমোদিত ও সক্রিয়',
+            'REJECTED': 'প্রত্যাখ্যাত',
+        }.get(status_raw, status_raw),
+        'status_label_en': status_raw.replace('_', ' ').title(),
+        'circle': circle_dict,
+        'submitted_at': submitted_date.strftime('%d %B %Y') if submitted_date else None,
+        'reviewed_at': m.updated_at.strftime('%d %B %Y') if (m.updated_at and status_raw in ('ACTIVE', 'APPROVED')) else None,
+        'timeline': timeline,
+        'documents': [
+            {
+                'id': d.id,
+                'document_type': d.document_type,
+                'filename': d.filename,
+                'review_status': d.review_status,
+                'reviewer_note': d.reviewer_note,
+                'download_url': f'/api/v1/member/documents/{d.id}/download',
+            }
+            for d in docs
+        ],
+        'required_document_types': required_docs,
+        'pending_payment': pending_payment,
+    }
+
+
+@router.post('/application/documents')
+async def upload_application_document(
+    file: UploadFile = File(...),
+    document_type: str = Form('ACADEMIC'),
+    request: Request = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Phase 3: Inline document upload for required/missing application documents.
+    Validates magic bytes, restricts file size (5MB), and updates member status.
+    """
+    m = get_member(user, db)
+    doc_type_clean = (document_type or 'ACADEMIC').strip().upper()
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, 'আপলোডকৃত ফাইলটি খালি (File is empty).')
+
+    MAX_BYTES = 5 * 1024 * 1024
+    if len(file_bytes) > MAX_BYTES:
+        raise HTTPException(400, 'ফাইলের আকার সর্বোচ্চ ৫ মেগাবাইট (Maximum 5MB allowed).')
+
+    is_pdf = file_bytes.startswith(b'%PDF-')
+    is_jpeg = file_bytes.startswith(b'\xff\xd8\xff')
+    is_png = file_bytes.startswith(b'\x89PNG\r\n\x1a\n')
+    is_webp = len(file_bytes) >= 12 and file_bytes[:4] == b'RIFF' and file_bytes[8:12] == b'WEBP'
+
+    if not (is_pdf or is_jpeg or is_png or is_webp):
+        raise HTTPException(
+            400,
+            'শুধুমাত্র অনুমোদিত ফরম্যাট (PDF, JPEG, PNG, WEBP) আপলোড করা যাবে।',
+        )
+
+    ext = 'pdf' if is_pdf else ('png' if is_png else ('webp' if is_webp else 'jpg'))
+    fname = f"doc_{m.id}_{doc_type_clean.lower()}_{uuid.uuid4().hex[:8]}.{ext}"
+    target_dir = BASE_STORAGE / 'documents' / f'member_{m.id}'
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / fname
+
+    with open(target_path, 'wb') as f:
+        f.write(file_bytes)
+
+    existing_doc = db.scalar(
+        select(MemberDocument)
+        .where(MemberDocument.member_id == m.id, MemberDocument.document_type == doc_type_clean)
+    )
+    if existing_doc:
+        existing_doc.filename = file.filename or fname
+        existing_doc.storage_path = str(target_path)
+        existing_doc.content_type = file.content_type or 'application/octet-stream'
+        existing_doc.review_status = 'PENDING'
+        doc_obj = existing_doc
+    else:
+        doc_obj = MemberDocument(
+            member_id=m.id,
+            document_type=doc_type_clean,
+            filename=file.filename or fname,
+            storage_path=str(target_path),
+            content_type=file.content_type or 'application/octet-stream',
+            review_status='PENDING',
+        )
+        db.add(doc_obj)
+
+    if m.status in ('DOCUMENTS_REQUIRED', 'PENDING'):
+        m.status = 'UNDER_REVIEW'
+
+    log_audit_action(
+        db=db,
+        request=request,
+        action='DOCUMENT_SUBMITTED',
+        entity='MEMBER_DOCUMENT',
+        entity_id=str(doc_obj.id or doc_type_clean),
+        user=user,
+        new_value={'document_type': doc_type_clean, 'filename': doc_obj.filename},
+    )
+
+    db.commit()
+
+    return {
+        'ok': True,
+        'message': f'{doc_type_clean} ডকুমেন্ট সফলভাবে আপলোড করা হয়েছে।',
+        'document': {
+            'id': doc_obj.id,
+            'document_type': doc_obj.document_type,
+            'filename': doc_obj.filename,
+            'review_status': doc_obj.review_status,
+        },
+    }
 
 
 @router.get('/application/timeline')

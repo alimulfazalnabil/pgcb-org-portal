@@ -128,16 +128,52 @@ def renew_membership(
         member.membership_type = 'LIFE'
     member.issue_date = member.issue_date or now
     member.validity_date = new_validity
-    renewal = MembershipRenewal(
-        member_id=member.id,
-        payment_id=payment_id,
-        previous_validity_date=previous,
-        new_validity_date=new_validity,
-        amount=amount,
-        currency=currency,
-        status='COMPLETED',
+    existing_pending = None
+    if payment_id:
+        existing_pending = db.scalar(
+            select(MembershipRenewal).where(MembershipRenewal.payment_id == payment_id)
+        )
+    if not existing_pending:
+        existing_pending = db.scalar(
+            select(MembershipRenewal)
+            .where(MembershipRenewal.member_id == member.id, MembershipRenewal.status == 'PENDING')
+            .order_by(MembershipRenewal.created_at.desc())
+        )
+
+    if existing_pending:
+        existing_pending.status = 'COMPLETED'
+        existing_pending.payment_id = payment_id
+        existing_pending.previous_validity_date = previous
+        existing_pending.new_validity_date = new_validity
+        existing_pending.amount = amount
+        existing_pending.currency = currency
+        renewal = existing_pending
+    else:
+        renewal = MembershipRenewal(
+            member_id=member.id,
+            payment_id=payment_id,
+            previous_validity_date=previous,
+            new_validity_date=new_validity,
+            amount=amount,
+            currency=currency,
+            status='COMPLETED',
+        )
+        db.add(renewal)
+
+    from app.models import MembershipStatusHistory
+    db.add(
+        MembershipStatusHistory(
+            member_id=member.id,
+            old_status='ACTIVE' if previous else 'PENDING',
+            new_status='ACTIVE',
+            old_validity=previous,
+            new_validity=new_validity,
+            action='RENEWAL',
+            reason=f'Membership renewed via payment {payment_id}',
+            payment_id=payment_id,
+            effective_at=now,
+        )
     )
-    db.add(renewal)
     db.flush()
     return renewal
 

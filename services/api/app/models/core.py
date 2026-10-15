@@ -70,6 +70,7 @@ class MemberDocument(Base):
     storage_path: Mapped[str] = mapped_column(String(1000))
     content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
     review_status: Mapped[str] = mapped_column(String(30), default='PENDING', index=True)
+    reviewer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     member = relationship('Member', back_populates='documents')
 
@@ -336,7 +337,44 @@ class MembershipRenewal(Base):
     amount: Mapped[int] = mapped_column(Integer, default=0)
     currency: Mapped[str] = mapped_column(String(10), default='BDT')
     status: Mapped[str] = mapped_column(String(30), default='COMPLETED', index=True)
+    duration_years: Mapped[int | None] = mapped_column(Integer, default=1, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    member = relationship('Member')
+    payment = relationship(PaymentTransaction)
+
+    @property
+    def reference(self) -> str:
+        yr = self.created_at.year if self.created_at else 2026
+        return f"PGCB-REN-{yr}-{int(self.id or 0):05d}"
+
+
+class MembershipStatusHistory(Base):
+    __tablename__ = 'membership_status_history'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey('members.id', ondelete='CASCADE'), index=True)
+    old_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    new_status: Mapped[str] = mapped_column(String(30), index=True)
+    old_validity: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    new_validity: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    action: Mapped[str] = mapped_column(String(60), default='STATUS_CHANGE', index=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    performed_by_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    payment_id: Mapped[int | None] = mapped_column(ForeignKey('payment_transactions.id', ondelete='SET NULL'), nullable=True)
+    certificate_id: Mapped[int | None] = mapped_column(ForeignKey('certificates.id', ondelete='SET NULL'), nullable=True)
+    effective_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    member = relationship('Member')
+    performed_by = relationship('User', foreign_keys=[performed_by_id])
+    payment = relationship(PaymentTransaction, foreign_keys=[payment_id])
+    certificate = relationship('Certificate', foreign_keys=[certificate_id])
+
+    @property
+    def reference(self) -> str:
+        yr = self.created_at.year if self.created_at else 2026
+        return f"PGCB-HIST-{yr}-{int(self.id or 0):05d}"
 
 class MembershipReminder(Base):
     __tablename__ = 'membership_reminders'

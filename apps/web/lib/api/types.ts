@@ -204,22 +204,30 @@ export interface DigitalCardDetails {
 }
 
 export interface RenewalOptionItem {
-  code: string;
+  code?: string;
+  plan_code?: string;
   plan_id?: string;
   period?: string;
   label_en?: string;
   label_bn?: string;
   title_en?: string;
   title_bn?: string;
-  years: number;
+  years?: number;
+  duration_years?: number;
   days?: number;
   fee?: number;
   amount?: number;
   amount_bdt?: number;
   amount_formatted?: string;
+  net_fee?: number;
+  formatted_net_fee?: string;
   projected_validity_date?: string;
   projected_validity_formatted?: string;
-  currency: string;
+  projected_valid_until?: string;
+  projected_valid_until_bn?: string;
+  recommended?: boolean;
+  currency?: string;
+  [key: string]: any;
 }
 
 export interface NotificationPreferences {
@@ -626,6 +634,154 @@ export interface MemberProfile {
   };
 }
 
+export interface MembershipHistoryItem {
+  id: number;
+  reference?: string | null;
+  date: string;
+  year: string;
+  action: string;
+  action_label_en: string;
+  action_label_bn: string;
+  old_status?: string | null;
+  new_status?: string | null;
+  status?: string | null;
+  old_validity?: string | null;
+  new_validity?: string | null;
+  period_label?: string | null;
+  reason?: string | null;
+  performed_by?: string | null;
+  payment_reference?: string | null;
+  payment_id?: number | null;
+  certificate_no?: string | null;
+  certificate_id?: number | null;
+  created_at: string;
+}
 
+export type MembershipHistoryRecord = MembershipHistoryItem;
 
+export interface MembershipSummary {
+  status: 'ACTIVE' | 'EXPIRING_SOON' | 'EXPIRED' | 'SUSPENDED' | 'PENDING' | 'CANCELLED' | string;
+  status_label_en: string;
+  status_label_bn: string;
+  membership_id?: string | null;
+  membership_type?: string | null;
+  membership_type_label_en?: string | null;
+  membership_type_label_bn?: string | null;
+  circle?: string | null;
+  circle_bn?: string | null;
+  circle_en?: string | null;
+  joined_at?: string | null;
+  valid_until?: string | null;
+  days_remaining?: number | null;
+  validity_progress_percentage: number;
+  can_renew: boolean;
+  renewal_blocked_reason?: string | null;
+  digital_id_available: boolean;
+  certificate_available: boolean;
+  recent_history: MembershipHistoryItem[];
+}
 
+export type MembershipSummaryResponse = MembershipSummary;
+
+export interface MembershipRenewalOption {
+  duration_years: number;
+  plan_code: string;
+  label_en: string;
+  label_bn: string;
+  base_fee: number;
+  discount_amount: number;
+  net_fee: number;
+  formatted_net_fee: string;
+  projected_valid_until: string;
+  projected_valid_until_bn: string;
+  recommended: boolean;
+  savings_note_en?: string | null;
+  savings_note_bn?: string | null;
+  code?: string;
+  years?: number;
+  currency?: string;
+  [key: string]: any;
+}
+
+export type MembershipRenewalPlan = MembershipRenewalOption;
+
+export interface MembershipRenewalOptions {
+  membership_id: string;
+  current_status: string;
+  current_valid_until?: string | null;
+  can_renew: boolean;
+  ineligibility_reason?: string | null;
+  unresolved_renewal_reference?: string | null;
+  options: MembershipRenewalOption[];
+  periods?: any[];
+  plans?: any[];
+  [key: string]: any;
+}
+
+export type MembershipRenewalOptionsResponse = MembershipRenewalOptions;
+
+export interface MembershipRenewalRequest {
+  duration_years: number;
+  plan_code: string;
+  payment_gateway?: string;
+  notes?: string;
+}
+
+export interface MembershipRenewalResult {
+  renewal_id: number;
+  renewal_reference: string;
+  duration_years: number;
+  net_fee: number;
+  formatted_net_fee: string;
+  status: string;
+  projected_valid_until: string;
+  payment_id?: number | null;
+  payment_checkout_url?: string | null;
+  message: string;
+}
+
+export type MembershipRenewalResponse = MembershipRenewalResult;
+
+export interface ApplicationTimelineStep {
+  step_number: number;
+  code: string;
+  label_en: string;
+  label_bn: string;
+  description_en: string;
+  description_bn: string;
+  status: 'COMPLETED' | 'CURRENT' | 'PENDING' | 'REJECTED' | string;
+  completed_at?: string | null;
+  remarks?: string | null;
+}
+
+export interface ApplicationCenterDetails {
+  has_application: boolean;
+  application_no?: string | null;
+  membership_id?: string | null;
+  membership_type?: string | null;
+  current_stage?: string | null;
+  current_stage_label_en?: string | null;
+  current_stage_label_bn?: string | null;
+  submitted_at?: string | null;
+  reviewed_at?: string | null;
+  rejection_reason?: string | null;
+  timeline: ApplicationTimelineStep[];
+  missing_documents: string[];
+  uploaded_documents: Array<{
+    id?: number;
+    document_type?: string;
+    filename?: string;
+    status?: string;
+    review_status?: string;
+    uploaded_at?: string;
+    url?: string;
+    [key: string]: any;
+  }>;
+  can_upload_documents: boolean;
+  can_pay: boolean;
+  payment_reference?: string | null;
+  payment_amount?: number | null;
+  payment_url?: string | null;
+}
+
+export type ApplicationDetailsResponse = ApplicationCenterDetails;

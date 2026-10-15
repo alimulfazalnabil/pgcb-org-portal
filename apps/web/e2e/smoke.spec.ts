@@ -369,5 +369,39 @@ test.describe('PGCB Portal Comprehensive E2E Journeys', () => {
     const notifs = await notifRes.json();
     expect(notifs.length).toBeGreaterThanOrEqual(2);
   });
+
+  test('PHASE 3: Membership center, renewal options, history, and unified application lifecycle APIs', async ({ page }) => {
+    // 1. Authenticate as active member
+    await page.request.post('/backend/api/v1/auth/login', {
+      data: { email: 'member@example.org', password: 'ChangeMe123!' },
+    });
+
+    // 2. Authoritative membership summary API
+    const memRes = await page.request.get('/backend/api/v1/member/membership');
+    expect(memRes.ok()).toBeTruthy();
+    const memSummary = await memRes.json();
+    expect(memSummary.status).toBeDefined();
+    expect(memSummary.validity_progress_percentage).toBeGreaterThanOrEqual(0);
+
+    // 3. Official renewal pricing options API
+    const renRes = await page.request.get('/backend/api/v1/member/membership/renewal/options');
+    expect(renRes.ok()).toBeTruthy();
+    const renOptions = await renRes.json();
+    expect(Array.isArray(renOptions.plans)).toBeTruthy();
+    expect(renOptions.plans.length).toBeGreaterThanOrEqual(1);
+
+    // 4. Chronological membership history API
+    const histRes = await page.request.get('/backend/api/v1/member/membership/history');
+    expect(histRes.ok()).toBeTruthy();
+    const histData = await histRes.json();
+    expect(Array.isArray(histData.items)).toBeTruthy();
+
+    // 5. Unified 6-step application center API
+    const appRes = await page.request.get('/backend/api/v1/member/application');
+    expect(appRes.ok()).toBeTruthy();
+    const appData = await appRes.json();
+    expect(appData.timeline.length).toBe(6);
+  });
 });
+
 

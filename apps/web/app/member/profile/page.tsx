@@ -241,7 +241,7 @@ export default function MemberProfilePage() {
             </Link>
 
             <Link
-              href="/portal?tab=membership"
+              href="/member/membership"
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-sm text-slate-300 hover:text-white hover:bg-slate-800/60 transition-colors"
             >
               <ShieldCheck size={18} />
@@ -249,7 +249,7 @@ export default function MemberProfilePage() {
             </Link>
 
             <Link
-              href="/portal?tab=application"
+              href="/member/application"
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-sm text-slate-300 hover:text-white hover:bg-slate-800/60 transition-colors"
             >
               <FileText size={18} />

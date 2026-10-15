@@ -221,7 +221,7 @@ export default function MemberPortal() {
       if (regRes.status === 'fulfilled') setRegistrations(regRes.value);
       if (pay.status === 'fulfilled') setPayments(pay.value);
       if (renOptRes.status === 'fulfilled') {
-        const opts = renOptRes.value?.options || renOptRes.value?.periods || renOptRes.value?.plans || [];
+        const opts = (renOptRes.value?.options || renOptRes.value?.periods || renOptRes.value?.plans || []) as any[];
         setRenewalOptions(opts);
       }
       if (renListRes.status === 'fulfilled') setRenewals(renListRes.value);

@@ -1,5 +1,15 @@
 import { request, API_BASE_URL } from './client';
-import { PublicMember, CircleItem, CommitteeItem } from './types';
+import {
+  PublicMember,
+  CircleItem,
+  CommitteeItem,
+  MembershipSummary,
+  MembershipHistoryItem,
+  MembershipRenewalOptions,
+  MembershipRenewalRequest,
+  MembershipRenewalResult,
+  ApplicationCenterDetails,
+} from './types';
 
 export const membersApi = {
   getMembers: (params?: { q?: string; circle_id?: number; page?: number; limit?: number }) => {
@@ -72,7 +82,7 @@ export const membersApi = {
   updateNotificationPreferences: (prefs: Record<string, any>) =>
     request<any>('/member/notification-preferences', { method: 'PUT', body: JSON.stringify(prefs) }),
   getMemberDashboard: () => request<any>('/member/dashboard'),
-  getRenewalOptions: () => request<any>('/member/renewal-options'),
+  getRenewalOptions: () => request<MembershipRenewalOptions>('/member/membership/renewal/options'),
   getMemberRenewals: () => request<any>('/member/renewals'),
   getRenewals: async () => {
     const res = await request<any>('/member/renewals');
@@ -117,5 +127,24 @@ export const membersApi = {
     `${API_BASE_URL}/api/v1/certificates/${encodeURIComponent(certificateNo)}.pdf`,
   getPaymentReceiptPdfUrl: (transactionId: number) =>
     `${API_BASE_URL}/api/v1/payments/transactions/${transactionId}/receipt.pdf`,
+
+  // Phase 3 — Membership Center
+  getMembershipSummary: () => request<MembershipSummary>('/member/membership'),
+  getMembershipHistory: () => request<{ items: MembershipHistoryItem[]; count: number }>('/member/membership/history'),
+  submitRenewal: (data: MembershipRenewalRequest) =>
+    request<MembershipRenewalResult>('/member/membership/renew', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getApplicationDetails: () => request<ApplicationCenterDetails>('/member/application'),
+  uploadApplicationDocument: (file: File, documentType: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('document_type', documentType);
+    return request<any>('/member/application/documents', {
+      method: 'POST',
+      body: formData,
+    });
+  },
 };
 
