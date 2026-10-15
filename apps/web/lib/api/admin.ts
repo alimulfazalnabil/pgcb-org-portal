@@ -188,6 +188,23 @@ export const adminApi = {
   getAdminIntelligence: () => request<any>('/admin/analytics/intelligence'),
   getSystemHealth: () => request<any>('/admin/system/health'),
   runSmokeTest: () => request<any>('/admin/system/smoke-test', { method: 'POST' }),
+  getMemberChangeRequests: (params?: { status?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.status) query.set('status', params.status);
+    return request<{ items: any[]; count: number }>(`/admin/member-change-requests?${query.toString()}`);
+  },
+  getMemberChangeRequest: (id: number) =>
+    request<any>(`/admin/member-change-requests/${id}`),
+  approveMemberChangeRequest: (id: number, reviewer_comment?: string) =>
+    request<any>(`/admin/member-change-requests/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ reviewer_comment }),
+    }),
+  rejectMemberChangeRequest: (id: number, reviewer_comment: string) =>
+    request<any>(`/admin/member-change-requests/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reviewer_comment }),
+    }),
 };
 
 export const getAIUsageAnalytics = () => adminApi.getAiUsageAnalytics();

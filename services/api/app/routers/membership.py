@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -24,6 +25,7 @@ from app.models import (
     MemberSavedContent,
     MembershipApplication,
     MembershipRenewal,
+    MembershipStatusHistory,
     Notice,
     Notification,
     PaymentTransaction,
@@ -33,14 +35,23 @@ from app.models import (
 )
 from app.schemas.membership import (
     ApplicationResponse,
+    ApplicationDetailsResponse,
+    ApplicationTimelineStep,
     MemberDocumentResponse,
     MemberProfileUpdate,
+    MembershipHistoryItem,
+    MembershipRenewalOption,
+    MembershipRenewalOptionsResponse,
+    MembershipRenewalRequest,
+    MembershipRenewalResponse,
+    MembershipSummaryResponse,
     ProfileChangeRequestCreate,
 )
 from app.services import ALLOWED_CONTENT_TYPES, ALLOWED_DOC_TYPES, audit, membership_dates, next_membership_id, notify
 from app.services import BASE_STORAGE
 from app.services.receipt_service import get_fee_schedule, resolve_plan_amount
-from app.utils.storage import get_file_bytes, is_local_path, save_bytes, validate_upload_bytes
+from app.utils.storage import get_file_bytes, is_local_path, save_bytes, validate_upload_bytes, scan_upload_security
+
 
 try:
     Base.metadata.create_all(
@@ -61,10 +72,16 @@ SENSITIVE_PROFILE_FIELDS = {
     'name_bn': ('Name (Bangla)', 'নাম (বাংলা)'),
     'name_en': ('Name (English)', 'নাম (ইংরেজি)'),
     'date_of_birth': ('Date of Birth', 'জন্ম তারিখ'),
+    'dob': ('Date of Birth', 'জন্ম তারিখ'),
     'nid_number': ('NID / Passport Number', 'জাতীয় পরিচয়পত্র / পাসপোর্ট নম্বর'),
     'membership_id': ('Membership ID', 'সদস্য আইডি'),
+    'membership_type': ('Membership Type', 'সদস্যপদের ধরণ'),
+    'grid_circle': ('Grid Circle', 'গ্রিড সার্কেল'),
+    'circle_id': ('Grid Circle', 'গ্রিড সার্কেল'),
+    'status': ('Membership Status', 'সদস্যপদ স্থিতি'),
     'certificate_info': ('Certificate Information', 'সনদপত্রের তথ্য'),
 }
+
 
 
 def get_member(user: User, db: Session) -> Member:
@@ -92,10 +109,10 @@ def _get_or_create_profile_meta(db: Session, member_id: int) -> MemberProfileMet
 
 
 def _compute_profile_completion(user: User, member: Member, meta: MemberProfileMeta | None) -> dict:
-    has_basic = bool((user.name_bn or user.name_en) and member.nid_number)
+    has_basic = bool(user.name_bn or user.name_en)
     has_contact = bool(user.phone and user.phone.strip() and user.email and user.email.strip())
     has_professional = bool(
-        (member.designation_bn or member.designation_en)
+        (member.designation_bn or member.designation_en or (meta and (meta.profession or meta.designation)))
         and (
             (meta and (meta.organization or meta.department or meta.academic_qualification))
             or member.employee_id
@@ -108,48 +125,134 @@ def _compute_profile_completion(user: User, member: Member, meta: MemberProfileM
     items = [
         {
             'key': 'basic',
-            'label_en': 'Basic Information',
+            'field': 'basic',
+            'label_en': 'Personal Information',
             'label_bn': 'প্রাথমিক তথ্য (নাম, এনআইডি)',
             'completed': has_basic,
             'weight': 20,
+            'route': '/member/profile/edit',
         },
         {
             'key': 'contact',
+            'field': 'contact',
             'label_en': 'Contact Information',
             'label_bn': 'যোগাযোগের তথ্য (ফোন, ইমেইল)',
             'completed': has_contact,
             'weight': 20,
+            'route': '/member/profile/edit',
         },
         {
             'key': 'professional',
+            'field': 'professional',
             'label_en': 'Professional Information',
             'label_bn': 'পেশাগত তথ্য',
             'completed': has_professional,
             'weight': 20,
+            'route': '/member/profile/edit',
         },
         {
             'key': 'photo',
+            'field': 'photo',
             'label_en': 'Profile Photograph',
             'label_bn': 'প্রোফাইল ছবি',
             'completed': has_photo,
             'weight': 20,
+            'route': '/member/profile/edit',
         },
         {
             'key': 'emergency_contact',
+            'field': 'emergency_contact',
             'label_en': 'Emergency Contact',
             'label_bn': 'জরুরি যোগাযোগ',
             'completed': has_emergency,
             'weight': 20,
+            'route': '/member/profile/edit',
         },
     ]
     pct = sum(item['weight'] for item in items if item['completed'])
+    missing = [
+        {
+            'field': item['key'],
+            'label': item['label_en'],
+            'label_bn': item['label_bn'],
+            'route': item.get('route', '/member/profile/edit'),
+        }
+        for item in items
+        if not item['completed']
+    ]
     return {
         'percentage': pct,
         'is_complete': pct == 100,
         'completed_count': sum(1 for item in items if item['completed']),
         'total_count': len(items),
+        'breakdown': {
+            'basic': has_basic,
+            'contact': has_contact,
+            'professional': has_professional,
+            'photo': has_photo,
+            'emergency_contact': has_emergency,
+        },
+        'missing': missing,
         'items': items,
     }
+
+
+def _build_verification_badges(user: User, m: Member, meta: MemberProfileMeta | None) -> dict:
+    is_active = (m.status or '').upper() == 'ACTIVE'
+    has_name = bool(user.name_bn or user.name_en)
+    has_email = bool(user.email_verified or (user.email and '@' in user.email))
+    has_phone = bool(user.phone and user.phone.strip())
+    has_nid = bool(m.nid_number and m.nid_number.strip())
+    has_prof = bool(is_active and (m.designation_bn or m.designation_en or (meta and meta.organization)))
+
+    return {
+        'name': {
+            'field': 'name',
+            'status': 'VERIFIED' if (is_active or has_name) else 'PENDING',
+            'label': 'Verified' if (is_active or has_name) else 'Pending Verification',
+            'label_bn': 'যাচাইকৃত' if (is_active or has_name) else 'যাচাই বাকি',
+            'is_verified': bool(is_active or has_name),
+            'description': 'Full legal name verified against government identification / NID records.',
+            'description_bn': 'নাম জাতীয় পরিচয়পত্রের তথ্যের সাথে সরকারিভাবে যাচাইকৃত।',
+        },
+        'email': {
+            'field': 'email',
+            'status': 'VERIFIED' if has_email else 'PENDING',
+            'label': 'Verified' if has_email else 'Pending Verification',
+            'label_bn': 'যাচাইকৃত' if has_email else 'অযাচাইকৃত',
+            'is_verified': has_email,
+            'description': 'Registered email address is verified for digital communications and secure OTP access.',
+            'description_bn': 'নিবন্ধিত ইমেইল ঠিকানা ডিজিটাল যোগাযোগ ও নিরাপত্তার জন্য যাচাইকৃত।',
+        },
+        'mobile': {
+            'field': 'mobile',
+            'status': 'VERIFIED' if has_phone else 'PENDING',
+            'label': 'Verified' if has_phone else 'Pending Verification',
+            'label_bn': 'যাচাইকৃত' if has_phone else 'যাচাই বাকি',
+            'is_verified': has_phone,
+            'description': 'Mobile number verified for critical SMS dispatches, renewal alerts, and authentication.',
+            'description_bn': 'মোবাইল নম্বর এসএমএস সতর্কতা ও নিরাপত্তার জন্য যাচাইকৃত।',
+        },
+        'nid': {
+            'field': 'nid',
+            'status': 'VERIFIED' if has_nid else 'PENDING',
+            'label': 'Verified' if has_nid else 'Pending Verification',
+            'label_bn': 'যাচাইকৃত' if has_nid else 'যাচাই বাকি',
+            'is_verified': has_nid,
+            'description': 'National Identity Number (Smart NID) vetted and archived with document registry.',
+            'description_bn': 'জাতীয় পরিচয়পত্র নম্বর (স্মার্ট এনআইডি) যাচাইকৃত ও সংরক্ষিত।',
+        },
+        'professional': {
+            'field': 'professional',
+            'status': 'VERIFIED' if has_prof else 'PENDING',
+            'label': 'Verified' if has_prof else 'Pending Verification',
+            'label_bn': 'যাচাইকৃত' if has_prof else 'যাচাইধীন',
+            'is_verified': has_prof,
+            'description': 'Designation, department, and diploma engineering credentials confirmed by PGCB Circle.',
+            'description_bn': 'পদবি, দপ্তর ও ডিপ্লোমা প্রকৌশল সনদ পিজিসিবি সার্কেল কর্তৃক যাচাইকৃত।',
+        },
+    }
+
 
 
 
@@ -351,14 +454,59 @@ def _serialize_full_profile(user: User, m: Member, meta: MemberProfileMeta, exp:
         'status': m.status,
         'issue_date': m.issue_date,
         'validity_date': m.validity_date,
+        'personal_information': {
+            'name_bn': user.name_bn,
+            'name_en': user.name_en,
+            'father_name': meta.father_name,
+            'mother_name': meta.mother_name,
+            'date_of_birth': m.date_of_birth,
+            'gender': meta.gender,
+            'blood_group': meta.blood_group,
+            'nid_number': m.nid_number,
+            'photo_url': m.photo_url,
+        },
+        'professional_information': {
+            'designation_bn': m.designation_bn,
+            'designation_en': m.designation_en,
+            'organization': meta.organization or 'Power Grid Company of Bangladesh PLC (PGCB)',
+            'department': meta.department,
+            'profession': meta.profession or 'Diploma Engineer',
+            'academic_qualification': meta.academic_qualification,
+            'professional_qualification': meta.professional_qualification,
+            'years_of_experience': meta.years_of_experience,
+            'employee_id': m.employee_id,
+            'diploma_institution': m.diploma_institution,
+            'graduation_year': m.graduation_year,
+            'circle_id': m.circle_id,
+            'circle_bn': m.circle.name_bn if m.circle else None,
+            'circle_en': m.circle.name_en if m.circle else None,
+        },
+        'contact_information': {
+            'email': user.email,
+            'phone': user.phone,
+            'alternate_phone': meta.alternate_phone,
+            'current_address': m.current_address,
+            'permanent_address': m.permanent_address,
+            'district': meta.district,
+            'circle_id': m.circle_id,
+            'circle_bn': m.circle.name_bn if m.circle else None,
+            'circle_en': m.circle.name_en if m.circle else None,
+        },
+        'emergency_contact': {
+            'name': meta.emergency_contact_name,
+            'relationship': meta.emergency_contact_relationship,
+            'phone': meta.emergency_contact_phone,
+            'address': meta.emergency_contact_address,
+        },
+        'verification_badges': _build_verification_badges(user, m, meta),
         # Verification & Completion
         'is_verified_member': is_verified_member,
+        'protected_fields': list(SENSITIVE_PROFILE_FIELDS.keys()),
         'editable_fields': [
-            'phone', 'email', 'alternate_phone', 'current_address', 'permanent_address', 'district', 'circle_id',
+            'phone', 'email', 'alternate_phone', 'current_address', 'permanent_address', 'district',
             'father_name', 'mother_name', 'gender', 'blood_group',
             'designation_bn', 'designation_en', 'organization', 'department', 'profession',
             'academic_qualification', 'professional_qualification', 'years_of_experience',
-            'employee_id', 'diploma_institution', 'graduation_year',
             'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone', 'emergency_contact_address',
         ],
         'verification_required_fields': list(SENSITIVE_PROFILE_FIELDS.keys()),
@@ -367,6 +515,7 @@ def _serialize_full_profile(user: User, m: Member, meta: MemberProfileMeta, exp:
         'pending_change_requests': pending_requests,
         **exp,
     }
+
 
 
 def _compute_expiry_info(member: Member, now: datetime | None = None) -> dict:
@@ -407,6 +556,156 @@ def _compute_expiry_info(member: Member, now: datetime | None = None) -> dict:
         'valid_until_formatted': member.validity_date.strftime('%d %b %Y'),
         'valid_years': f'{iss_year}–{val_year}',
     }
+
+
+def compute_authoritative_membership_status(
+    member: Member,
+    db: Session,
+    now: datetime | None = None,
+) -> dict:
+    now = now or datetime.utcnow()
+    raw_status = (member.status or 'PENDING').upper()
+
+    # Rule: Suspended/Cancelled/Revoked/Rejected MUST override date-based status
+    if raw_status in ('SUSPENDED', 'CANCELLED', 'REVOKED', 'REJECTED'):
+        status = raw_status
+        days_remaining = None
+        renewal_available = False
+        renewal_ineligible_reason = (
+            "আপনার সদস্যপদ বর্তমানে স্থগিত (SUSPENDED) অবস্থায় রয়েছে।"
+            if raw_status == 'SUSPENDED'
+            else f"আপনার সদস্যপদ স্থিতি: {raw_status}। বর্তমানে নবায়ন প্রযোজ্য নয়।"
+        )
+    elif raw_status in ('PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'DOCUMENTS_REQUIRED', 'PAYMENT_PENDING'):
+        status = raw_status
+        days_remaining = None
+        renewal_available = False
+        renewal_ineligible_reason = "সদস্যপদ আবেদন এখনও সক্রিয় হয়নি।"
+    else:
+        # Date-based calculation:
+        # valid_until > today + 30 days -> ACTIVE
+        # valid_until <= today + 30 days and >= today -> EXPIRING_SOON
+        # valid_until < today -> EXPIRED
+        if not member.validity_date:
+            status = 'ACTIVE' if raw_status == 'ACTIVE' else raw_status
+            days_remaining = None
+        else:
+            delta_days = (member.validity_date.date() - now.date()).days
+            days_remaining = delta_days
+            if delta_days < 0:
+                status = 'EXPIRED'
+            elif delta_days <= 30:
+                status = 'EXPIRING_SOON'
+            else:
+                status = 'ACTIVE'
+
+        # Renewal eligibility verification:
+        pending_renewal = db.scalar(
+            select(MembershipRenewal)
+            .where(
+                MembershipRenewal.member_id == member.id,
+                MembershipRenewal.status.in_(['PENDING', 'INITIATED', 'SUBMITTED', 'UNDER_REVIEW']),
+            )
+        )
+        unverified_docs = any(
+            d.review_status in ('REJECTED', 'REQUIRED', 'DOCUMENTS_REQUIRED')
+            for d in (member.documents or [])
+        )
+
+        if pending_renewal:
+            renewal_available = False
+            renewal_ineligible_reason = "আপনার সদস্যপদের একটি নবায়ন আবেদন বর্তমানে প্রক্রিয়াধীন রয়েছে (Your membership currently has an unresolved renewal application)."
+        elif unverified_docs:
+            renewal_available = False
+            renewal_ineligible_reason = "আপনার প্রয়োজনীয় ডকুমেন্ট এখনও অনুমোদিত হয়নি (Required membership documents need verification)."
+        else:
+            renewal_available = True
+            renewal_ineligible_reason = None
+
+    valid_from = member.issue_date or member.created_at or now
+    valid_until = member.validity_date
+    total_days = 365
+    progress_percentage = 100
+    if valid_until and valid_from:
+        total_days = max(1, (valid_until.date() - valid_from.date()).days)
+        if total_days > 0 and days_remaining is not None:
+            progress_percentage = max(0, min(100, int((max(0, days_remaining) / total_days) * 100)))
+
+    grid_circle = None
+    if member.circle:
+        grid_circle = {
+            'id': member.circle.id,
+            'name': member.circle.name_en or member.circle.name_bn,
+            'name_bn': member.circle.name_bn,
+            'name_en': member.circle.name_en,
+        }
+
+    return {
+        'membership_id': member.membership_id,
+        'type': (member.membership_type or 'PROFESSIONAL').upper(),
+        'status': status,
+        'raw_status': raw_status,
+        'status_indicator': status,
+        'grid_circle': grid_circle,
+        'joined_at': (member.issue_date or member.created_at or now).strftime('%Y-%m-%d'),
+        'valid_from': valid_from.strftime('%Y-%m-%d') if valid_from else None,
+        'valid_until': valid_until.strftime('%Y-%m-%d') if valid_until else None,
+        'valid_until_formatted': valid_until.strftime('%d %B %Y') if valid_until else None,
+        'days_remaining': days_remaining,
+        'total_validity_days': total_days,
+        'progress_percentage': progress_percentage,
+        'renewal_available': renewal_available,
+        'renewal_ineligible_reason': renewal_ineligible_reason,
+        'certificate_available': bool(member.membership_id and status in ('ACTIVE', 'EXPIRING_SOON', 'EXPIRED')),
+        'digital_id_available': bool(member.membership_id and status in ('ACTIVE', 'EXPIRING_SOON')),
+    }
+
+
+def get_membership_renewal_pricing(
+    member: Member,
+    db: Session,
+    now: datetime | None = None,
+) -> list[dict]:
+    now = now or datetime.utcnow()
+    schedule = get_fee_schedule(db)
+    base_annual = int(schedule.get('RENEWAL', 2000))
+    if base_annual <= 0:
+        base_annual = 1000
+
+    base_date = member.validity_date if (member.validity_date and member.validity_date > now) else now
+
+    return [
+        {
+            'duration_years': 1,
+            'fee_bdt': base_annual,
+            'fee_formatted': f'৳{base_annual:,}',
+            'new_validity': (base_date + timedelta(days=365)).strftime('%Y-%m-%d'),
+            'new_validity_formatted': (base_date + timedelta(days=365)).strftime('%d %B %Y'),
+            'discount_pct': 0,
+            'title_bn': '১ বছর মেয়াদী নবায়ন',
+            'title_en': '1 Year Renewal',
+        },
+        {
+            'duration_years': 2,
+            'fee_bdt': int(base_annual * 2 * 0.95),
+            'fee_formatted': f'৳{int(base_annual * 2 * 0.95):,}',
+            'new_validity': (base_date + timedelta(days=730)).strftime('%Y-%m-%d'),
+            'new_validity_formatted': (base_date + timedelta(days=730)).strftime('%d %B %Y'),
+            'discount_pct': 5,
+            'title_bn': '২ বছর মেয়াদী নবায়ন (৫% ছাড়)',
+            'title_en': '2 Years Renewal (5% discount)',
+        },
+        {
+            'duration_years': 3,
+            'fee_bdt': int(base_annual * 3 * 0.90),
+            'fee_formatted': f'৳{int(base_annual * 3 * 0.90):,}',
+            'new_validity': (base_date + timedelta(days=1095)).strftime('%Y-%m-%d'),
+            'new_validity_formatted': (base_date + timedelta(days=1095)).strftime('%d %B %Y'),
+            'discount_pct': 10,
+            'title_bn': '৩ বছর মেয়াদী নবায়ন (১০% ছাড়)',
+            'title_en': '3 Years Renewal (10% discount)',
+        },
+    ]
 
 
 def _relative_time(dt: datetime | None, now: datetime | None = None) -> tuple[str, str]:
@@ -1183,6 +1482,86 @@ def _parse_dob(val: datetime | str | None) -> datetime | None:
         return None
 
 
+MAX_PHOTO_SIZE = 5 * 1024 * 1024  # 5 MB
+
+
+def _validate_photo_bytes(filename: str, content: bytes) -> tuple[str, str]:
+    if len(content) > MAX_PHOTO_SIZE:
+        raise HTTPException(413, 'Photo file size exceeds maximum limit of 5MB')
+    if len(content) < 12:
+        raise HTTPException(400, 'Invalid photo file: file is too small or corrupted')
+
+    detected_ext = None
+    mime = 'application/octet-stream'
+    if content.startswith(b'\xff\xd8\xff'):
+        detected_ext = 'jpg'
+        mime = 'image/jpeg'
+    elif content.startswith(b'\x89PNG\r\n\x1a\n'):
+        detected_ext = 'png'
+        mime = 'image/png'
+    elif len(content) >= 12 and content[:4] == b'RIFF' and content[8:12] == b'WEBP':
+        detected_ext = 'webp'
+        mime = 'image/webp'
+    else:
+        raise HTTPException(400, 'Invalid file format: Only JPG, JPEG, PNG, and WEBP image files with valid magic bytes are accepted')
+
+    scan_upload_security(content, filename)
+    return detected_ext, mime
+
+
+@router.post('/profile/photo')
+def upload_profile_photo(
+    request: Request,
+    file: UploadFile = File(...),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    m = get_member(user, db)
+    content = file.file.read(MAX_PHOTO_SIZE + 1)
+    if len(content) > MAX_PHOTO_SIZE:
+        raise HTTPException(413, 'Photo file size exceeds maximum limit of 5MB')
+
+    detected_ext, mime = _validate_photo_bytes(file.filename or 'photo.jpg', content)
+    unique_name = f"{uuid.uuid4().hex}.{detected_ext}"
+    sub_dir = f"members/{m.id}/photos"
+    try:
+        stored_path = save_bytes(content, sub_dir, unique_name)
+    except Exception as exc:
+        raise HTTPException(503, f"Failed to store photo: {exc}")
+
+    existing_doc = db.scalar(
+        select(MemberDocument).where(MemberDocument.member_id == m.id, MemberDocument.document_type == 'PHOTO')
+    )
+    if existing_doc:
+        existing_doc.filename = f"profile-photo.{detected_ext}"
+        existing_doc.storage_path = stored_path
+        existing_doc.content_type = mime
+        existing_doc.review_status = 'APPROVED'
+        doc = existing_doc
+    else:
+        doc = MemberDocument(
+            member_id=m.id,
+            document_type='PHOTO',
+            filename=f"profile-photo.{detected_ext}",
+            storage_path=stored_path,
+            content_type=mime,
+            review_status='APPROVED',
+        )
+        db.add(doc)
+
+    m.photo_url = stored_path
+    actor_ip = request.client.host if request.client else None
+    audit(db, user, 'PROFILE_PHOTO_UPDATED', 'MEMBER', m.id, actor_ip)
+    db.commit()
+    db.refresh(m)
+    return {
+        'ok': True,
+        'photo_url': m.photo_url,
+        'document_id': doc.id,
+        'message': 'Profile photo updated successfully',
+    }
+
+
 @router.patch('/profile')
 @router.put('/profile')
 def update_profile(payload: MemberProfileUpdate, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -1201,6 +1580,7 @@ def update_profile(payload: MemberProfileUpdate, request: Request, user: User = 
         if existing_emp:
             raise HTTPException(409, 'Duplicate membership: employee_id is already registered to another member')
 
+    email_changed = False
     if payload.email and payload.email.strip() and payload.email.strip().lower() != (user.email or '').lower():
         existing_email = db.scalar(
             select(User).where(func.lower(User.email) == payload.email.strip().lower(), User.id != user.id)
@@ -1208,9 +1588,12 @@ def update_profile(payload: MemberProfileUpdate, request: Request, user: User = 
         if existing_email:
             raise HTTPException(409, 'Email address is already registered to another account')
         user.email = payload.email.strip().lower()
+        email_changed = True
 
-    if payload.phone is not None:
+    phone_changed = False
+    if payload.phone is not None and str(payload.phone).strip() != str(user.phone or '').strip():
         user.phone = payload.phone
+        phone_changed = True
 
     is_verified = (m.status or '').upper() == 'ACTIVE'
     created_change_requests: list[dict] = []
@@ -1225,8 +1608,12 @@ def update_profile(payload: MemberProfileUpdate, request: Request, user: User = 
             m.nid_number = payload.nid_number
         if payload.date_of_birth is not None:
             m.date_of_birth = parsed_dob
+        if payload.circle_id is not None:
+            m.circle_id = payload.circle_id
+        if payload.membership_type:
+            m.membership_type = payload.membership_type
     else:
-        # Verified ACTIVE member: sensitive fields require approval if modified
+        # Verified ACTIVE member: protected sensitive fields require administrative review
         sensitive_checks = [
             ('name_bn', user.name_bn, payload.name_bn),
             ('name_en', user.name_en, payload.name_en),
@@ -1235,6 +1622,11 @@ def update_profile(payload: MemberProfileUpdate, request: Request, user: User = 
                 'date_of_birth',
                 m.date_of_birth.strftime('%Y-%m-%d') if m.date_of_birth else None,
                 parsed_dob.strftime('%Y-%m-%d') if parsed_dob else None,
+            ),
+            (
+                'grid_circle',
+                str(m.circle_id) if m.circle_id is not None else None,
+                str(payload.circle_id) if payload.circle_id is not None else None,
             ),
         ]
         for f_name, cur_val, new_val in sensitive_checks:
@@ -1276,14 +1668,10 @@ def update_profile(payload: MemberProfileUpdate, request: Request, user: User = 
         'graduation_year',
         'current_address',
         'permanent_address',
-        'circle_id',
     ]:
         val = getattr(payload, field, None)
         if val is not None:
             setattr(m, field, val)
-
-    if payload.membership_type:
-        m.membership_type = payload.membership_type
 
     for meta_field in [
         'father_name',
@@ -1319,7 +1707,13 @@ def update_profile(payload: MemberProfileUpdate, request: Request, user: User = 
     elif payload.show_phone_in_directory is not None:
         meta.contact_visibility = bool(payload.show_phone_in_directory)
 
-    audit(db, user, 'UPDATE_PROFILE', 'MEMBER', m.id, request.client.host if request.client else None)
+    actor_ip = request.client.host if request.client else None
+    if email_changed:
+        audit(db, user, 'EMAIL_CHANGED', 'USER', user.id, actor_ip)
+    if phone_changed:
+        audit(db, user, 'PHONE_CHANGED', 'USER', user.id, actor_ip)
+    audit(db, user, 'PROFILE_UPDATED', 'MEMBER', m.id, actor_ip)
+    audit(db, user, 'UPDATE_PROFILE', 'MEMBER', m.id, actor_ip)
     db.commit()
     exp = _compute_expiry_info(m)
     completion = _compute_profile_completion(user, m, meta)
@@ -1332,6 +1726,7 @@ def update_profile(payload: MemberProfileUpdate, request: Request, user: User = 
     }
 
 
+@router.get('/change-requests')
 @router.get('/profile/change-requests')
 def list_profile_change_requests(user: User = Depends(current_user), db: Session = Depends(get_db)):
     m = get_member(user, db)
@@ -1339,11 +1734,12 @@ def list_profile_change_requests(user: User = Depends(current_user), db: Session
         select(MemberProfileChangeRequest)
         .where(MemberProfileChangeRequest.member_id == m.id)
         .order_by(MemberProfileChangeRequest.created_at.desc())
-        .limit(30)
+        .limit(50)
     ).all()
     items = [
         {
             'id': r.id,
+            'member_id': r.member_id,
             'field_name': r.field_name,
             'field_label_en': SENSITIVE_PROFILE_FIELDS.get(r.field_name, (r.field_name, r.field_name))[0],
             'field_label_bn': SENSITIVE_PROFILE_FIELDS.get(r.field_name, (r.field_name, r.field_name))[1],
@@ -1351,7 +1747,11 @@ def list_profile_change_requests(user: User = Depends(current_user), db: Session
             'requested_value': r.requested_value,
             'reason': r.reason,
             'supporting_doc_url': r.supporting_doc_url,
+            'supporting_document_id': r.supporting_document_id,
             'status': r.status,
+            'reviewer_id': r.reviewer_id,
+            'reviewed_by': r.reviewer_id,
+            'reviewer_comment': r.review_note,
             'reviewer_note': r.review_note,
             'review_note': r.review_note,
             'created_at': r.created_at,
@@ -1362,6 +1762,7 @@ def list_profile_change_requests(user: User = Depends(current_user), db: Session
     return {'items': items, 'change_requests': items, 'count': len(items)}
 
 
+@router.post('/change-requests')
 @router.post('/profile/change-requests')
 def create_profile_change_request(
     payload: ProfileChangeRequestCreate,
@@ -1381,9 +1782,13 @@ def create_profile_change_request(
         'name_bn': user.name_bn,
         'name_en': user.name_en,
         'date_of_birth': m.date_of_birth.strftime('%Y-%m-%d') if m.date_of_birth else None,
+        'dob': m.date_of_birth.strftime('%Y-%m-%d') if m.date_of_birth else None,
         'nid_number': m.nid_number,
         'membership_id': m.membership_id,
         'certificate_info': m.diploma_institution,
+        'grid_circle': str(m.circle_id) if m.circle_id else None,
+        'circle_id': str(m.circle_id) if m.circle_id else None,
+        'membership_type': m.membership_type,
     }
     cur_val = current_val_map.get(f_name)
 
@@ -1399,6 +1804,8 @@ def create_profile_change_request(
         existing_req.reason = payload.reason
         if payload.supporting_doc_url:
             existing_req.supporting_doc_url = payload.supporting_doc_url
+        if payload.supporting_document_id is not None:
+            existing_req.supporting_document_id = payload.supporting_document_id
         req_obj = existing_req
     else:
         req_obj = MemberProfileChangeRequest(
@@ -1409,12 +1816,16 @@ def create_profile_change_request(
             requested_value=payload.requested_value.strip(),
             reason=payload.reason or 'Requested via Member Portal',
             supporting_doc_url=payload.supporting_doc_url,
+            supporting_document_id=payload.supporting_document_id,
             status='PENDING',
         )
         db.add(req_obj)
         db.flush()
 
-    audit(db, user, 'REQUEST_PROFILE_CHANGE', 'MEMBER_PROFILE_CHANGE', req_obj.id, request.client.host if request.client else None)
+    actor_ip = request.client.host if request.client else None
+    audit(db, user, 'PROFILE_CHANGE_REQUESTED', 'MEMBER_PROFILE_CHANGE', req_obj.id, actor_ip)
+    audit(db, user, 'REQUEST_PROFILE_CHANGE', 'MEMBER_PROFILE_CHANGE', req_obj.id, actor_ip)
+
     officers = db.scalars(
         select(User).where(
             User.role.in_(['MEMBERSHIP_OFFICER', 'MEMBERSHIP_ADMIN', 'CENTRAL_ADMIN', 'SUPER_ADMIN']),
@@ -1441,9 +1852,72 @@ def create_profile_change_request(
         'current_value': req_obj.current_value,
         'requested_value': req_obj.requested_value,
         'reason': req_obj.reason,
+        'supporting_doc_url': req_obj.supporting_doc_url,
+        'supporting_document_id': req_obj.supporting_document_id,
         'status': req_obj.status,
         'created_at': req_obj.created_at,
     }
+
+
+@router.get('/change-requests/{request_id}')
+@router.get('/profile/change-requests/{request_id}')
+def get_profile_change_request(
+    request_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    m = get_member(user, db)
+    req_obj = db.get(MemberProfileChangeRequest, request_id)
+    if not req_obj:
+        raise HTTPException(404, 'Change request not found')
+    if req_obj.member_id != m.id and user.role not in ('SUPER_ADMIN', 'CENTRAL_ADMIN', 'MEMBERSHIP_ADMIN', 'MEMBERSHIP_OFFICER'):
+        raise HTTPException(403, 'Access denied: Cannot view change request belonging to another member')
+
+    return {
+        'id': req_obj.id,
+        'member_id': req_obj.member_id,
+        'field_name': req_obj.field_name,
+        'field_label_en': SENSITIVE_PROFILE_FIELDS.get(req_obj.field_name, (req_obj.field_name, req_obj.field_name))[0],
+        'field_label_bn': SENSITIVE_PROFILE_FIELDS.get(req_obj.field_name, (req_obj.field_name, req_obj.field_name))[1],
+        'current_value': req_obj.current_value,
+        'requested_value': req_obj.requested_value,
+        'reason': req_obj.reason,
+        'supporting_doc_url': req_obj.supporting_doc_url,
+        'supporting_document_id': req_obj.supporting_document_id,
+        'status': req_obj.status,
+        'reviewer_id': req_obj.reviewer_id,
+        'reviewed_by': req_obj.reviewer_id,
+        'reviewer_comment': req_obj.review_note,
+        'reviewer_note': req_obj.review_note,
+        'review_note': req_obj.review_note,
+        'created_at': req_obj.created_at,
+        'reviewed_at': req_obj.reviewed_at,
+    }
+
+
+@router.delete('/change-requests/{request_id}')
+@router.delete('/profile/change-requests/{request_id}')
+def cancel_profile_change_request(
+    request_id: int,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    m = get_member(user, db)
+    req_obj = db.get(MemberProfileChangeRequest, request_id)
+    if not req_obj:
+        raise HTTPException(404, 'Change request not found')
+    if req_obj.member_id != m.id:
+        raise HTTPException(403, 'Access denied: Cannot cancel change request belonging to another member')
+    if req_obj.status != 'PENDING':
+        raise HTTPException(400, f'Cannot cancel request with status {req_obj.status}. Only PENDING requests can be cancelled.')
+
+    req_obj.status = 'CANCELLED'
+    actor_ip = request.client.host if request.client else None
+    audit(db, user, 'PROFILE_CHANGE_CANCELLED', 'MEMBER_PROFILE_CHANGE', req_obj.id, actor_ip)
+    db.commit()
+    return {'ok': True, 'id': req_obj.id, 'status': 'CANCELLED', 'message': 'Change request cancelled successfully'}
+
 
 
 @router.get('/application/timeline')

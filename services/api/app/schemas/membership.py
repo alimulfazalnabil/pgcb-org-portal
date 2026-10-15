@@ -50,6 +50,32 @@ class ProfileChangeRequestCreate(BaseModel):
     requested_value: str = Field(min_length=1, max_length=2000)
     reason: str | None = None
     supporting_doc_url: str | None = None
+    supporting_document_id: int | None = None
+
+class ProfileChangeAdminAction(BaseModel):
+    comment: str | None = None
+    reviewer_comment: str | None = None
+
+class ProfileChangeRequestResponse(BaseModel):
+    id: int
+    member_id: int
+    field_name: str
+    field_label_en: str
+    field_label_bn: str
+    current_value: str | None = None
+    requested_value: str
+    reason: str | None = None
+    supporting_doc_url: str | None = None
+    supporting_document_id: int | None = None
+    status: str
+    reviewer_id: int | None = None
+    reviewed_by: int | None = None
+    reviewed_at: datetime | None = None
+    reviewer_comment: str | None = None
+    reviewer_note: str | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
 
 class ApplicationResponse(BaseModel):
     id: int
@@ -81,5 +107,105 @@ class MemberDashboardResponse(BaseModel):
     upcoming_events: list[dict] = []
     notifications: list[dict] = []
     recent_activity: list[dict] = []
+
+
+class MembershipSummaryResponse(BaseModel):
+    membership_id: str | None = None
+    type: str = 'PROFESSIONAL'
+    status: str = 'ACTIVE'
+    raw_status: str = 'ACTIVE'
+    status_indicator: str = 'ACTIVE'
+    grid_circle: dict | None = None
+    joined_at: str | None = None
+    valid_from: str | None = None
+    valid_until: str | None = None
+    valid_until_formatted: str | None = None
+    days_remaining: int | None = None
+    total_validity_days: int | None = None
+    progress_percentage: int = 100
+    renewal_available: bool = False
+    renewal_ineligible_reason: str | None = None
+    certificate_available: bool = False
+    digital_id_available: bool = False
+
+
+class MembershipHistoryItem(BaseModel):
+    id: int | str
+    reference: str
+    date: str
+    action: str
+    action_label_bn: str
+    action_label_en: str
+    period: str
+    old_validity: str | None = None
+    new_validity: str | None = None
+    status: str
+    status_label_bn: str
+    payment_reference: str | None = None
+    certificate_reference: str | None = None
+    performed_by: str | None = None
+
+
+class MembershipRenewalOption(BaseModel):
+    duration_years: int
+    fee_bdt: int
+    fee_formatted: str
+    new_validity: str
+    new_validity_formatted: str
+    discount_pct: int = 0
+    title_bn: str
+    title_en: str
+
+
+class MembershipRenewalOptionsResponse(BaseModel):
+    eligible: bool
+    ineligible_reason: str | None = None
+    current_validity: str | None = None
+    plans: list[MembershipRenewalOption] = []
+
+
+class MembershipRenewalRequest(BaseModel):
+    duration_years: int = Field(ge=1, le=5, default=1)
+    notes: str | None = None
+
+
+class MembershipRenewalResponse(BaseModel):
+    ok: bool = True
+    renewal_id: int
+    reference: str
+    duration_years: int
+    amount: int
+    amount_formatted: str
+    currency: str = 'BDT'
+    new_validity: str
+    status: str = 'PENDING'
+    transaction_id: str | None = None
+    payment_url: str | None = None
+    message: str
+
+
+class ApplicationTimelineStep(BaseModel):
+    step_key: str
+    title_bn: str
+    title_en: str
+    status: str
+    description: str | None = None
+    timestamp: str | None = None
+    actor_type: str | None = None
+
+
+class ApplicationDetailsResponse(BaseModel):
+    application_no: str
+    membership_type: str
+    status: str
+    status_label_bn: str
+    status_label_en: str
+    circle: dict | None = None
+    submitted_at: str | None = None
+    reviewed_at: str | None = None
+    timeline: list[ApplicationTimelineStep] = []
+    documents: list[dict] = []
+    required_document_types: list[str] = []
+    pending_payment: dict | None = None
 
 

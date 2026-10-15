@@ -22,16 +22,30 @@ export const membersApi = {
   getProfile: () => request<any>('/member/profile'),
   updateProfile: (data: any) =>
     request<any>('/member/profile', { method: 'PATCH', body: JSON.stringify(data) }),
-  getProfileChangeRequests: () => request<any>('/member/profile/change-requests'),
+  uploadProfilePhoto: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return request<any>('/member/profile/photo', {
+      method: 'POST',
+      body: formData,
+    });
+  },
+  getProfileChangeRequests: () => request<{ items: any[]; change_requests: any[]; count: number }>('/member/profile/change-requests'),
+  getProfileChangeRequest: (id: number) => request<any>(`/member/profile/change-requests/${id}`),
   createProfileChangeRequest: (data: {
     field_name: string;
     requested_value: string;
     reason?: string;
     supporting_doc_url?: string;
+    supporting_document_id?: number;
   }) =>
     request<any>('/member/profile/change-requests', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+  cancelProfileChangeRequest: (id: number) =>
+    request<any>(`/member/profile/change-requests/${id}`, {
+      method: 'DELETE',
     }),
   getApplicationTimeline: () => request<any>('/member/application/timeline'),
   saveApplicationDraft: () =>

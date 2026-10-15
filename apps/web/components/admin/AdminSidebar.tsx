@@ -25,6 +25,7 @@ import {
   KeyRound,
   BarChart3,
   ClipboardList,
+  FileCheck,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -55,6 +56,12 @@ export function AdminSidebar({ userRole = 'ADMIN', permissions = [] }: SidebarPr
       href: '/admin/members',
       icon: Users,
       permission: 'member.read',
+    },
+    {
+      title: 'তথ্য সংশোধন আবেদন (Change Requests)',
+      href: '/admin/members/change-requests',
+      icon: FileCheck,
+      permission: 'member.review',
     },
     {
       title: 'ইভেন্ট ও সম্মেলন (Events)',

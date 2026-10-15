@@ -1251,9 +1251,12 @@ def review_document(
     return {'ok': True, 'review_status': d.review_status, 'reviewer_note': getattr(d, 'reviewer_note', resolved_note)}
 
 
+@router.get('/member-change-requests')
 @router.get('/profile-change-requests')
-def list_admin_profile_change_requests(
+def list_admin_member_change_requests(
     status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
     admin: User = Depends(require_permission('member.read')),
     db: Session = Depends(get_db),
 ):
@@ -1261,7 +1264,7 @@ def list_admin_profile_change_requests(
     stmt = select(MemberProfileChangeRequest).order_by(MemberProfileChangeRequest.created_at.desc())
     if status and status.upper() != 'ALL':
         stmt = stmt.where(MemberProfileChangeRequest.status == status.strip().upper())
-    rows = db.scalars(stmt.limit(100)).all()
+    rows = db.scalars(stmt.limit(min(max(limit, 1), 500)).offset(max(offset, 0))).all()
     items = []
     for r in rows:
         m = db.get(Member, r.member_id)
@@ -1278,15 +1281,93 @@ def list_admin_profile_change_requests(
             'requested_value': r.requested_value,
             'reason': r.reason,
             'supporting_doc_url': r.supporting_doc_url,
+            'supporting_document_id': r.supporting_document_id,
             'status': r.status,
             'review_note': r.review_note,
+            'reviewer_comment': r.review_note,
             'reviewer_id': r.reviewer_id,
+            'reviewed_by': r.reviewer_id,
             'created_at': r.created_at,
             'reviewed_at': r.reviewed_at,
         })
-    return {'items': items, 'count': len(items)}
+    return {'items': items, 'change_requests': items, 'count': len(items)}
 
 
+@router.get('/member-change-requests/{request_id}')
+@router.get('/profile-change-requests/{request_id}')
+def get_admin_member_change_request(
+    request_id: int,
+    admin: User = Depends(require_permission('member.read')),
+    db: Session = Depends(get_db),
+):
+    from app.models import MemberProfileChangeRequest
+    req_obj = db.get(MemberProfileChangeRequest, request_id)
+    if not req_obj:
+        raise HTTPException(404, 'Profile change request not found')
+    m = db.get(Member, req_obj.member_id)
+    u = db.get(User, req_obj.user_id)
+    return {
+        'id': req_obj.id,
+        'member_id': req_obj.member_id,
+        'membership_id': m.membership_id if m else None,
+        'user_id': req_obj.user_id,
+        'member_name_bn': u.name_bn if u else None,
+        'member_name_en': u.name_en if u else None,
+        'field_name': req_obj.field_name,
+        'current_value': req_obj.current_value,
+        'requested_value': req_obj.requested_value,
+        'reason': req_obj.reason,
+        'supporting_doc_url': req_obj.supporting_doc_url,
+        'supporting_document_id': req_obj.supporting_document_id,
+        'status': req_obj.status,
+        'review_note': req_obj.review_note,
+        'reviewer_comment': req_obj.review_note,
+        'reviewer_id': req_obj.reviewer_id,
+        'reviewed_by': req_obj.reviewer_id,
+        'created_at': req_obj.created_at,
+        'reviewed_at': req_obj.reviewed_at,
+    }
+
+
+@router.post('/member-change-requests/{request_id}/approve')
+def approve_admin_member_change_request(
+    request_id: int,
+    request: Request,
+    payload: dict | None = None,
+    admin: User = Depends(require_permission('member.review')),
+    db: Session = Depends(get_db),
+):
+    payload = payload or {}
+    return _apply_admin_profile_change_action(
+        request_id=request_id,
+        action='APPROVE',
+        note=payload.get('comment') or payload.get('reviewer_comment') or payload.get('review_note') or payload.get('note'),
+        request=request,
+        admin=admin,
+        db=db,
+    )
+
+
+@router.post('/member-change-requests/{request_id}/reject')
+def reject_admin_member_change_request(
+    request_id: int,
+    request: Request,
+    payload: dict | None = None,
+    admin: User = Depends(require_permission('member.review')),
+    db: Session = Depends(get_db),
+):
+    payload = payload or {}
+    return _apply_admin_profile_change_action(
+        request_id=request_id,
+        action='REJECT',
+        note=payload.get('comment') or payload.get('reviewer_comment') or payload.get('review_note') or payload.get('note'),
+        request=request,
+        admin=admin,
+        db=db,
+    )
+
+
+@router.post('/member-change-requests/{request_id}/review')
 @router.post('/profile-change-requests/{request_id}/review')
 def review_admin_profile_change_request(
     request_id: int,
@@ -1295,23 +1376,47 @@ def review_admin_profile_change_request(
     admin: User = Depends(require_permission('member.review')),
     db: Session = Depends(get_db),
 ):
+    action = str(payload.get('action') or 'APPROVE').strip().upper()
+    note = str(payload.get('note') or payload.get('review_note') or payload.get('comment') or '').strip() or None
+    return _apply_admin_profile_change_action(
+        request_id=request_id,
+        action=action,
+        note=note,
+        request=request,
+        admin=admin,
+        db=db,
+    )
+
+
+def _apply_admin_profile_change_action(
+    request_id: int,
+    action: str,
+    note: str | None,
+    request: Request,
+    admin: User,
+    db: Session,
+) -> dict:
     from app.models import MemberProfileChangeRequest
     from app.routers.membership import _parse_dob
 
     req_obj = db.get(MemberProfileChangeRequest, request_id)
     if not req_obj:
         raise HTTPException(404, 'Profile change request not found')
-    action = str(payload.get('action') or 'APPROVE').strip().upper()
-    note = str(payload.get('note') or payload.get('review_note') or '').strip() or None
-    if action not in ('APPROVE', 'APPROVED', 'REJECT', 'REJECTED'):
+
+    norm_action = action.strip().upper()
+    if norm_action not in ('APPROVE', 'APPROVED', 'REJECT', 'REJECTED'):
         raise HTTPException(400, 'Action must be APPROVE or REJECT')
+
+    # Security: Member/Admin cannot approve own change request
+    if norm_action in ('APPROVE', 'APPROVED') and req_obj.user_id == admin.id:
+        raise HTTPException(403, 'Administrators cannot approve their own profile change requests')
 
     m = db.get(Member, req_obj.member_id)
     u = db.get(User, req_obj.user_id)
     if not m or not u:
         raise HTTPException(404, 'Target member not found')
 
-    if action in ('APPROVE', 'APPROVED'):
+    if norm_action in ('APPROVE', 'APPROVED'):
         req_obj.status = 'APPROVED'
         f_name = req_obj.field_name
         val = req_obj.requested_value
@@ -1321,24 +1426,40 @@ def review_admin_profile_change_request(
             u.name_en = val
         elif f_name == 'nid_number':
             m.nid_number = val
-        elif f_name == 'date_of_birth':
+        elif f_name in ('date_of_birth', 'dob'):
             m.date_of_birth = _parse_dob(val)
         elif f_name == 'membership_id':
             m.membership_id = val
+        elif f_name in ('grid_circle', 'circle_id'):
+            m.circle_id = int(val)
+        elif f_name == 'membership_type':
+            m.membership_type = val
         elif f_name == 'certificate_info':
             m.diploma_institution = val
-        notify_msg = f'আপনার প্রোফাইল তথ্য সংশোধনের আবেদন ({f_name}) অনুমোদিত হয়েছে।'
+        notify_msg = f'আপনার প্রোফাইল তথ্য সংশোধনের আবেদন ({f_name}) অনুমোদিত হয়েছে।'
+        audit_action = 'PROFILE_CHANGE_APPROVED'
     else:
         req_obj.status = 'REJECTED'
-        notify_msg = f'আপনার প্রোফাইল তথ্য সংশোধনের আবেদন ({req_obj.field_name}) প্রত্যাখ্যাত হয়েছে।'
+        notify_msg = f'আপনার প্রোফাইল তথ্য সংশোধনের আবেদন ({req_obj.field_name}) বাতিল করা হয়েছে।'
+        audit_action = 'PROFILE_CHANGE_REJECTED'
 
     req_obj.reviewer_id = admin.id
     req_obj.review_note = note
     req_obj.reviewed_at = datetime.utcnow()
-    audit(db, admin, f'{req_obj.status}_PROFILE_CHANGE', 'MEMBER_PROFILE_CHANGE', req_obj.id, _actor_ip(request))
-    notify(db, u.id, 'প্রোফাইল যাচাইকরণ আপডেট', notify_msg, 'MEMBERSHIP')
+    actor_ip = _actor_ip(request)
+    audit(db, admin, audit_action, 'MEMBER_PROFILE_CHANGE', req_obj.id, actor_ip)
+    audit(db, admin, f'{req_obj.status}_PROFILE_CHANGE', 'MEMBER_PROFILE_CHANGE', req_obj.id, actor_ip)
+    notify(db, u.id, 'প্রোফাইল সংশোধন আপডেট', notify_msg, 'PROFILE')
     db.commit()
-    return {'ok': True, 'id': req_obj.id, 'status': req_obj.status, 'review_note': req_obj.review_note}
+    return {
+        'ok': True,
+        'id': req_obj.id,
+        'status': req_obj.status,
+        'field_name': req_obj.field_name,
+        'reviewer_comment': req_obj.review_note,
+        'review_note': req_obj.review_note,
+    }
+
 
 
 

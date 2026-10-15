@@ -469,5 +469,163 @@ export interface AdminIntelligenceDashboard {
   }>;
 }
 
+export interface VerificationBadge {
+  field: string;
+  status: 'VERIFIED' | 'PENDING' | 'REJECTED';
+  label: string;
+  label_bn: string;
+  is_verified: boolean;
+  description: string;
+  description_bn: string;
+}
+
+export interface ProfileCompletionItem {
+  key: string;
+  field: string;
+  label_en: string;
+  label_bn: string;
+  completed: boolean;
+  weight: number;
+  route: string;
+}
+
+export interface ProfileCompletionDetails {
+  percentage: number;
+  is_complete: boolean;
+  completed_count: number;
+  total_count: number;
+  breakdown: Record<string, boolean>;
+  items: ProfileCompletionItem[];
+  missing: Array<{
+    field: string;
+    label: string;
+    label_bn: string;
+    route: string;
+  }>;
+}
+
+export interface ProfileChangeRequest {
+  id: number;
+  member_id: number;
+  field_name: string;
+  field_label_en: string;
+  field_label_bn: string;
+  current_value?: string | null;
+  requested_value: string;
+  reason?: string | null;
+  supporting_doc_url?: string | null;
+  supporting_document_id?: number | null;
+  status: 'PENDING' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  reviewer_id?: number | null;
+  reviewed_by?: number | null;
+  reviewer_comment?: string | null;
+  reviewer_note?: string | null;
+  review_note?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+  member_name_en?: string | null;
+  member_name_bn?: string | null;
+  membership_id?: string | null;
+}
+
+export interface MemberProfile {
+  id: number;
+  user_id: number;
+  name_bn?: string | null;
+  name_en?: string | null;
+  father_name?: string | null;
+  mother_name?: string | null;
+  date_of_birth?: string | null;
+  gender?: string | null;
+  blood_group?: string | null;
+  nid_number?: string | null;
+  photo_url?: string | null;
+  designation_bn?: string | null;
+  designation_en?: string | null;
+  organization?: string | null;
+  department?: string | null;
+  profession?: string | null;
+  academic_qualification?: string | null;
+  professional_qualification?: string | null;
+  years_of_experience?: number | null;
+  employee_id?: string | null;
+  diploma_institution?: string | null;
+  graduation_year?: number | null;
+  email?: string | null;
+  phone?: string | null;
+  alternate_phone?: string | null;
+  current_address?: string | null;
+  permanent_address?: string | null;
+  district?: string | null;
+  circle_id?: number | null;
+  circle_bn?: string | null;
+  circle_en?: string | null;
+  emergency_contact_name?: string | null;
+  emergency_contact_relationship?: string | null;
+  emergency_contact_phone?: string | null;
+  emergency_contact_address?: string | null;
+  emergency_contact?: {
+    name?: string | null;
+    relationship?: string | null;
+    phone?: string | null;
+    address?: string | null;
+  };
+  preferred_language?: string;
+  profile_visibility?: string;
+  directory_visibility?: boolean;
+  contact_visibility?: boolean;
+  membership_id?: string | null;
+  membership_type?: string;
+  status?: string;
+  issue_date?: string | null;
+  validity_date?: string | null;
+  is_verified_member?: boolean;
+  protected_fields?: string[];
+  editable_fields?: string[];
+  profile_completion?: number;
+  profile_completion_details?: ProfileCompletionDetails;
+  verification_badges?: Record<string, VerificationBadge>;
+  pending_change_requests?: ProfileChangeRequest[];
+  personal_information?: {
+    name_bn?: string | null;
+    name_en?: string | null;
+    father_name?: string | null;
+    mother_name?: string | null;
+    date_of_birth?: string | null;
+    gender?: string | null;
+    blood_group?: string | null;
+    nid_number?: string | null;
+    photo_url?: string | null;
+  };
+  professional_information?: {
+    designation_bn?: string | null;
+    designation_en?: string | null;
+    organization?: string | null;
+    department?: string | null;
+    profession?: string | null;
+    academic_qualification?: string | null;
+    professional_qualification?: string | null;
+    years_of_experience?: number | null;
+    employee_id?: string | null;
+    diploma_institution?: string | null;
+    graduation_year?: number | null;
+    circle_id?: number | null;
+    circle_bn?: string | null;
+    circle_en?: string | null;
+  };
+  contact_information?: {
+    email?: string | null;
+    phone?: string | null;
+    alternate_phone?: string | null;
+    current_address?: string | null;
+    permanent_address?: string | null;
+    district?: string | null;
+    circle_id?: number | null;
+    circle_bn?: string | null;
+    circle_en?: string | null;
+  };
+}
+
+
 
 
