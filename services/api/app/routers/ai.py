@@ -30,6 +30,7 @@ from app.models import (
     KnowledgeDocument,
     KnowledgeFAQ,
     Member,
+    MemberDocument,
     MembershipApplication,
     Notice,
     Notification,
@@ -1112,7 +1113,107 @@ def _execute_member_tools(
         ans_bn = f'আপনার অ্যাকাউন্টের সাথে {len(regs)} টি ইভেন্ট নিবন্ধন যুক্ত রয়েছে।'
         return tools_used, ans_en, ans_bn, actions
 
-    # 7. Member Documents
+    # 7. Pending Documents Query ("আমার কোন documents এখনও pending?")
+    if any(k in q_lower for k in ('pending document', 'pending documents', 'documents এখনও pending', 'ডকুমেন্ট এখনও pending', 'ডকুমেন্টস এখনও pending', 'কোন documents', 'কোন নথি পেন্ডিং', 'review-এ আছে', 'আন্ডার রিভিউ')):
+        mem_docs = []
+        if member:
+            mem_docs = list(
+                db.scalars(
+                    select(MemberDocument)
+                    .where(
+                        MemberDocument.member_id == member.id,
+                        MemberDocument.deleted_at.is_(None),
+                        MemberDocument.review_status.in_(('PENDING', 'UNDER_REVIEW')),
+                    )
+                    .order_by(MemberDocument.id.desc())
+                ).all()
+            )
+        tools_used.append(
+            {
+                'tool_name': 'member.get_pending_documents',
+                'authorized': True,
+                'result': {
+                    'pending_count': len(mem_docs),
+                    'documents': [
+                        {
+                            'id': d.id,
+                            'title': d.title or d.document_type,
+                            'type': d.document_type,
+                            'status': 'Under Review' if d.review_status in ('PENDING', 'UNDER_REVIEW') else d.review_status,
+                            'submitted_at': d.created_at.strftime('%d %B %Y') if d.created_at else 'N/A',
+                        }
+                        for d in mem_docs
+                    ],
+                },
+            }
+        )
+        actions.append(
+            {
+                'type': 'OPEN_DOCUMENT',
+                'action': 'OPEN_DOCUMENT',
+                'label': 'Manage Documents',
+                'label_bn': 'ডকুমেন্ট সেন্টার দেখুন',
+                'url': '/member/documents',
+            }
+        )
+        if mem_docs:
+            doc_lines_bn = []
+            doc_lines_en = []
+            for d in mem_docs:
+                submitted_str = d.created_at.strftime('%d %B %Y') if d.created_at else '2026'
+                doc_lines_bn.append(f"📄 {d.title or d.document_type}\nStatus: Under Review\nSubmitted: {submitted_str}")
+                doc_lines_en.append(f"📄 {d.title or d.document_type}\nStatus: Under Review\nSubmitted: {submitted_str}")
+            ans_bn = f"আপনার {len(mem_docs)}টি document বর্তমানে review-এ আছে:\n\n" + "\n\n".join(doc_lines_bn)
+            ans_en = f"You have {len(mem_docs)} document(s) currently under review:\n\n" + "\n\n".join(doc_lines_en)
+        else:
+            ans_bn = "আপনার কোনো নথি (document) বর্তমানে review বা pending অবস্থায় নেই। আপনার সকল নথি অনুমোদিত অথবা কোনো আবেদন অপেক্ষমাণ নেই।"
+            ans_en = "You have no documents currently pending review. All your submitted documents have been processed."
+        return tools_used, ans_en, ans_bn, actions
+
+    # 8. Digital ID Validity Query ("আমার digital ID valid আছে?")
+    if any(k in q_lower for k in ('digital id valid', 'digital id valid আছে', 'digital id ভ্যালিড', 'digital id-এর অবস্থা', 'আমার digital id', 'ডিজিটাল আইডি')):
+        from app.domain.documents_id import get_or_create_digital_id
+        did_status = 'PENDING'
+        valid_until_str = 'N/A'
+        is_active = False
+        if member:
+            did = get_or_create_digital_id(db, member)
+            did_status = did.status
+            is_active = did_status == 'ACTIVE'
+            if did.valid_until:
+                valid_until_str = did.valid_until.strftime('%d %B %Y')
+            elif member.validity_date:
+                valid_until_str = member.validity_date.strftime('%d %B %Y')
+
+        tools_used.append(
+            {
+                'tool_name': 'member.get_digital_id_validity',
+                'authorized': True,
+                'result': {
+                    'status': did_status,
+                    'is_valid': is_active,
+                    'valid_until': valid_until_str,
+                },
+            }
+        )
+        actions.append(
+            {
+                'type': 'OPEN_DIGITAL_ID',
+                'action': 'OPEN_DIGITAL_ID',
+                'label': 'Open Digital ID',
+                'label_bn': 'ডিজিটাল আইডি খুলুন',
+                'url': '/member/digital-id',
+            }
+        )
+        if is_active:
+            ans_bn = f"হ্যাঁ।\n\nDigital ID: ACTIVE\nValid until: {valid_until_str}\n\n[Open Digital ID](/member/digital-id)"
+            ans_en = f"Yes.\n\nDigital ID: ACTIVE\nValid until: {valid_until_str}\n\n[Open Digital ID](/member/digital-id)"
+        else:
+            ans_bn = f"আপনার Digital ID বর্তমানে {did_status} অবস্থায় রয়েছে।\nValid until: {valid_until_str}\n\n[Open Digital ID](/member/digital-id)"
+            ans_en = f"Your Digital ID is currently {did_status}.\nValid until: {valid_until_str}\n\n[Open Digital ID](/member/digital-id)"
+        return tools_used, ans_en, ans_bn, actions
+
+    # 9. General Member Documents
     if any(k in q_lower for k in ('my document', 'আমার ডকুমেন্ট', 'আমার নথি')):
         docs = list(db.scalars(select(Document).order_by(Document.id.desc()).limit(5)).all())
         tools_used.append(
@@ -1128,7 +1229,7 @@ def _execute_member_tools(
                 'action': 'OPEN_DOCUMENT',
                 'label': 'Open Documents',
                 'label_bn': 'ডকুমেন্টস দেখুন',
-                'url': '/documents',
+                'url': '/member/documents',
             }
         )
         ans_en = f'There are {len(docs)} official institutional forms and documents available in your repository.'

@@ -347,24 +347,14 @@ class CertificateService:
                 'CERTIFICATE',
             )
 
-        # Retain references before delete
-        cert_copy = Certificate(
-            certificate_no=cert.certificate_no,
-            recipient_name=cert.recipient_name,
-            title_bn=cert.title_bn,
-            issue_date=cert.issue_date,
-            verification_token_hash=cert.verification_token_hash,
-            storage_path=cert.storage_path,
-            pdf_path=cert.pdf_path,
-            created_at=cert.created_at,
-        )
-        cert_copy.id = cert.id
-        cert_copy._raw_token = getattr(cert, '_raw_token', cert.certificate_no)
-        cert_copy._transient_status = 'REVOKED'
+        cert.status = 'REVOKED'
+        cert.revoked_at = datetime.utcnow()
+        cert.revoked_by_id = admin_user.id
+        cert.revocation_reason = reason
 
-        db.delete(cert)
         db.commit()
-        return cert_copy
+        db.refresh(cert)
+        return cert
 
 
 _revoked_certs = CertificateService._revocations

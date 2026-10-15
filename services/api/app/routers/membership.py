@@ -1152,11 +1152,11 @@ def member_dashboard(user: User = Depends(current_user), db: Session = Depends(g
     }
 
     quick_actions = [
-        {'id': 'DIGITAL_ID', 'label_bn': 'ডিজিটাল আইডি', 'label_en': 'Digital ID', 'href': '/portal/id-card'},
-        {'id': 'RENEW_MEMBERSHIP', 'label_bn': 'সদস্যপদ নবায়ন', 'label_en': 'Renew Membership', 'href': '/portal?tab=renewal'},
-        {'id': 'CERTIFICATES', 'label_bn': 'সনদপত্র ওয়ালেট', 'label_en': 'Certificates', 'href': '/portal?tab=certificates'},
-        {'id': 'DOCUMENTS', 'label_bn': 'ডকুমেন্টস', 'label_en': 'Documents', 'href': '/portal?tab=documents'},
-        {'id': 'PAYMENTS', 'label_bn': 'পেমেন্ট ও রসিদ', 'label_en': 'Payments', 'href': '/portal?tab=payments'},
+        {'id': 'DIGITAL_ID', 'label_bn': 'ডিজিটাল আইডি', 'label_en': 'Digital ID', 'href': '/member/digital-id'},
+        {'id': 'RENEW_MEMBERSHIP', 'label_bn': 'সদস্যপদ নবায়ন', 'label_en': 'Renew Membership', 'href': '/member/membership/renew'},
+        {'id': 'CERTIFICATES', 'label_bn': 'সনদপত্র ওয়ালেট', 'label_en': 'Certificates', 'href': '/member/certificates'},
+        {'id': 'DOCUMENTS', 'label_bn': 'ডকুমেন্টস', 'label_en': 'Documents', 'href': '/member/documents'},
+        {'id': 'PAYMENTS', 'label_bn': 'পেমেন্ট ও রসিদ', 'label_en': 'Payments', 'href': '/member/payments'},
         {'id': 'EVENTS', 'label_bn': 'ইভেন্ট নিবন্ধন', 'label_en': 'Events', 'href': '/events'},
     ]
 

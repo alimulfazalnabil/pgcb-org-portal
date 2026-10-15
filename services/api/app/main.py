@@ -37,6 +37,46 @@ async def lifespan(app: FastAPI):
     if settings.database_url.startswith("sqlite"):
         try:
             Base.metadata.create_all(bind=engine, checkfirst=True)
+            from sqlalchemy import inspect as sqla_inspect
+            inspector = sqla_inspect(engine)
+            with engine.connect() as conn:
+                if 'membership_renewals' in inspector.get_table_names():
+                    cols = {c['name'] for c in inspector.get_columns('membership_renewals')}
+                    if 'duration_years' not in cols:
+                        conn.execute(text("ALTER TABLE membership_renewals ADD COLUMN duration_years INTEGER DEFAULT 1"))
+                    if 'notes' not in cols:
+                        conn.execute(text("ALTER TABLE membership_renewals ADD COLUMN notes TEXT"))
+                if 'member_documents' in inspector.get_table_names():
+                    cols = {c['name'] for c in inspector.get_columns('member_documents')}
+                    if 'reviewer_note' not in cols:
+                        conn.execute(text("ALTER TABLE member_documents ADD COLUMN reviewer_note TEXT"))
+                    if 'title' not in cols:
+                        conn.execute(text("ALTER TABLE member_documents ADD COLUMN title VARCHAR(255)"))
+                    if 'file_size' not in cols:
+                        conn.execute(text("ALTER TABLE member_documents ADD COLUMN file_size INTEGER DEFAULT 0"))
+                    if 'version' not in cols:
+                        conn.execute(text("ALTER TABLE member_documents ADD COLUMN version INTEGER DEFAULT 1"))
+                    if 'verified_at' not in cols:
+                        conn.execute(text("ALTER TABLE member_documents ADD COLUMN verified_at DATETIME"))
+                    if 'expires_at' not in cols:
+                        conn.execute(text("ALTER TABLE member_documents ADD COLUMN expires_at DATETIME"))
+                    if 'deleted_at' not in cols:
+                        conn.execute(text("ALTER TABLE member_documents ADD COLUMN deleted_at DATETIME"))
+                if 'certificates' in inspector.get_table_names():
+                    cols = {c['name'] for c in inspector.get_columns('certificates')}
+                    if 'title_en' not in cols:
+                        conn.execute(text("ALTER TABLE certificates ADD COLUMN title_en VARCHAR(500)"))
+                    if 'certificate_type' not in cols:
+                        conn.execute(text("ALTER TABLE certificates ADD COLUMN certificate_type VARCHAR(50) DEFAULT 'MEMBERSHIP'"))
+                    if 'status' not in cols:
+                        conn.execute(text("ALTER TABLE certificates ADD COLUMN status VARCHAR(30) DEFAULT 'VALID'"))
+                    if 'revoked_at' not in cols:
+                        conn.execute(text("ALTER TABLE certificates ADD COLUMN revoked_at DATETIME"))
+                    if 'revoked_by_id' not in cols:
+                        conn.execute(text("ALTER TABLE certificates ADD COLUMN revoked_by_id INTEGER"))
+                    if 'revocation_reason' not in cols:
+                        conn.execute(text("ALTER TABLE certificates ADD COLUMN revocation_reason TEXT"))
+                conn.commit()
         except Exception as exc:
             logger.debug("SQLite table initialization notice: %s", exc)
     # Ensure storage root and subdirectories are created on persistent disk
@@ -165,12 +205,35 @@ app.add_middleware(
 if settings.database_url.startswith('sqlite'):
     try:
         Base.metadata.create_all(bind=engine, checkfirst=True)
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            for col_def in [
+                "ALTER TABLE member_documents ADD COLUMN title VARCHAR(255)",
+                "ALTER TABLE member_documents ADD COLUMN file_size INTEGER",
+                "ALTER TABLE member_documents ADD COLUMN version INTEGER DEFAULT 1",
+                "ALTER TABLE member_documents ADD COLUMN verified_at TIMESTAMP",
+                "ALTER TABLE member_documents ADD COLUMN expires_at TIMESTAMP",
+                "ALTER TABLE member_documents ADD COLUMN deleted_at TIMESTAMP",
+                "ALTER TABLE certificates ADD COLUMN title_en VARCHAR(255)",
+                "ALTER TABLE certificates ADD COLUMN certificate_type VARCHAR(64) DEFAULT 'MEMBERSHIP'",
+                "ALTER TABLE certificates ADD COLUMN status VARCHAR(32) DEFAULT 'VALID'",
+                "ALTER TABLE certificates ADD COLUMN revoked_at TIMESTAMP",
+                "ALTER TABLE certificates ADD COLUMN revoked_by_id INTEGER",
+                "ALTER TABLE certificates ADD COLUMN revocation_reason TEXT",
+            ]:
+                try:
+                    conn.execute(text(col_def))
+                    conn.commit()
+                except Exception:
+                    pass
     except Exception as exc:
         logger.debug("Database schema auto-creation notice: %s", exc)
 
 
 app.include_router(auth.router, prefix='/api/v1')
 app.include_router(public.router, prefix='/api/v1')
+from app.routers.member_documents import router as member_documents_router
+app.include_router(member_documents_router, prefix='/api/v1')
 app.include_router(membership.router, prefix='/api/v1')
 app.include_router(card.router, prefix='/api/v1')
 app.include_router(admin.router, prefix='/api/v1')

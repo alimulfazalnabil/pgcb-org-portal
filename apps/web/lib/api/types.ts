@@ -785,3 +785,184 @@ export interface ApplicationCenterDetails {
 }
 
 export type ApplicationDetailsResponse = ApplicationCenterDetails;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4: Document Center, Digital ID & Certificates
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface DocumentVersionItem {
+  id: number;
+  version_number: number;
+  filename: string;
+  file_size: number;
+  content_type: string;
+  replacement_reason?: string | null;
+  created_at: string;
+  download_url: string;
+}
+
+export interface DocumentVerificationEventItem {
+  id: number;
+  action: 'VERIFIED' | 'REJECTED' | 'UPLOADED' | 'REPLACED' | string;
+  actor_name: string;
+  actor_role: string;
+  notes?: string | null;
+  created_at: string;
+}
+
+export interface MemberDocumentListItem {
+  id: number;
+  document_type: string;
+  title: string;
+  filename: string;
+  status: 'PENDING' | 'UNDER_REVIEW' | 'APPROVED' | 'VERIFIED' | 'REJECTED' | 'EXPIRED' | string;
+  version: number;
+  file_size: number;
+  file_size_formatted: string;
+  uploaded_at?: string | null;
+  verified_at?: string | null;
+  expires_at?: string | null;
+  reviewer_note?: string | null;
+  download_url: string;
+  preview_url: string;
+}
+
+export interface MemberDocumentDetail extends MemberDocumentListItem {
+  versions: DocumentVersionItem[];
+  verification_history: DocumentVerificationEventItem[];
+}
+
+export interface MemberDocumentSummary {
+  total_count: number;
+  verified_count: number;
+  pending_count: number;
+  rejected_count: number;
+  expired_count: number;
+  documents: MemberDocumentListItem[];
+}
+
+export interface DigitalMemberIdData {
+  identifier: string;
+  membership_id: string;
+  name_en: string;
+  name_bn?: string | null;
+  membership_type: string;
+  circle_en: string;
+  circle_bn: string;
+  designation_en?: string | null;
+  designation_bn?: string | null;
+  photo_url?: string | null;
+  status: 'ACTIVE' | 'EXPIRING_SOON' | 'EXPIRED' | 'SUSPENDED' | string;
+  issue_date?: string | null;
+  valid_until?: string | null;
+  valid_until_formatted?: string | null;
+  days_remaining?: number | null;
+  is_valid: boolean;
+  qr_code_data: string;
+  verification_url: string;
+  pdf_download_url: string;
+  image_download_url: string;
+}
+
+export interface MemberCertificateItem {
+  id: number;
+  certificate_no: string;
+  certificate_number: string;
+  title_bn: string;
+  title_en: string;
+  certificate_type: 'MEMBERSHIP' | 'EVENT' | 'TRAINING' | 'APPRECIATION' | string;
+  recipient_name: string;
+  issue_date: string;
+  status: 'VALID' | 'REVOKED' | 'EXPIRED' | string;
+  revoked_at?: string | null;
+  revocation_reason?: string | null;
+  download_url: string;
+  preview_url: string;
+  verify_url: string;
+}
+
+export interface PublicMemberVerificationResult {
+  is_valid: boolean;
+  membership_id: string;
+  member_name: string;
+  member_name_bn?: string | null;
+  membership_type: string;
+  circle: string;
+  status: 'ACTIVE' | 'EXPIRING_SOON' | 'EXPIRED' | 'SUSPENDED' | 'CANCELLED' | string;
+  valid_until?: string | null;
+  days_remaining?: number | null;
+  photo_url?: string | null;
+  designation?: string | null;
+  verified_at: string;
+  verification_reference: string;
+}
+
+export interface PublicCertificateVerificationResult {
+  is_valid: boolean;
+  certificate_no: string;
+  recipient_name: string;
+  certificate_type: string;
+  issue_date?: string | null;
+  status: 'VALID' | 'REVOKED' | 'EXPIRED' | string;
+  revoked_at?: string | null;
+  revocation_reason?: string | null;
+  verified_at: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 5: Payment Center & Receipts
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PaymentTransactionItem {
+  id: number;
+  transaction_ref: string;
+  purpose: 'MEMBERSHIP' | 'RENEWAL' | 'APPLICATION' | 'EVENT' | string;
+  purpose_label_en: string;
+  purpose_label_bn: string;
+  amount: number;
+  amount_formatted: string;
+  currency: string;
+  status: 'INITIATED' | 'PENDING' | 'PROCESSING' | 'PAID' | 'SUCCESS' | 'FAILED' | 'CANCELLED' | 'REFUNDED' | 'EXPIRED' | string;
+  status_label_en: string;
+  status_label_bn: string;
+  provider: 'SSLCOMMERZ' | 'BKASH' | 'NAGAD' | 'OFFLINE' | string;
+  provider_tran_id?: string | null;
+  receipt_no?: string | null;
+  paid_at?: string | null;
+  created_at: string;
+  receipt_url?: string | null;
+  receipt_pdf_url?: string | null;
+}
+
+export interface PaymentSummary {
+  total_paid: number;
+  total_paid_formatted: string;
+  successful_count: number;
+  pending_count: number;
+  failed_count: number;
+  refunded_count: number;
+  transactions: PaymentTransactionItem[];
+}
+
+export interface PaymentReceiptData {
+  receipt_no: string;
+  transaction_ref: string;
+  payment_id: number;
+  member_id?: number | null;
+  membership_id?: string | null;
+  member_name: string;
+  member_name_bn?: string | null;
+  purpose: string;
+  purpose_title_en: string;
+  purpose_title_bn: string;
+  amount: number;
+  amount_formatted: string;
+  currency: string;
+  payment_date: string;
+  provider: string;
+  provider_tran_id?: string | null;
+  status: string;
+  verification_url: string;
+  verification_qr_data: string;
+  download_pdf_url: string;
+}

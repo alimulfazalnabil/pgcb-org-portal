@@ -65,14 +65,83 @@ class MemberDocument(Base):
     __tablename__ = 'member_documents'
     id: Mapped[int] = mapped_column(primary_key=True)
     member_id: Mapped[int] = mapped_column(ForeignKey('members.id', ondelete='CASCADE'), index=True)
-    document_type: Mapped[str] = mapped_column(String(50))
+    document_type: Mapped[str] = mapped_column(String(50), index=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     filename: Mapped[str] = mapped_column(String(255))
     storage_path: Mapped[str] = mapped_column(String(1000))
     content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    review_status: Mapped[str] = mapped_column(String(30), default='PENDING', index=True)
+    file_size: Mapped[int] = mapped_column(Integer, default=0)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    review_status: Mapped[str] = mapped_column(String(30), default='UNDER_REVIEW', index=True)
     reviewer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
     member = relationship('Member', back_populates='documents')
+    versions = relationship('DocumentVersion', back_populates='document', cascade='all,delete-orphan', order_by='DocumentVersion.version_number.desc()')
+    verification_events = relationship('DocumentVerificationEvent', back_populates='document', cascade='all,delete-orphan', order_by='DocumentVerificationEvent.id.desc()')
+
+    @property
+    def status(self) -> str:
+        return self.review_status
+
+    @status.setter
+    def status(self, val: str) -> None:
+        self.review_status = val
+
+
+class DocumentVersion(Base):
+    __tablename__ = 'document_versions'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey('member_documents.id', ondelete='CASCADE'), index=True)
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    filename: Mapped[str] = mapped_column(String(255))
+    storage_path: Mapped[str] = mapped_column(String(1000))
+    content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    file_size: Mapped[int] = mapped_column(Integer, default=0)
+    review_status: Mapped[str] = mapped_column(String(30), default='UNDER_REVIEW')
+    reviewer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    document = relationship('MemberDocument', back_populates='versions')
+
+
+class DocumentVerificationEvent(Base):
+    __tablename__ = 'document_verification_events'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey('member_documents.id', ondelete='CASCADE'), index=True)
+    action: Mapped[str] = mapped_column(String(40), index=True)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    previous_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    new_status: Mapped[str] = mapped_column(String(30), index=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    document = relationship('MemberDocument', back_populates='verification_events')
+    actor = relationship('User', foreign_keys=[actor_id])
+
+
+class DigitalMemberId(Base):
+    __tablename__ = 'digital_member_ids'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey('members.id', ondelete='CASCADE'), index=True)
+    identifier: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    qr_token: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    valid_from: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default='ACTIVE', index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revocation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    member = relationship('Member')
+
 
 class CommitteeMember(Base):
     __tablename__ = 'committee_members'
@@ -392,13 +461,23 @@ class Certificate(Base):
     certificate_no: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     recipient_name: Mapped[str] = mapped_column(String(250))
     title_bn: Mapped[str] = mapped_column(String(500))
+    title_en: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    certificate_type: Mapped[str] = mapped_column(String(50), default='MEMBERSHIP', index=True)
     issue_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     event_registration_id: Mapped[int | None] = mapped_column(ForeignKey('event_registrations.id', ondelete='SET NULL'), nullable=True, index=True)
     member_id: Mapped[int | None] = mapped_column(ForeignKey('members.id', ondelete='SET NULL'), nullable=True, index=True)
     verification_token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     storage_path: Mapped[str] = mapped_column(String(1000))
     pdf_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default='VALID', index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_by_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    revocation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    member = relationship('Member')
+    revoked_by = relationship('User', foreign_keys=[revoked_by_id])
+    verification_records = relationship('CertificateVerificationRecord', back_populates='certificate', cascade='all,delete-orphan', order_by='CertificateVerificationRecord.id.desc()')
 
     @property
     def certificate_number(self) -> str:
@@ -416,13 +495,19 @@ class Certificate(Base):
     def token(self, val: str):
         self._raw_token = val
 
-    @property
-    def status(self) -> str:
-        return getattr(self, '_transient_status', 'ISSUED')
 
-    @status.setter
-    def status(self, val: str):
-        self._transient_status = val
+class CertificateVerificationRecord(Base):
+    __tablename__ = 'certificate_verification_records'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    certificate_id: Mapped[int] = mapped_column(ForeignKey('certificates.id', ondelete='CASCADE'), index=True)
+    action: Mapped[str] = mapped_column(String(40), index=True)  # ISSUED, VERIFIED, REVOKED
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    certificate = relationship('Certificate', back_populates='verification_records')
+    actor = relationship('User', foreign_keys=[actor_id])
 
 class ContentWorkflow(Base):
     __tablename__ = 'content_workflows'

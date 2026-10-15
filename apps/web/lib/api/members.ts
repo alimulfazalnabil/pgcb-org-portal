@@ -146,5 +146,51 @@ export const membersApi = {
       body: formData,
     });
   },
+
+  // Phase 4 — Document Center & Digital ID
+  getDocumentSummary: (filter?: string) => {
+    const q = filter && filter.toUpperCase() !== 'ALL' ? `?filter=${encodeURIComponent(filter.toUpperCase())}` : '';
+    return request<any>(`/member/documents${q}`);
+  },
+  getDocumentDetail: (id: number) => request<any>(`/member/documents/${id}`),
+  uploadDocument: (file: File, documentType: string, title?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('document_type', documentType);
+    if (title) formData.append('title', title);
+    return request<any>('/member/documents', {
+      method: 'POST',
+      body: formData,
+    });
+  },
+  replaceDocument: (id: number, file: File, replacementReason?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (replacementReason) formData.append('replacement_reason', replacementReason);
+    return request<any>(`/member/documents/${id}/replace`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
+  getDigitalMemberId: () => request<any>('/member/digital-id'),
+  getDigitalMemberIdPdfUrl: () => `${API_BASE_URL}/api/v1/member/digital-id/pdf`,
+  getMemberCertificatesList: () => request<any[]>('/member/certificates'),
+  getMemberCertificateDetail: (id: number) => request<any>(`/member/certificates/${id}`),
+  verifyMemberPublic: (ref: string) => request<any>(`/public/verify/member/${encodeURIComponent(ref)}`),
+  verifyCertificatePublic: (ref: string) => request<any>(`/public/verify/certificate/${encodeURIComponent(ref)}`),
+
+  // Phase 5 — Payments & Receipts
+  getPaymentSummary: (statusFilter?: string) => {
+    const q = statusFilter && statusFilter.toUpperCase() !== 'ALL' ? `?status=${encodeURIComponent(statusFilter.toUpperCase())}` : '';
+    return request<any>(`/member/payments${q}`);
+  },
+  getPaymentDetail: (id: number) => request<any>(`/member/payments/${id}`),
+  getPaymentReceipt: (id: number) => request<any>(`/member/payments/${id}/receipt`),
+  initiatePaymentCheckout: (data: { purpose: string; plan_code?: string; provider?: string; idempotency_key?: string }) =>
+    request<any>('/member/payments/initiate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  verifyPaymentPublic: (ref: string) => request<any>(`/public/verify/payment/${encodeURIComponent(ref)}`),
 };
 
