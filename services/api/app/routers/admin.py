@@ -22,6 +22,7 @@ from app.models import (
     ContactMessage,
     Event,
     EventRegistration,
+    EventAttendance,
     Journal,
     Member,
     MemberDocument,
@@ -2861,5 +2862,460 @@ def run_production_smoke_test(
 def simulate_controlled_500_error(_: User = Depends(require_permission('admin.stats'))):
     """Diagnostic endpoint to verify controlled production 500 error responses (ERROR-ID: PGCB-YYYY-MMDD-XXXX)."""
     raise RuntimeError('Simulated internal failure for controlled error-ID verification (sensitive stack trace hidden)')
+
+
+# ==========================================
+# Admin Events & Attendance Check-In Router
+# ==========================================
+
+@router.get('/events')
+def admin_list_events(
+    category: str | None = None,
+    status: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _: User = Depends(require_permission('events.read')),
+    db: Session = Depends(get_db),
+):
+    """Admin event list with registration metrics, waitlist counts, and capacity tracking."""
+    stmt = select(Event)
+    if category:
+        stmt = stmt.where(Event.category == category.upper())
+    if status and status.upper() != 'ALL':
+        stmt = stmt.where(Event.status == status.upper())
+    if q:
+        s = f"%{q.strip()}%"
+        stmt = stmt.where(or_(Event.title_bn.like(s), Event.title_en.like(s), Event.venue.like(s)))
+
+    events = db.scalars(stmt.order_by(Event.created_at.desc()).limit(limit).offset(offset)).all()
+    items = []
+    for evt in events:
+        confirmed_count = db.scalar(
+            select(func.count(EventRegistration.id)).where(
+                EventRegistration.event_id == evt.id,
+                EventRegistration.registration_status.in_(['CONFIRMED', 'REGISTERED', 'ATTENDED']),
+            )
+        ) or 0
+        waitlist_count = db.scalar(
+            select(func.count(EventRegistration.id)).where(
+                EventRegistration.event_id == evt.id,
+                EventRegistration.registration_status == 'WAITLISTED',
+            )
+        ) or 0
+        checked_in_count = db.scalar(
+            select(func.count(EventRegistration.id)).where(
+                EventRegistration.event_id == evt.id,
+                EventRegistration.attendance_status == 'CHECKED_IN',
+            )
+        ) or 0
+
+        items.append({
+            'id': evt.id,
+            'category': evt.category or 'SEMINAR',
+            'title_bn': evt.title_bn,
+            'title_en': evt.title_en,
+            'description_bn': evt.description_bn,
+            'description_en': evt.description_en,
+            'event_date': evt.event_date.isoformat() if evt.event_date else None,
+            'start_date': evt.start_date.isoformat() if evt.start_date else None,
+            'end_date': evt.end_date.isoformat() if evt.end_date else None,
+            'start_time': evt.start_time,
+            'end_time': evt.end_time,
+            'venue': evt.venue or evt.location_bn or 'পিজিসিবি হেড অফিস অডিটোরিয়াম',
+            'location_bn': evt.location_bn,
+            'location_en': evt.location_en,
+            'is_online': evt.is_online,
+            'capacity': evt.capacity,
+            'confirmed_count': confirmed_count,
+            'waitlist_count': waitlist_count,
+            'checked_in_count': checked_in_count,
+            'fee_amount': evt.fee_amount or 0,
+            'status': evt.status or 'PUBLISHED',
+            'is_published': evt.is_published,
+            'registration_enabled': evt.registration_enabled,
+            'certificate_eligible': evt.certificate_eligible,
+            'created_at': evt.created_at.isoformat() if evt.created_at else None,
+        })
+    return {'items': items, 'total': len(items)}
+
+
+@router.post('/events')
+def admin_create_event(
+    payload: dict,
+    request: Request,
+    admin: User = Depends(require_permission('events.write')),
+    db: Session = Depends(get_db),
+):
+    """Create a new institutional event."""
+    from app.services.event_service import CONTROLLED_CATEGORIES
+    cat = (payload.get('category') or 'SEMINAR').upper()
+    if cat not in CONTROLLED_CATEGORIES:
+        cat = 'SEMINAR'
+
+    evt_date = None
+    if payload.get('event_date'):
+        try:
+            evt_date = datetime.fromisoformat(payload['event_date'].replace('Z', '+00:00'))
+        except Exception:
+            evt_date = datetime.utcnow() + timedelta(days=7)
+
+    evt = Event(
+        category=cat,
+        title_bn=payload.get('title_bn') or 'নতুন ইভেন্ট',
+        title_en=payload.get('title_en'),
+        description_bn=payload.get('description_bn'),
+        description_en=payload.get('description_en'),
+        event_date=evt_date,
+        start_date=evt_date,
+        start_time=payload.get('start_time') or '10:00 AM',
+        end_time=payload.get('end_time') or '05:00 PM',
+        venue=payload.get('venue') or 'পিজিসিবি অডিটোরিয়াম',
+        location_bn=payload.get('location_bn') or 'ঢাকা',
+        location_en=payload.get('location_en') or 'Dhaka',
+        is_online=bool(payload.get('is_online', False)),
+        meeting_link=payload.get('meeting_link'),
+        capacity=int(payload['capacity']) if payload.get('capacity') else None,
+        fee_amount=int(payload.get('fee_amount') or 0),
+        status=payload.get('status') or 'PUBLISHED',
+        is_published=bool(payload.get('is_published', True)),
+        registration_enabled=bool(payload.get('registration_enabled', True)),
+        certificate_eligible=bool(payload.get('certificate_eligible', False)),
+        eligibility_criteria=payload.get('eligibility_criteria') or 'ALL_MEMBERS',
+    )
+    db.add(evt)
+    db.flush()
+    audit(db, admin, 'CREATE', 'EVENT', evt.id, _actor_ip(request))
+    db.commit()
+    db.refresh(evt)
+    return {'ok': True, 'id': evt.id, 'title_bn': evt.title_bn, 'status': evt.status}
+
+
+@router.get('/events/{event_id}')
+def admin_get_event(
+    event_id: int,
+    _: User = Depends(require_permission('events.read')),
+    db: Session = Depends(get_db),
+):
+    """Get single event with comprehensive attendance and capacity statistics."""
+    evt = db.get(Event, event_id)
+    if not evt:
+        raise HTTPException(404, 'Event not found')
+
+    confirmed_count = db.scalar(
+        select(func.count(EventRegistration.id)).where(
+            EventRegistration.event_id == evt.id,
+            EventRegistration.registration_status.in_(['CONFIRMED', 'REGISTERED', 'ATTENDED']),
+        )
+    ) or 0
+    waitlist_count = db.scalar(
+        select(func.count(EventRegistration.id)).where(
+            EventRegistration.event_id == evt.id,
+            EventRegistration.registration_status == 'WAITLISTED',
+        )
+    ) or 0
+    checked_in_count = db.scalar(
+        select(func.count(EventRegistration.id)).where(
+            EventRegistration.event_id == evt.id,
+            EventRegistration.attendance_status == 'CHECKED_IN',
+        )
+    ) or 0
+
+    return {
+        'id': evt.id,
+        'category': evt.category or 'SEMINAR',
+        'title_bn': evt.title_bn,
+        'title_en': evt.title_en,
+        'description_bn': evt.description_bn,
+        'description_en': evt.description_en,
+        'event_date': evt.event_date.isoformat() if evt.event_date else None,
+        'start_date': evt.start_date.isoformat() if evt.start_date else None,
+        'end_date': evt.end_date.isoformat() if evt.end_date else None,
+        'start_time': evt.start_time,
+        'end_time': evt.end_time,
+        'venue': evt.venue or evt.location_bn or 'পিজিসিবি অডিটোরিয়াম',
+        'location_bn': evt.location_bn,
+        'location_en': evt.location_en,
+        'is_online': evt.is_online,
+        'meeting_link': evt.meeting_link,
+        'capacity': evt.capacity,
+        'confirmed_count': confirmed_count,
+        'waitlist_count': waitlist_count,
+        'checked_in_count': checked_in_count,
+        'fee_amount': evt.fee_amount or 0,
+        'fee_currency': evt.fee_currency or 'BDT',
+        'status': evt.status or 'PUBLISHED',
+        'is_published': evt.is_published,
+        'registration_enabled': evt.registration_enabled,
+        'certificate_eligible': evt.certificate_eligible,
+        'eligibility_criteria': evt.eligibility_criteria,
+        'created_at': evt.created_at.isoformat() if evt.created_at else None,
+    }
+
+
+@router.patch('/events/{event_id}')
+@router.put('/events/{event_id}')
+def admin_update_event(
+    event_id: int,
+    payload: dict,
+    request: Request,
+    admin: User = Depends(require_permission('events.write')),
+    db: Session = Depends(get_db),
+):
+    """Update event properties."""
+    evt = db.get(Event, event_id)
+    if not evt:
+        raise HTTPException(404, 'Event not found')
+
+    for field in (
+        'category', 'title_bn', 'title_en', 'description_bn', 'description_en',
+        'start_time', 'end_time', 'venue', 'location_bn', 'location_en',
+        'is_online', 'meeting_link', 'capacity', 'fee_amount', 'status',
+        'is_published', 'registration_enabled', 'certificate_eligible',
+        'eligibility_criteria'
+    ):
+        if field in payload and payload[field] is not None:
+            setattr(evt, field, payload[field])
+
+    if 'event_date' in payload and payload['event_date']:
+        try:
+            evt.event_date = datetime.fromisoformat(payload['event_date'].replace('Z', '+00:00'))
+        except Exception:
+            pass
+
+    audit(db, admin, 'UPDATE', 'EVENT', evt.id, _actor_ip(request))
+    db.commit()
+    db.refresh(evt)
+    return {'ok': True, 'id': evt.id, 'title_bn': evt.title_bn, 'status': evt.status}
+
+
+@router.post('/events/{event_id}/publish')
+def admin_publish_event(
+    event_id: int,
+    request: Request,
+    admin: User = Depends(require_permission('events.write')),
+    db: Session = Depends(get_db),
+):
+    """Publish event and enable registrations."""
+    evt = db.get(Event, event_id)
+    if not evt:
+        raise HTTPException(404, 'Event not found')
+    evt.is_published = True
+    evt.status = 'REGISTRATION_OPEN'
+    evt.registration_enabled = True
+    audit(db, admin, 'PUBLISH', 'EVENT', evt.id, _actor_ip(request))
+    db.commit()
+    return {'ok': True, 'id': evt.id, 'status': evt.status}
+
+
+@router.post('/events/{event_id}/cancel')
+def admin_cancel_event(
+    event_id: int,
+    payload: dict | None = None,
+    request: Request = None,
+    admin: User = Depends(require_permission('events.write')),
+    db: Session = Depends(get_db),
+):
+    """Cancel event and send broadcast notifications to all registered participants."""
+    from app.services.notification_service import NotificationService
+    evt = db.get(Event, event_id)
+    if not evt:
+        raise HTTPException(404, 'Event not found')
+    evt.status = 'CANCELLED'
+    evt.registration_enabled = False
+
+    # Notify all registered users
+    registrations = db.scalars(
+        select(EventRegistration).where(
+            EventRegistration.event_id == event_id,
+            EventRegistration.registration_status.in_(['CONFIRMED', 'REGISTERED', 'WAITLISTED']),
+        )
+    ).all()
+
+    cancel_reason = (payload or {}).get('reason') or 'অনিবার্য কারণবশত ইভেন্টটি বাতিল করা হয়েছে।'
+    for r in registrations:
+        if r.user_id:
+            NotificationService.send_notification(
+                db=db,
+                user_id=r.user_id,
+                title_bn=f"ইভেন্ট বাতিল সংক্রান্ত নোটিশ: {evt.title_bn}",
+                title_en=f"Event Cancellation Notice: {evt.title_en or evt.title_bn}",
+                body_bn=f"'{evt.title_bn}' ইভেন্টটি বাতিল করা হয়েছে। কারণ: {cancel_reason}",
+                body_en=f"'{evt.title_en or evt.title_bn}' has been cancelled. Reason: {cancel_reason}",
+                notification_type='EVENT',
+                action_route="/member/events",
+                priority='HIGH',
+                entity_type='EVENT',
+                entity_id=evt.id,
+            )
+
+    audit(db, admin, 'CANCEL', 'EVENT', evt.id, _actor_ip(request))
+    db.commit()
+    return {'ok': True, 'id': evt.id, 'status': evt.status, 'notified_attendees': len(registrations)}
+
+
+@router.get('/events/{event_id}/registrations')
+def admin_get_event_registrations(
+    event_id: int,
+    format: str | None = None,
+    status: str | None = None,
+    _: User = Depends(require_permission('events.read')),
+    db: Session = Depends(get_db),
+):
+    """List event registrations with optional CSV download export."""
+    evt = db.get(Event, event_id)
+    if not evt:
+        raise HTTPException(404, 'Event not found')
+
+    stmt = select(EventRegistration).where(EventRegistration.event_id == event_id)
+    if status and status.upper() != 'ALL':
+        stmt = stmt.where(EventRegistration.registration_status == status.upper())
+
+    rows = db.scalars(stmt.order_by(EventRegistration.registered_at.desc())).all()
+
+    if format == 'csv':
+        buffer = StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow([
+            'Registration ID',
+            'Ticket Code',
+            'Name',
+            'Email',
+            'Phone',
+            'Organization',
+            'Status',
+            'Payment Status',
+            'Waitlist Position',
+            'Registered At',
+            'Attendance Status',
+            'Checked In At',
+        ])
+        for r in rows:
+            writer.writerow([
+                r.id,
+                r.ticket_code,
+                r.name,
+                r.email,
+                r.phone or '',
+                r.organization or '',
+                r.registration_status,
+                r.payment_status,
+                r.waitlist_position or '',
+                r.registered_at.strftime('%Y-%m-%d %H:%M') if r.registered_at else '',
+                r.attendance_status,
+                r.checked_in_at.strftime('%Y-%m-%d %H:%M') if r.checked_in_at else '',
+            ])
+        buffer.seek(0)
+        filename = f"event_{event_id}_registrations.csv"
+        return StreamingResponse(
+            iter([buffer.getvalue()]),
+            media_type='text/csv',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+        )
+
+    return {
+        'event_id': evt.id,
+        'title_bn': evt.title_bn,
+        'total': len(rows),
+        'registrations': [
+            {
+                'id': r.id,
+                'name': r.name,
+                'email': r.email,
+                'phone': r.phone,
+                'organization': r.organization,
+                'ticket_code': r.ticket_code,
+                'registration_status': r.registration_status,
+                'payment_status': r.payment_status,
+                'attendance_status': r.attendance_status,
+                'waitlist_position': r.waitlist_position,
+                'registered_at': r.registered_at.isoformat() if r.registered_at else None,
+                'checked_in_at': r.checked_in_at.isoformat() if r.checked_in_at else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get('/events/{event_id}/attendance')
+def admin_get_event_attendance(
+    event_id: int,
+    _: User = Depends(require_permission('events.read')),
+    db: Session = Depends(get_db),
+):
+    """Retrieve event attendance logs and check-in percentages."""
+    evt = db.get(Event, event_id)
+    if not evt:
+        raise HTTPException(404, 'Event not found')
+
+    total_registered = db.scalar(
+        select(func.count(EventRegistration.id)).where(
+            EventRegistration.event_id == event_id,
+            EventRegistration.registration_status.in_(['CONFIRMED', 'REGISTERED', 'ATTENDED']),
+        )
+    ) or 0
+
+    records = db.scalars(
+        select(EventAttendance)
+        .where(EventAttendance.event_id == event_id)
+        .order_by(EventAttendance.checked_in_at.desc())
+    ).all()
+
+    total_checked_in = len(records)
+    check_in_rate = round((total_checked_in / total_registered * 100), 1) if total_registered > 0 else 0.0
+
+    return {
+        'event_id': evt.id,
+        'title_bn': evt.title_bn,
+        'total_registered': total_registered,
+        'total_checked_in': total_checked_in,
+        'check_in_rate_percent': check_in_rate,
+        'attendance': [
+            {
+                'id': att.id,
+                'registration_id': att.registration_id,
+                'member_id': att.member_id,
+                'attendee_name': att.registration.name if att.registration else (att.member.user.name_bn if att.member and att.member.user else 'প্রকৌশলী'),
+                'ticket_code': att.registration.ticket_code if att.registration else None,
+                'checked_in_at': att.checked_in_at.isoformat() if att.checked_in_at else None,
+                'method': att.method,
+                'checked_in_by': att.checker.name_bn if att.checker else 'Admin',
+            }
+            for att in records
+        ],
+    }
+
+
+@router.post('/events/{event_id}/check-in')
+def admin_event_check_in(
+    event_id: int,
+    payload: dict,
+    request: Request,
+    admin: User = Depends(require_permission('events.write')),
+    db: Session = Depends(get_db),
+):
+    """
+    Rapid QR / Ticket Check-in Endpoint:
+    - Validates ticket_code or cryptographically signed QR token
+    - Prevents double check-in: 409 '⚠ ALREADY CHECKED IN (Checked in at 10:15 AM)'
+    - Records entry in EventAttendance
+    - Automatically issues Certificate of Participation if event is certificate-eligible!
+    """
+    from app.services.event_service import EventService
+    token_or_code = payload.get('qr_token') or payload.get('ticket_code') or payload.get('ticket_token')
+    if not token_or_code:
+        raise HTTPException(400, 'Ticket code or QR token is required')
+
+    method = payload.get('method') or 'QR'
+    client_ip = _actor_ip(request)
+    return EventService.check_in_attendee(
+        db=db,
+        event_id=event_id,
+        token_or_code=token_or_code,
+        admin_user=admin,
+        method=method,
+        ip=client_ip,
+    )
+
 
 

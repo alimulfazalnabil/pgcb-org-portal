@@ -166,10 +166,10 @@ export default function AdminEventsPage() {
                     ফি: {ev.fee_amount ? `৳${ev.fee_amount}` : 'বিনামূল্যে'}
                   </span>
                   <Link
-                    href="/admin/attendance"
+                    href={`/admin/events/${ev.id}/check-in`}
                     className="px-3 py-1.5 rounded-xl border border-border bg-surface hover:bg-card text-primary font-semibold text-xs inline-flex items-center gap-1"
                   >
-                    উপস্থিতি পরিচালনা <Ticket size={13} />
+                    কিউআর চেক-ইন ও উপস্থিতি <Ticket size={13} />
                   </Link>
                 </div>
               </div>

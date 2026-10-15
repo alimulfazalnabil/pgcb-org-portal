@@ -966,3 +966,180 @@ export interface PaymentReceiptData {
   verification_qr_data: string;
   download_pdf_url: string;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 6: Member Events & Platform-Wide Notifications
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface MemberEventItem {
+  id: number;
+  category: string;
+  title_bn: string;
+  title_en?: string | null;
+  description_bn?: string | null;
+  description_en?: string | null;
+  event_date?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  venue: string;
+  location_bn?: string | null;
+  location_en?: string | null;
+  is_online?: boolean;
+  meeting_link?: string | null;
+  capacity?: number | null;
+  confirmed_count: number;
+  waitlist_count: number;
+  seats_available?: number | null;
+  is_full?: boolean;
+  fee_amount: number;
+  fee_currency: string;
+  is_free: boolean;
+  status: string;
+  registration_enabled?: boolean;
+  certificate_eligible?: boolean;
+  eligibility_criteria?: string | null;
+  is_registered: boolean;
+  my_registration?: {
+    id: number;
+    registration_status: 'CONFIRMED' | 'WAITLISTED' | 'ATTENDED' | 'CANCELLED' | string;
+    attendance_status: string;
+    payment_status: string;
+    ticket_code: string;
+    waitlist_position?: number | null;
+    registered_at?: string | null;
+  } | null;
+}
+
+export interface MemberEventsResponse {
+  items: MemberEventItem[];
+  counts: {
+    all: number;
+    upcoming: number;
+    registered: number;
+    past: number;
+  };
+  categories: string[];
+}
+
+export interface MemberEventPass {
+  registration_id: number;
+  ticket_code: string;
+  qr_token: string;
+  qr_image_data_url: string;
+  registration_status: string;
+  attendance_status: string;
+  payment_status: string;
+  registered_at?: string | null;
+  checked_in_at?: string | null;
+  event: {
+    id: number;
+    title_bn: string;
+    title_en?: string | null;
+    category: string;
+    event_date?: string | null;
+    start_date?: string | null;
+    end_date?: string | null;
+    start_time?: string | null;
+    end_time?: string | null;
+    venue: string;
+    location_bn?: string | null;
+    location_en?: string | null;
+    is_online?: boolean;
+    meeting_link?: string | null;
+    certificate_eligible?: boolean;
+  };
+  attendee: {
+    name: string;
+    email: string;
+    phone?: string | null;
+    designation?: string | null;
+    membership_id?: string | null;
+    circle_name?: string | null;
+    organization?: string | null;
+  };
+  verification_url: string;
+}
+
+export interface MemberNotificationItem {
+  id: number;
+  title_bn: string;
+  title_en: string;
+  body_bn: string;
+  body_en: string;
+  type: string;
+  priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT' | string;
+  is_read: boolean;
+  read_at?: string | null;
+  created_at?: string | null;
+  relative_time_en: string;
+  relative_time_bn: string;
+  action?: {
+    label?: string;
+    label_bn?: string;
+    route?: string;
+  } | null;
+  data?: any;
+}
+
+export interface MemberNotificationsResponse {
+  items: MemberNotificationItem[];
+  unread_count: number;
+  total_count: number;
+}
+
+export interface NotificationCategoryInfo {
+  id: string;
+  title_bn: string;
+  description_bn: string;
+}
+
+export interface NotificationSettingsResponse {
+  ok: boolean;
+  preferences: Record<string, { in_app: boolean; email: boolean; sms: boolean }>;
+  categories: NotificationCategoryInfo[];
+}
+
+export interface AdminEventAttendanceRecord {
+  id: number;
+  registration_id?: number | null;
+  member_id?: number | null;
+  attendee_name: string;
+  ticket_code?: string | null;
+  checked_in_at?: string | null;
+  method: string;
+  checked_in_by: string;
+}
+
+export interface AdminEventAttendanceResponse {
+  event_id: number;
+  title_bn: string;
+  total_registered: number;
+  total_checked_in: number;
+  check_in_rate_percent: number;
+  attendance: AdminEventAttendanceRecord[];
+}
+
+export interface AdminCheckInResult {
+  ok: boolean;
+  message: string;
+  registration: {
+    id: number;
+    ticket_code: string;
+    attendee_name: string;
+    membership_id?: string | null;
+    registration_status: string;
+    attendance_status: string;
+  };
+  attendance: {
+    checked_in_at: string;
+    method: string;
+  };
+  certificate?: {
+    certificate_no: string;
+    title: string;
+    wallet_url: string;
+  } | null;
+}
+

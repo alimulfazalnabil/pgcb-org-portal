@@ -146,14 +146,14 @@ export function MemberLayout({
     {
       label_en: 'Events',
       label_bn: 'ইভেন্টস',
-      href: '/events',
+      href: '/member/events',
       icon: Calendar,
       exact: false,
     },
     {
       label_en: 'Notifications',
       label_bn: 'বিজ্ঞপ্তি',
-      href: '/portal?tab=notifications',
+      href: '/member/notifications',
       icon: Bell,
       badge: unreadCount > 0 ? unreadCount : undefined,
       exact: false,

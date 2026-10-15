@@ -55,6 +55,60 @@ def initialize_test_database():
                     conn.execute(text("ALTER TABLE certificates ADD COLUMN revoked_by_id INTEGER"))
                 if 'revocation_reason' not in cols:
                     conn.execute(text("ALTER TABLE certificates ADD COLUMN revocation_reason TEXT"))
+            if 'events' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('events')}
+                if 'category' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN category VARCHAR(50) DEFAULT 'SEMINAR'"))
+                if 'description_en' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN description_en TEXT"))
+                if 'start_date' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN start_date DATETIME"))
+                if 'end_date' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN end_date DATETIME"))
+                if 'start_time' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN start_time VARCHAR(30)"))
+                if 'end_time' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN end_time VARCHAR(30)"))
+                if 'venue' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN venue VARCHAR(300)"))
+                if 'location_en' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN location_en VARCHAR(300)"))
+                if 'is_online' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN is_online BOOLEAN DEFAULT 0"))
+                if 'meeting_link' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN meeting_link VARCHAR(1000)"))
+                if 'status' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN status VARCHAR(30) DEFAULT 'PUBLISHED'"))
+                if 'certificate_eligible' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN certificate_eligible BOOLEAN DEFAULT 0"))
+                if 'eligibility_criteria' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN eligibility_criteria VARCHAR(50) DEFAULT 'ALL_MEMBERS'"))
+                if 'updated_at' not in cols:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN updated_at DATETIME"))
+            if 'event_registrations' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('event_registrations')}
+                if 'member_id' not in cols:
+                    conn.execute(text("ALTER TABLE event_registrations ADD COLUMN member_id INTEGER"))
+                if 'waitlist_position' not in cols:
+                    conn.execute(text("ALTER TABLE event_registrations ADD COLUMN waitlist_position INTEGER"))
+                if 'qr_token' not in cols:
+                    conn.execute(text("ALTER TABLE event_registrations ADD COLUMN qr_token VARCHAR(128)"))
+                if 'cancelled_at' not in cols:
+                    conn.execute(text("ALTER TABLE event_registrations ADD COLUMN cancelled_at DATETIME"))
+                if 'cancellation_reason' not in cols:
+                    conn.execute(text("ALTER TABLE event_registrations ADD COLUMN cancellation_reason TEXT"))
+            if 'notifications' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('notifications')}
+                if 'title_en' not in cols:
+                    conn.execute(text("ALTER TABLE notifications ADD COLUMN title_en VARCHAR(300)"))
+                if 'body_en' not in cols:
+                    conn.execute(text("ALTER TABLE notifications ADD COLUMN body_en TEXT"))
+                if 'data_json' not in cols:
+                    conn.execute(text("ALTER TABLE notifications ADD COLUMN data_json JSON"))
+                if 'priority' not in cols:
+                    conn.execute(text("ALTER TABLE notifications ADD COLUMN priority VARCHAR(20) DEFAULT 'NORMAL'"))
+                if 'expires_at' not in cols:
+                    conn.execute(text("ALTER TABLE notifications ADD COLUMN expires_at DATETIME"))
             conn.commit()
     except Exception:
         pass

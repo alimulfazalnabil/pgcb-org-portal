@@ -1148,34 +1148,160 @@ def _execute_member_tools(
         ans_bn = f'আপনার সাম্প্রতিক {len(notifs)} টি নোটিফিকেশনের মধ্যে {unread_cnt} টি অপঠিত রয়েছে।'
         return tools_used, ans_en, ans_bn, actions
 
-    # 6. Member Events
-    if any(k in q_lower for k in ('my event', 'আমার ইভেন্ট', 'registered event')):
+    # 6. Member Registered Events & Event Pass Queries
+    if any(
+        k in q_lower
+        for k in (
+            'my event pass',
+            'event pass',
+            'আমার event pass',
+            'আমার পাস',
+            'পাস দেখাও',
+            'টিকিট দেখাও',
+            'ticket দেখাও',
+            'আমার টিকিট',
+            'show my pass',
+        )
+    ):
+        latest_reg = db.scalar(
+            select(EventRegistration)
+            .where(
+                (EventRegistration.user_id == user.id) | (EventRegistration.email == user.email),
+                EventRegistration.registration_status != 'CANCELLED',
+            )
+            .order_by(EventRegistration.id.desc())
+        )
+        if latest_reg:
+            evt = db.get(Event, latest_reg.event_id)
+            evt_title = evt.title_bn if evt else 'PGCB Event'
+            evt_date_str = evt.event_date.strftime('%d %B %Y') if (evt and evt.event_date) else 'Upcoming'
+            evt_venue = evt.venue or evt.location_bn or 'পিজিসিবি অডিটোরিয়াম' if evt else 'পিজিসিবি অডিটোরিয়াম'
+            pass_url = f"/member/events/{latest_reg.event_id}/pass"
+
+            pass_payload = {
+                'event_id': latest_reg.event_id,
+                'event_title': evt_title,
+                'ticket_code': latest_reg.ticket_code,
+                'status': latest_reg.registration_status,
+                'venue': evt_venue,
+                'pass_url': pass_url,
+            }
+            tools_used.append(
+                {
+                    'tool_name': 'member.get_event_pass',
+                    'authorized': True,
+                    'result': pass_payload,
+                }
+            )
+            actions.append(
+                {
+                    'type': 'VIEW_PASS',
+                    'action': 'VIEW_PASS',
+                    'label': 'View Digital Event Pass',
+                    'label_bn': 'ডিজিটাল ইভেন্ট পাস দেখুন',
+                    'url': pass_url,
+                }
+            )
+            if latest_reg.registration_status == 'WAITLISTED':
+                ans_en = f"You are currently on the waitlist (Position: #{latest_reg.waitlist_position or 1}) for '{evt_title}'. Your pass will be generated once your registration is confirmed."
+                ans_bn = f"আপনি বর্তমানে '{evt_title}' ইভেন্টের ওয়েটিং লিস্টে রয়েছেন (অবস্থান: #{latest_reg.waitlist_position or 1})। নিবন্ধন নিশ্চিত হলে ডিজিটাল পাস প্রস্তুত হবে।"
+            else:
+                ans_en = (
+                    f"Here is your official digital event pass for '{evt_title}':\n\n"
+                    f"Ticket Code: {latest_reg.ticket_code}\n"
+                    f"Date: {evt_date_str}\n"
+                    f"Venue: {evt_venue}\n"
+                    f"Status: {latest_reg.registration_status}\n\n"
+                    f"Click below to open and save your cryptographically signed QR Event Pass."
+                )
+                ans_bn = (
+                    f"'{evt_title}' ইভেন্টের জন্য আপনার অফিসিয়াল ডিজিটাল পাস প্রস্তুত:\n\n"
+                    f"টিকিট কোড: {latest_reg.ticket_code}\n"
+                    f"তারিখ: {evt_date_str}\n"
+                    f"ভেন্যু: {evt_venue}\n"
+                    f"অবস্থা: {latest_reg.registration_status}\n\n"
+                    f"নিচের বাটনে ক্লিক করে কিউআর কোডসহ ডিজিটাল ইভেন্ট পাস দেখুন ও প্রিন্ট করুন।"
+                )
+        else:
+            ans_en = "You have not registered for any active events yet. Browse the Event Center to find upcoming conferences and training."
+            ans_bn = "আপনার কোনো সক্রিয় ইভেন্ট রেজিস্ট্রেশন পাওয়া যায়নি। আসন্ন সম্মেলন ও প্রশিক্ষণে অংশ নিতে ইভেন্ট সেন্টারে যান।"
+            actions.append(
+                {
+                    'type': 'OPEN_EVENT',
+                    'action': 'OPEN_EVENT',
+                    'label': 'Browse Events',
+                    'label_bn': 'ইভেন্টসমূহ দেখুন',
+                    'url': '/member/events',
+                }
+            )
+        return tools_used, ans_en, ans_bn, actions
+
+    if any(
+        k in q_lower
+        for k in (
+            'my event',
+            'my events',
+            'registered event',
+            'registered events',
+            'আমার registered event',
+            'আমার registered events',
+            'আমার ইভেন্ট',
+            'কোন ইভেন্টে রেজিস্টার করেছি',
+            'রেজিস্ট্রেশন করেছি',
+        )
+    ):
         regs = list(
             db.scalars(
                 select(EventRegistration)
-                .where(EventRegistration.email == user.email)
+                .where(
+                    (EventRegistration.user_id == user.id) | (EventRegistration.email == user.email),
+                    EventRegistration.registration_status != 'CANCELLED',
+                )
                 .order_by(EventRegistration.id.desc())
-                .limit(5)
+                .limit(10)
             ).all()
         )
+        evt_ids = [r.event_id for r in regs]
+        events_by_id = {
+            e.id: e for e in db.scalars(select(Event).where(Event.id.in_(evt_ids))).all()
+        } if evt_ids else {}
+
+        items = []
+        for r in regs:
+            e = events_by_id.get(r.event_id)
+            items.append({
+                'event_id': r.event_id,
+                'title_bn': e.title_bn if e else 'ইভেন্ট',
+                'title_en': e.title_en if e else 'Event',
+                'ticket_code': r.ticket_code,
+                'status': r.registration_status,
+                'date': e.event_date.strftime('%d %B %Y') if (e and e.event_date) else 'TBD',
+            })
+
         tools_used.append(
             {
                 'tool_name': 'member.get_events',
                 'authorized': True,
-                'result': {'registered_events_count': len(regs)},
+                'result': {'registered_events_count': len(regs), 'events': items},
             }
         )
         actions.append(
             {
                 'type': 'OPEN_EVENT',
                 'action': 'OPEN_EVENT',
-                'label': 'Browse Events',
-                'label_bn': 'ইভেন্টসমূহ দেখুন',
-                'url': '/events',
+                'label': 'Member Events Center',
+                'label_bn': 'ইভেন্ট সেন্টার দেখুন',
+                'url': '/member/events',
             }
         )
-        ans_en = f'You have {len(regs)} event registration(s) associated with your account.'
-        ans_bn = f'আপনার অ্যাকাউন্টের সাথে {len(regs)} টি ইভেন্ট নিবন্ধন যুক্ত রয়েছে।'
+        if items:
+            event_lines_bn = "\n".join([f"- **{it['title_bn']}** (তারিখ: {it['date']}, স্ট্যাটাস: {it['status']})" for it in items[:4]])
+            event_lines_en = "\n".join([f"- **{it['title_en']}** (Date: {it['date']}, Status: {it['status']})" for it in items[:4]])
+            ans_en = f"You have {len(regs)} active event registration(s):\n\n{event_lines_en}\n\nYou can access your event passes from the Member Portal."
+            ans_bn = f"আপনার মোট {len(regs)} টি সক্রিয় ইভেন্ট রেজিস্ট্রেশন রয়েছে:\n\n{event_lines_bn}\n\nসদস্য পোর্টাল থেকে আপনি আপনার ডিজিটাল পাস সংগ্রহ করতে পারবেন।"
+        else:
+            ans_en = "You currently have 0 active event registrations. You can explore upcoming programs in the Events Center."
+            ans_bn = "বর্তমানে আপনার কোনো সক্রিয় ইভেন্ট রেজিস্ট্রেশন নেই। আসন্ন কর্মসূচি দেখতে ইভেন্ট সেন্টারে যান।"
         return tools_used, ans_en, ans_bn, actions
 
     # 7. Pending Documents Query ("আমার কোন documents এখনও pending?")

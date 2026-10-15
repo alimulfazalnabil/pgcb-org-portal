@@ -216,7 +216,7 @@ export default function MemberPortal() {
       if (a.status === 'fulfilled') setApplication(a.value);
       if (tlRes.status === 'fulfilled') setTimeline(tlRes.value);
       if (d.status === 'fulfilled') setDocs(d.value);
-      if (n.status === 'fulfilled') setNotes(n.value);
+      if (n.status === 'fulfilled') setNotes(Array.isArray(n.value) ? n.value : (n.value?.items || []));
       if (c.status === 'fulfilled') setCircles(c.value);
       if (regRes.status === 'fulfilled') setRegistrations(regRes.value);
       if (pay.status === 'fulfilled') setPayments(pay.value);

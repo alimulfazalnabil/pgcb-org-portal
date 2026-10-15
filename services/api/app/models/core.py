@@ -192,19 +192,33 @@ class Journal(Base):
 class Event(Base):
     __tablename__ = 'events'
     id: Mapped[int] = mapped_column(primary_key=True)
+    category: Mapped[str] = mapped_column(String(50), default='SEMINAR', index=True)
     title_bn: Mapped[str] = mapped_column(String(500), index=True)
     title_en: Mapped[str | None] = mapped_column(String(500), nullable=True)
     description_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description_en: Mapped[str | None] = mapped_column(Text, nullable=True)
     event_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    start_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    end_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    start_time: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    end_time: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    venue: Mapped[str | None] = mapped_column(String(300), nullable=True)
     location_bn: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    location_en: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    is_online: Mapped[bool] = mapped_column(Boolean, default=False)
+    meeting_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     cover_image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     registration_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     registration_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     fee_amount: Mapped[int] = mapped_column(Integer, default=0)
     fee_currency: Mapped[str] = mapped_column(String(10), default='BDT')
+    status: Mapped[str] = mapped_column(String(30), default='PUBLISHED', index=True)
+    certificate_eligible: Mapped[bool] = mapped_column(Boolean, default=False)
+    eligibility_criteria: Mapped[str] = mapped_column(String(50), default='ALL_MEMBERS')
     is_published: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class MediaAsset(Base):
     __tablename__ = 'media_assets'
@@ -234,10 +248,33 @@ class Notification(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
     title_bn: Mapped[str] = mapped_column(String(300))
+    title_en: Mapped[str | None] = mapped_column(String(300), nullable=True)
     body_bn: Mapped[str] = mapped_column(Text)
-    notification_type: Mapped[str] = mapped_column(String(50), default='GENERAL')
+    body_en: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notification_type: Mapped[str] = mapped_column(String(50), default='GENERAL', index=True)
+    data_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    priority: Mapped[str] = mapped_column(String(20), default='NORMAL')
     read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship('User')
+
+
+class NotificationPreference(Base):
+    __tablename__ = 'notification_preferences'
+    __table_args__ = (UniqueConstraint('user_id', 'category', name='uq_user_notification_preference'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
+    category: Mapped[str] = mapped_column(String(50), index=True)  # MEMBERSHIP, EVENTS, PAYMENTS, SYSTEM, ANNOUNCEMENTS
+    in_app: Mapped[bool] = mapped_column(Boolean, default=True)
+    email: Mapped[bool] = mapped_column(Boolean, default=True)
+    sms: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship('User')
+
 
 class AuditLog(Base):
     __tablename__ = 'audit_logs'
@@ -293,17 +330,47 @@ class EventRegistration(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey('events.id', ondelete='CASCADE'), index=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True)
+    member_id: Mapped[int | None] = mapped_column(ForeignKey('members.id', ondelete='SET NULL'), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
     email: Mapped[str] = mapped_column(String(255), index=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     organization: Mapped[str | None] = mapped_column(String(250), nullable=True)
     ticket_code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    qr_token: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     registration_status: Mapped[str] = mapped_column(String(30), default='REGISTERED', index=True)
     attendance_status: Mapped[str] = mapped_column(String(30), default='NOT_CHECKED_IN', index=True)
     payment_status: Mapped[str] = mapped_column(String(30), default='NOT_REQUIRED', index=True)
+    waitlist_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     registered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     checked_in_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     checked_in_by: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    event = relationship('Event')
+    user = relationship('User', foreign_keys=[user_id])
+    member = relationship('Member', foreign_keys=[member_id])
+
+
+class EventAttendance(Base):
+    __tablename__ = 'event_attendance'
+    __table_args__ = (UniqueConstraint('event_id', 'member_id', name='uq_event_attendance_member'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey('events.id', ondelete='CASCADE'), index=True)
+    registration_id: Mapped[int | None] = mapped_column(ForeignKey('event_registrations.id', ondelete='SET NULL'), nullable=True, index=True)
+    member_id: Mapped[int | None] = mapped_column(ForeignKey('members.id', ondelete='SET NULL'), nullable=True, index=True)
+    checked_in_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    checked_out_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    checked_in_by: Mapped[int | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    method: Mapped[str] = mapped_column(String(30), default='QR')  # QR, ADMIN, MANUAL, IMPORT
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    event = relationship('Event')
+    registration = relationship('EventRegistration')
+    member = relationship('Member')
+    checker = relationship('User', foreign_keys=[checked_in_by])
+
 
 class PaymentTransaction(Base):
     __tablename__ = 'payment_transactions'
