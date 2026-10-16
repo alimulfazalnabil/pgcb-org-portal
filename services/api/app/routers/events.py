@@ -386,6 +386,34 @@ def get_member_event_pass(
     img.save(buf, format="PNG")
     b64_qr = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
 
+    event_info = {
+        'id': evt.id,
+        'category': evt.category or 'SEMINAR',
+        'title_bn': evt.title_bn,
+        'title_en': evt.title_en,
+        'event_date': evt.event_date.isoformat() if evt.event_date else None,
+        'start_date': evt.start_date.isoformat() if evt.start_date else None,
+        'end_date': evt.end_date.isoformat() if evt.end_date else None,
+        'start_time': evt.start_time or '10:00 AM',
+        'end_time': evt.end_time or '05:00 PM',
+        'venue': evt.venue or evt.location_bn or 'পিজিসিবি অডিটোরিয়াম, ঢাকা',
+        'location_bn': evt.location_bn,
+        'location_en': evt.location_en,
+        'is_online': evt.is_online,
+        'meeting_link': evt.meeting_link,
+    }
+
+    attendee_info = {
+        'name': reg.name,
+        'email': reg.email,
+        'phone': reg.phone,
+        'organization': reg.organization,
+        'membership_id': member.membership_id if member else None,
+        'employee_id': member.employee_id if member else None,
+        'designation_bn': member.designation_bn if member else None,
+        'circle_name': member.circle.name_bn if member and member.circle else None,
+    }
+
     return {
         'ok': True,
         'pass': {
@@ -398,33 +426,11 @@ def get_member_event_pass(
             'payment_status': reg.payment_status,
             'registered_at': reg.registered_at.isoformat() if reg.registered_at else None,
             'checked_in_at': reg.checked_in_at.isoformat() if reg.checked_in_at else None,
+            'event': event_info,
+            'attendee': attendee_info,
         },
-        'event': {
-            'id': evt.id,
-            'category': evt.category or 'SEMINAR',
-            'title_bn': evt.title_bn,
-            'title_en': evt.title_en,
-            'event_date': evt.event_date.isoformat() if evt.event_date else None,
-            'start_date': evt.start_date.isoformat() if evt.start_date else None,
-            'end_date': evt.end_date.isoformat() if evt.end_date else None,
-            'start_time': evt.start_time or '10:00 AM',
-            'end_time': evt.end_time or '05:00 PM',
-            'venue': evt.venue or evt.location_bn or 'পিজিসিবি অডিটোরিয়াম, ঢাকা',
-            'location_bn': evt.location_bn,
-            'location_en': evt.location_en,
-            'is_online': evt.is_online,
-            'meeting_link': evt.meeting_link,
-        },
-        'attendee': {
-            'name': reg.name,
-            'email': reg.email,
-            'phone': reg.phone,
-            'organization': reg.organization,
-            'membership_id': member.membership_id if member else None,
-            'employee_id': member.employee_id if member else None,
-            'designation_bn': member.designation_bn if member else None,
-            'circle_name': member.circle.name_bn if member and member.circle else None,
-        },
+        'event': event_info,
+        'attendee': attendee_info,
     }
 
 

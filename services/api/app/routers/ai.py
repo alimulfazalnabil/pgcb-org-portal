@@ -36,9 +36,11 @@ from app.models import (
     Notification,
     Payment,
     PaymentTransaction,
+    SupportTicket,
     User,
 )
 from app.services import audit
+from app.services import ai_tools
 from app.services.ai_provider import GROUNDED_SYSTEM_PROMPT, get_ai_provider
 from app.services.knowledge_service import (
     can_user_access_document,
@@ -50,11 +52,11 @@ from app.services.knowledge_service import (
 
 router = APIRouter(tags=['ai-intelligence'])
 
-# Ensure AI conversation tables exist even on pre-initialized SQLite test DBs
+# Ensure AI conversation and support tables exist even on pre-initialized SQLite test DBs
 try:
     Base.metadata.create_all(
         bind=engine,
-        tables=[AIConversation.__table__, AIMessage.__table__],
+        tables=[AIConversation.__table__, AIMessage.__table__, SupportTicket.__table__],
         checkfirst=True,
     )
 except Exception:
@@ -78,10 +80,11 @@ PROMPT_INJECTION_PATTERNS = [
 ]
 
 CROSS_MEMBER_PRIVACY_PATTERNS = [
-    r"(?:another|other)\s+member(?:'s)?\s+(?:payment|certificate|nid|phone|password|salary|record)",
-    r'অন্য\s+সদস্যের\s+(?:পেমেন্ট|রসিদ|সনদ|এনআইডি|ফোন|তথ্য)',
-    r'payment\s+(?:history|status)\s+(?:of|for)\s+member\s+pgd-',
-    r'pgd-\d{4}-\d{3,6}\s+এর\s+(?:পেমেন্ট|রসিদ|ব্যক্তিগত)',
+    r"(?:another|other)\s+member(?:'s)?\s+(?:payment|certificate|nid|phone|password|salary|record|data|details|profile)",
+    r'অন্য\s+সদস্যের\s+(?:পেমেন্ট|রসিদ|সনদ|এনআইডি|ফোন|তথ্য|ব্যক্তিগত)',
+    r'(?:payment|receipt|history|status|private\s+data|records?)\s+(?:of|for)\s+member\s+(?:pgd-|pgcb-)',
+    r'private\s+data\s+(?:of|for)\s+member\s+',
+    r'(?:pgd|pgcb)[\w-]+\s+এর\s+(?:পেমেন্ট|রসিদ|ব্যক্তিগত|তথ্য)',
 ]
 
 # Sliding-window rate limit tracker for AI chat (per user/IP)
@@ -116,9 +119,9 @@ def _detect_cross_member_privacy_violation(question: str, current_member_id_str:
     for pat in CROSS_MEMBER_PRIVACY_PATTERNS:
         if re.search(pat, q_low):
             return True
-    # Check if user is asking for a specific PGD-XXXX ID's private payment/receipt that is not their own
-    match = re.search(r'\b(pgd-\d{4}-\d{3,6})\b', q_low)
-    if match and any(w in q_low for w in ('payment', 'receipt', 'transaction', 'nid', 'পেমেন্ট', 'রসিদ', 'এনআইডি')):
+    # Check if user is asking for a specific PGCB-XXXX or PGD-XXXX ID's private data/records that is not their own
+    match = re.search(r'\b((?:pgcb-mem|pgd|pgcb)-[a-z0-9-]+)\b', q_low)
+    if match and any(w in q_low for w in ('payment', 'receipt', 'transaction', 'nid', 'private', 'data', 'details', 'profile', 'records', 'পেমেন্ট', 'রসিদ', 'এনআইডি', 'ব্যক্তিগত', 'তথ্য')):
         asked_id = match.group(1).upper()
         if not current_member_id_str or asked_id != current_member_id_str.upper():
             return True
@@ -703,11 +706,117 @@ def _execute_member_tools(
     actions: list[dict[str, Any]] = []
     member = db.scalar(select(Member).where(Member.user_id == user.id))
 
+    # 0.1 Safe Confirmation Workflow for Membership Renewal / Mutating Intent
+    if any(k in q_lower for k in ('renew my membership', 'renew membership', 'how do i renew', 'how to renew', 'সদস্যপদ নবায়ন', 'সদস্যপদ নবায়ন', 'সদস্যপদ রিনিউ', 'নবায়ন করতে চাই', 'নবায়ন করতে চাই', 'রিনিউ করতে চাই', 'মেয়াদ বাড়াতে', 'নবায়ন ফি')):
+        status_info = ai_tools.tool_get_membership_status(db, user, member)
+        tools_used.append({
+            'tool_name': 'get_membership_status',
+            'authorized': True,
+            'result': status_info,
+        })
+        renewal_fee = status_info.get('renewal_fee_bdt', 2000)
+        curr_status = status_info.get('status', 'ACTIVE')
+        valid_until = status_info.get('valid_until', 'N/A')
+
+        actions.append({
+            'type': 'CONFIRM_RENEWAL',
+            'action': 'CONFIRM_RENEWAL',
+            'label': f'Proceed to Payment (৳{renewal_fee:,})',
+            'label_bn': f'পেমেন্টে এগিয়ে যান (৳{renewal_fee:,})',
+            'url': '/member/payments',
+            'is_primary': True,
+        })
+        actions.append({
+            'type': 'NAVIGATE',
+            'action': 'NAVIGATE',
+            'label': 'View Membership Details',
+            'label_bn': 'সদস্যপদ বিবরণ দেখুন',
+            'url': '/member/membership',
+        })
+        actions.append({
+            'type': 'CANCEL',
+            'action': 'CANCEL',
+            'label': 'Cancel',
+            'label_bn': 'বাতিল করুন',
+            'url': '/member/ai-assistant',
+        })
+
+        ans_en = (
+            f"Your current membership status is {curr_status} (Valid until: {valid_until}).\n\n"
+            f"Annual Membership Renewal Fee is ৳{renewal_fee:,} BDT.\n\n"
+            f"Confirmation required: Would you like to proceed to payment now to renew your membership? "
+            f"Click '[Proceed to Payment]' below to complete your renewal safely via the Payment Center."
+        )
+        ans_bn = (
+            f"আপনার বর্তমান সদস্যপদ অবস্থা: {curr_status} (মেয়াদ: {valid_until})।\n\n"
+            f"বার্ষিক সদস্যপদ নবায়ন ফি: ৳{renewal_fee:,} টাকা।\n\n"
+            f"নিশ্চিতকরণ আবশ্যক: আপনি কি এখন নবায়ন ফি পরিশোধ করতে চান? "
+            f"নিচের '[পেমেন্টে এগিয়ে যান]' বাটনে ক্লিক করে নিরাপদে নবায়ন সম্পন্ন করুন।"
+        )
+        return tools_used, ans_en, ans_bn, actions
+
+    # 0.2 Profile Completion Tool
+    if any(k in q_lower for k in ('profile completion', 'complete profile', 'প্রোফাইল পূরণ', 'প্রোফাইল কতটুকু', 'প্রোফাইল কমপ্লিট', 'প্রোফাইল সম্পূর্ণ', 'কী বাকি আছে')):
+        comp_info = ai_tools.tool_get_profile_completion(db, user, member)
+        tools_used.append({
+            'tool_name': 'get_profile_completion',
+            'authorized': True,
+            'result': comp_info,
+        })
+        pct = comp_info['completion_percentage']
+        missing = comp_info['missing_fields']
+        actions.append({
+            'type': 'EDIT_PROFILE',
+            'action': 'EDIT_PROFILE',
+            'label': 'Complete Profile',
+            'label_bn': 'প্রোফাইল সম্পূর্ণ করুন',
+            'url': '/member/profile',
+            'is_primary': True,
+        })
+        missing_str_en = ", ".join(missing) if missing else "None"
+        missing_str_bn = ", ".join(missing) if missing else "কিছুই বাকি নেই"
+        ans_en = (
+            f"Your profile completion score is currently at {pct}%.\n\n"
+            f"Completed fields: {len(comp_info['completed_fields'])}/10\n"
+            f"Missing fields: {missing_str_en}\n\n"
+            f"Please complete your profile to reach 100% verified status."
+        )
+        ans_bn = (
+            f"আপনার প্রোফাইল বর্তমানে {pct}% সম্পূর্ণ।\n\n"
+            f"সম্পূর্ণ হয়েছে: {len(comp_info['completed_fields'])}/১০ টি তথ্য\n"
+            f"বাকি রয়েছে: {missing_str_bn}\n\n"
+            f"১০০% ভেরিফিকেশন নিশ্চিত করতে আপনার প্রোফাইল সম্পূর্ণ করুন।"
+        )
+        return tools_used, ans_en, ans_bn, actions
+
+    # 0.3 Membership History Tool
+    if any(k in q_lower for k in ('membership history', 'আমার হিস্ট্রি', 'সদস্যপদ ইতিহাস', 'রিনিউয়াল ইতিহাস', 'আবেদনের ইতিহাস')):
+        hist_info = ai_tools.tool_get_membership_history(db, user, member)
+        tools_used.append({
+            'tool_name': 'get_membership_history',
+            'authorized': True,
+            'result': hist_info,
+        })
+        actions.append({
+            'type': 'OPEN_MEMBERSHIP',
+            'action': 'OPEN_MEMBERSHIP',
+            'label': 'Membership Center',
+            'label_bn': 'সদস্যপদ দেখুন',
+            'url': '/member/membership',
+        })
+        timeline_items = hist_info.get('timeline', [])
+        lines_en = [f"• {t['date']}: {t['event']} ({t['details']})" for t in timeline_items[:4]]
+        lines_bn = [f"• {t['date']}: {t['event']} ({t['details']})" for t in timeline_items[:4]]
+        ans_en = f"Your membership timeline ({len(timeline_items)} events):\n\n" + "\n".join(lines_en)
+        ans_bn = f"আপনার সদস্যপদের কার্যক্রমের বিবরণ ({len(timeline_items)} টি ঘটনা):\n\n" + "\n".join(lines_bn)
+        return tools_used, ans_en, ans_bn, actions
+
     # 1. Member Profile & Membership Status
     if any(
         k in q_lower
         for k in (
             'my membership',
+            'membership status',
             'my status',
             'my id',
             'my profile',
@@ -715,6 +824,10 @@ def _execute_member_tools(
             'আমার স্ট্যাটাস',
             'সদস্যপদের অবস্থা',
             'আমার প্রোফাইল',
+            'amar membership',
+            'amar status',
+            'amar profile',
+            'status ki',
             'মেয়াদ',
             'মেয়াদ',
         )
@@ -757,6 +870,20 @@ def _execute_member_tools(
             'status': status_val,
             'valid_until': exp_val,
         }
+        tools_used.append(
+            {
+                'tool_name': 'get_membership_status',
+                'authorized': True,
+                'result': profile_payload,
+            }
+        )
+        tools_used.append(
+            {
+                'tool_name': 'get_member_profile',
+                'authorized': True,
+                'result': profile_payload,
+            }
+        )
         tools_used.append(
             {
                 'tool_name': 'my_membership_status',
@@ -879,6 +1006,20 @@ def _execute_member_tools(
             'latest_status': latest_status,
             'latest_date': latest_date,
         }
+        tools_used.append(
+            {
+                'tool_name': 'get_payment_history',
+                'authorized': True,
+                'result': result_payload,
+            }
+        )
+        tools_used.append(
+            {
+                'tool_name': 'get_payment_status',
+                'authorized': True,
+                'result': result_payload,
+            }
+        )
         tools_used.append(
             {
                 'tool_name': 'my_payment_history',
@@ -1024,6 +1165,13 @@ def _execute_member_tools(
         }
         tools_used.append(
             {
+                'tool_name': 'get_certificates',
+                'authorized': True,
+                'result': cert_payload,
+            }
+        )
+        tools_used.append(
+            {
                 'tool_name': 'my_certificates',
                 'authorized': True,
                 'result': cert_payload,
@@ -1088,6 +1236,13 @@ def _execute_member_tools(
         app_payload = {'application_status': app_status, 'application_no': app_no}
         tools_used.append(
             {
+                'tool_name': 'get_application_status',
+                'authorized': True,
+                'result': app_payload,
+            }
+        )
+        tools_used.append(
+            {
                 'tool_name': 'my_application_status',
                 'authorized': True,
                 'result': app_payload,
@@ -1124,6 +1279,17 @@ def _execute_member_tools(
             ).all()
         )
         unread_cnt = sum(1 for n in notifs if not getattr(n, 'is_read', False))
+        tools_used.append(
+            {
+                'tool_name': 'get_notifications',
+                'authorized': True,
+                'result': {
+                    'recent_count': len(notifs),
+                    'unread_count': unread_cnt,
+                    'items': [n.title_bn for n in notifs[:3]],
+                },
+            }
+        )
         tools_used.append(
             {
                 'tool_name': 'member.get_notifications',
@@ -1223,8 +1389,8 @@ def _execute_member_tools(
                     f"নিচের বাটনে ক্লিক করে কিউআর কোডসহ ডিজিটাল ইভেন্ট পাস দেখুন ও প্রিন্ট করুন।"
                 )
         else:
-            ans_en = "You have not registered for any active events yet. Browse the Event Center to find upcoming conferences and training."
-            ans_bn = "আপনার কোনো সক্রিয় ইভেন্ট রেজিস্ট্রেশন পাওয়া যায়নি। আসন্ন সম্মেলন ও প্রশিক্ষণে অংশ নিতে ইভেন্ট সেন্টারে যান।"
+            ans_en = "You have not registered for any active events yet, so no digital event pass or ticket is available. Browse the Event Center to find upcoming conferences and training."
+            ans_bn = "আপনার কোনো সক্রিয় ইভেন্ট রেজিস্ট্রেশন বা ডিজিটাল পাস (Event Pass / Ticket) পাওয়া যায়নি। আসন্ন সম্মেলন ও প্রশিক্ষণে অংশ নিতে ইভেন্ট সেন্টারে যান।"
             actions.append(
                 {
                     'type': 'OPEN_EVENT',
@@ -1280,6 +1446,13 @@ def _execute_member_tools(
 
         tools_used.append(
             {
+                'tool_name': 'get_registered_events',
+                'authorized': True,
+                'result': {'registered_events_count': len(regs), 'events': items},
+            }
+        )
+        tools_used.append(
+            {
                 'tool_name': 'member.get_events',
                 'authorized': True,
                 'result': {'registered_events_count': len(regs), 'events': items},
@@ -1319,6 +1492,25 @@ def _execute_member_tools(
                     .order_by(MemberDocument.id.desc())
                 ).all()
             )
+        tools_used.append(
+            {
+                'tool_name': 'get_pending_documents',
+                'authorized': True,
+                'result': {
+                    'pending_count': len(mem_docs),
+                    'documents': [
+                        {
+                            'id': d.id,
+                            'title': d.title or d.document_type,
+                            'type': d.document_type,
+                            'status': 'Under Review' if d.review_status in ('PENDING', 'UNDER_REVIEW') else d.review_status,
+                            'submitted_at': d.created_at.strftime('%d %B %Y') if d.created_at else 'N/A',
+                        }
+                        for d in mem_docs
+                    ],
+                },
+            }
+        )
         tools_used.append(
             {
                 'tool_name': 'member.get_pending_documents',
@@ -1376,6 +1568,17 @@ def _execute_member_tools(
             elif member.validity_date:
                 valid_until_str = member.validity_date.strftime('%d %B %Y')
 
+        tools_used.append(
+            {
+                'tool_name': 'get_digital_id',
+                'authorized': True,
+                'result': {
+                    'status': did_status,
+                    'is_valid': is_active,
+                    'valid_until': valid_until_str,
+                },
+            }
+        )
         tools_used.append(
             {
                 'tool_name': 'member.get_digital_id_validity',
@@ -2793,3 +2996,466 @@ def get_admin_intelligence_dashboard(
         'revenue_this_month_formatted': f'৳{revenue_month:,}',
         'circles_by_pending_applications': circles_by_pending,
     }
+
+
+# ===========================================================================
+# Phase 7: Authenticated Member-Aware AI Service & Support Escalation
+# ===========================================================================
+
+class MemberAIChatPayload(BaseModel):
+    message: str | None = None
+    question: str | None = None
+    conversation_id: int | None = None
+    language: str | None = None
+
+
+class SupportEscalationPayload(BaseModel):
+    conversation_id: int | None = None
+    subject: str = Field(min_length=3, max_length=300)
+    description: str = Field(min_length=5)
+    category: str = Field(default='GENERAL')
+    priority: str = Field(default='NORMAL')
+
+
+@router.post('/member/ai/chat')
+async def member_ai_chat(
+    payload: MemberAIChatPayload,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Phase 7: Authenticated Member-Aware AI Chat Service.
+    - Strictly bound to current_user (no arbitrary member_id parameter accepted).
+    - Prevents cross-member data access & SQL injection.
+    - Dispatches to 13 controlled tools with PII masking.
+    - Returns actionable buttons and versioned source citations.
+    """
+    t0 = time.perf_counter()
+    ensure_default_knowledge_seeded(db)
+
+    question = (payload.message or payload.question or '').strip()
+    if len(question) < 2:
+        raise HTTPException(status_code=422, detail='Message must be at least 2 characters.')
+    q_lower = question.lower()
+
+    # Rate limiting
+    _check_ai_rate_limit(f"user:{user.id}")
+
+    # Detect language
+    effective_lang = _detect_language(question, payload.language)
+
+    # Resolve member
+    current_member = db.scalar(select(Member).where(Member.user_id == user.id))
+    current_mid_str = current_member.membership_id if current_member else None
+
+    # Guardrails: Prompt injection & cross-member privacy rejection
+    if _detect_prompt_injection(question) or _detect_cross_member_privacy_violation(question, current_mid_str):
+        elapsed_ms = max(1, int((time.perf_counter() - t0) * 1000))
+        log_item = AIQueryLog(
+            user_id=user.id,
+            user_role=canonical_role(user.role),
+            assistant_mode='MEMBER',
+            question=_sanitize_pii(question[:500]),
+            question_category='SECURITY_BLOCKED',
+            answer_preview='Prompt injection or cross-member privacy violation blocked.',
+            confidence=0.0,
+            unanswered=True,
+            security_flagged=True,
+            documents_searched=0,
+            sources_cited='[]',
+            tools_called='[]',
+            response_time_ms=elapsed_ms,
+            token_count=len(question.split()),
+            estimated_cost_usd=0.0,
+        )
+        db.add(log_item)
+        audit(db, user, 'ai.security.prompt_injection_blocked', 'AIQueryLog', 'security')
+        db.commit()
+
+        ans_en_sec = (
+            "This request was blocked by PGCB AI Security Guardrails. "
+            "The assistant cannot disclose other members' private records, execute raw database commands, or alter records without verification."
+        )
+        ans_bn_sec = (
+            "পিজিসিবি এআই নিরাপত্তা নীতিমালার কারণে এই অনুরোধটি ব্লক করা হয়েছে। "
+            "সহকারী কোনো অবস্থাতেই অন্য সদস্যের ব্যক্তিগত তথ্য প্রকাশ বা অননুমোদিত কমান্ড সম্পাদন করতে পারে না।"
+        )
+        return {
+            'message': ans_bn_sec if effective_lang == 'bn' else ans_en_sec,
+            'answer': ans_bn_sec if effective_lang == 'bn' else ans_en_sec,
+            'language': effective_lang,
+            'status': 'BLOCKED_SECURITY',
+            'security_flagged': True,
+            'confidence': 0.0,
+            'actions': [
+                {
+                    'action': 'CONTACT_SECRETARIAT',
+                    'label': 'Contact Secretariat',
+                    'label_bn': 'সচিবালয়ে যোগাযোগ করুন',
+                    'url': '/contact',
+                }
+            ],
+            'sources': [],
+            'tools_used': [],
+            'conversation_id': payload.conversation_id,
+            'intent': 'SECURITY_BLOCKED',
+        }
+
+    # Conversation history resolution
+    conv: AIConversation | None = None
+    if payload.conversation_id is not None:
+        conv = db.get(AIConversation, payload.conversation_id)
+        if conv and conv.user_id != user.id:
+            conv = None  # IDOR prevention
+
+    if conv is None:
+        now_conv = datetime.utcnow()
+        conv = AIConversation(
+            user_id=user.id,
+            session_id=f"member_{user.id}_{int(time.time())}",
+            title=question[:120],
+            mode='MEMBER',
+            language=effective_lang,
+            created_at=now_conv,
+            updated_at=now_conv,
+        )
+        db.add(conv)
+        db.flush()
+
+    # Execute authorized member tools
+    tools_used, tool_ans_en, tool_ans_bn, structured_actions = _execute_member_tools(db, user, q_lower)
+
+    # Audit tool executions
+    for t_item in tools_used:
+        audit(db, user, 'AI_TOOL_CALLED', 'AI_TOOL', t_item.get('tool_name'))
+        audit(db, user, 'AI_TOOL_RESULT', 'AI_TOOL', t_item.get('tool_name'))
+
+    sources: list[dict[str, Any]] = []
+    unanswered = False
+    confidence = 0.95
+    requires_confirmation = False
+    confirmation_payload: dict[str, Any] | None = None
+
+    # Check if this was a renewal confirmation workflow
+    if any(a.get('type') == 'CONFIRM_RENEWAL' for a in structured_actions):
+        requires_confirmation = True
+        confirmation_payload = {
+            'action': 'RENEWAL',
+            'fee_bdt': 2000,
+            'target_url': '/member/payments',
+        }
+
+    if tool_ans_en:
+        answer_en = tool_ans_en
+        answer_bn = tool_ans_bn or tool_ans_en
+        q_category = 'MEMBER_DATA'
+    else:
+        # Knowledge Base Semantic Search (RAG)
+        kb_search = search_knowledge_base(
+            db,
+            query=question,
+            user=user,
+            circle_id=current_member.circle_id if current_member else None,
+            include_historical=False,
+            limit=3,
+        )
+        passages = kb_search.get('results', [])
+
+        for p in passages:
+            sources.append({
+                'document_id': p['document_id'],
+                'title': p['title'],
+                'title_bn': p.get('title_bn') or p['title'],
+                'category': p.get('category'),
+                'version': p.get('version', '2026.1'),
+                'section': p.get('section'),
+                'page': p.get('page'),
+                'snippet': _sanitize_pii(p['snippet']),
+                'score': p.get('score', 0.5),
+            })
+
+        if sources and sources[0]['score'] >= 0.25:
+            top_src = sources[0]
+            confidence = float(top_src['score'])
+            citation_bn = f"\n\n📚 সূত্র: {top_src['title_bn']} (সংস্করণ: {top_src['version']}, ধারা: {top_src['section']}, পৃষ্ঠা {top_src['page']})"
+            citation_en = f"\n\n📚 Source: {top_src['title']} (Version: {top_src['version']}, {top_src['section']}, Page {top_src['page']})"
+            answer_bn = f"{top_src['snippet']}{citation_bn}"
+            answer_en = f"{top_src['snippet']}{citation_en}"
+            q_category = 'KNOWLEDGE_BASE'
+        else:
+            confidence = 0.0
+            unanswered = True
+            q_category = 'UNANSWERED'
+            answer_en = (
+                "I could not find an authoritative PGCB institutional document answering your question.\n\n"
+                "Would you like to open a Human Support Ticket to get help from the Secretariat?"
+            )
+            answer_bn = (
+                "আপনার প্রশ্নের নির্ভরযোগ্য কোনো প্রাতিষ্ঠানিক তথ্য আমাদের নথিপত্রে পাওয়া যায়নি।\n\n"
+                "আপনি কি সচিবালয়ের সহায়তার জন্য একটি সাপোর্ট টিকিট খুলতে চান?"
+            )
+            structured_actions.append({
+                'type': 'ESCALATE_SUPPORT',
+                'action': 'ESCALATE_SUPPORT',
+                'label': 'Create Support Ticket',
+                'label_bn': 'সাপোর্ট টিকিট খুলুন',
+                'url': '/member/support',
+                'is_primary': True,
+            })
+
+    primary_answer = answer_bn if effective_lang == 'bn' else answer_en
+
+    # Persist message turns
+    now_msg = datetime.utcnow()
+    user_msg = AIMessage(
+        conversation_id=conv.id,
+        role='user',
+        content=_sanitize_pii(question),
+        content_bn=_sanitize_pii(question),
+        content_en=_sanitize_pii(question),
+        intent=q_category,
+        created_at=now_msg,
+    )
+    assistant_msg = AIMessage(
+        conversation_id=conv.id,
+        role='assistant',
+        content=primary_answer,
+        content_bn=answer_bn,
+        content_en=answer_en,
+        intent=q_category,
+        confidence=confidence,
+        confidence_state='HIGH' if confidence >= 0.8 else ('MEDIUM' if confidence >= 0.4 else 'LOW'),
+        sources=json.dumps(sources, ensure_ascii=False),
+        tools_used=json.dumps(tools_used, ensure_ascii=False),
+        actions=json.dumps(structured_actions, ensure_ascii=False),
+        created_at=now_msg,
+    )
+    conv.updated_at = now_msg
+    db.add(user_msg)
+    db.add(assistant_msg)
+
+    # Log query
+    elapsed_ms = max(1, int((time.perf_counter() - t0) * 1000))
+    log_item = AIQueryLog(
+        user_id=user.id,
+        user_role=canonical_role(user.role),
+        assistant_mode='MEMBER',
+        question=_sanitize_pii(question[:500]),
+        question_category=q_category,
+        answer_preview=_sanitize_pii(primary_answer[:480]),
+        confidence=confidence,
+        unanswered=unanswered,
+        security_flagged=False,
+        documents_searched=len(sources),
+        sources_cited=json.dumps([{'id': s.get('document_id'), 'title': s.get('title')} for s in sources]),
+        tools_called=json.dumps([t.get('tool_name') for t in tools_used]),
+        response_time_ms=elapsed_ms,
+        token_count=len(question.split()) + len(primary_answer.split()),
+        estimated_cost_usd=0.0,
+    )
+    db.add(log_item)
+    audit(db, user, 'AI_QUERY', 'AIConversation', conv.id)
+    audit(db, user, 'AI_RESPONSE', 'AIConversation', conv.id)
+    db.commit()
+
+    return {
+        'message': primary_answer,
+        'answer': primary_answer,
+        'answer_en': answer_en,
+        'answer_bn': answer_bn,
+        'language': effective_lang,
+        'actions': structured_actions,
+        'sources': sources,
+        'conversation_id': conv.id,
+        'intent': q_category,
+        'tools_used': [t.get('tool_name') for t in tools_used],
+        'confidence': confidence,
+        'requires_confirmation': requires_confirmation,
+        'confirmation': confirmation_payload,
+        'security_flagged': False,
+        'status': 'UNANSWERED' if unanswered else 'ANSWERED',
+    }
+
+
+@router.get('/member/ai/conversations')
+def list_member_ai_conversations(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """List authenticated member's isolated AI conversations."""
+    convs = db.scalars(
+        select(AIConversation)
+        .where(AIConversation.user_id == user.id)
+        .order_by(AIConversation.updated_at.desc())
+        .limit(40)
+    ).all()
+
+    items = []
+    for c in convs:
+        cnt = db.scalar(select(func.count(AIMessage.id)).where(AIMessage.conversation_id == c.id)) or 0
+        items.append({
+            'id': c.id,
+            'title': c.title or 'AI Assistant Chat',
+            'mode': c.mode,
+            'language': c.language,
+            'message_count': cnt,
+            'created_at': c.created_at.isoformat() if c.created_at else None,
+            'updated_at': c.updated_at.isoformat() if c.updated_at else None,
+        })
+    return items
+
+
+@router.get('/member/ai/conversations/{conversation_id}')
+def get_member_ai_conversation_detail(
+    conversation_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieve full conversation turn history for the member."""
+    conv = db.get(AIConversation, conversation_id)
+    if not conv or conv.user_id != user.id:
+        raise HTTPException(404, 'Conversation not found')
+
+    msgs = db.scalars(
+        select(AIMessage)
+        .where(AIMessage.conversation_id == conv.id)
+        .order_by(AIMessage.id.asc())
+    ).all()
+
+    return {
+        'id': conv.id,
+        'title': conv.title,
+        'mode': conv.mode,
+        'created_at': conv.created_at.isoformat() if conv.created_at else None,
+        'messages': [
+            {
+                'id': m.id,
+                'role': m.role,
+                'content': m.content,
+                'content_bn': m.content_bn,
+                'content_en': m.content_en,
+                'intent': m.intent,
+                'confidence': m.confidence,
+                'sources': json.loads(m.sources) if m.sources else [],
+                'tools_used': json.loads(m.tools_used) if m.tools_used else [],
+                'actions': json.loads(m.actions) if m.actions else [],
+                'created_at': m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in msgs
+        ],
+    }
+
+
+@router.delete('/member/ai/conversations/{conversation_id}')
+def delete_member_ai_conversation(
+    conversation_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a conversation belonging strictly to current member."""
+    conv = db.get(AIConversation, conversation_id)
+    if not conv or conv.user_id != user.id:
+        raise HTTPException(404, 'Conversation not found')
+    db.delete(conv)
+    db.commit()
+    return {'ok': True, 'deleted_id': conversation_id}
+
+
+# ---------------------------------------------------------------------------
+# Support Ticket Escalation & Helpdesk Management
+# ---------------------------------------------------------------------------
+
+@router.post('/member/ai/support')
+@router.post('/member/support')
+def create_member_support_ticket(
+    payload: SupportEscalationPayload,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Escalate a conversation or submit a support ticket."""
+    member = db.scalar(select(Member).where(Member.user_id == user.id))
+    ticket = ai_tools.create_support_ticket(
+        db=db,
+        user=user,
+        member=member,
+        subject=payload.subject,
+        description=payload.description,
+        conversation_id=payload.conversation_id,
+        category=payload.category,
+        priority=payload.priority,
+    )
+    return {
+        'ok': True,
+        'message': 'সাপোর্ট টিকিট সফলভাবে খোলা হয়েছে। আমাদের প্রতিনিধি শীঘ্রই যোগাযোগ করবেন।',
+        'ticket': {
+            'id': ticket.id,
+            'ticket_no': ticket.ticket_no,
+            'subject': ticket.subject,
+            'description': ticket.description,
+            'category': ticket.category,
+            'status': ticket.status,
+            'priority': ticket.priority,
+            'created_at': ticket.created_at.isoformat() if ticket.created_at else None,
+        },
+    }
+
+
+@router.get('/member/support')
+def list_member_support_tickets(
+    status: str | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """List authenticated member's support tickets."""
+    stmt = select(SupportTicket).where(SupportTicket.user_id == user.id).order_by(SupportTicket.id.desc())
+    if status:
+        stmt = stmt.where(SupportTicket.status == status.upper())
+    tickets = db.scalars(stmt).all()
+    return {
+        'tickets': [
+            {
+                'id': t.id,
+                'ticket_no': t.ticket_no,
+                'subject': t.subject,
+                'description': t.description,
+                'category': t.category,
+                'status': t.status,
+                'priority': t.priority,
+                'assigned_to': t.assigned_to,
+                'resolution_note': t.resolution_note,
+                'resolved_at': t.resolved_at.isoformat() if t.resolved_at else None,
+                'created_at': t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in tickets
+        ]
+    }
+
+
+@router.get('/member/support/{ticket_id}')
+def get_member_support_ticket_detail(
+    ticket_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Get support ticket details."""
+    ticket = db.get(SupportTicket, ticket_id)
+    if not ticket or ticket.user_id != user.id:
+        raise HTTPException(404, 'Support ticket not found')
+    return {
+        'ticket': {
+            'id': ticket.id,
+            'ticket_no': ticket.ticket_no,
+            'subject': ticket.subject,
+            'description': ticket.description,
+            'category': ticket.category,
+            'status': ticket.status,
+            'priority': ticket.priority,
+            'assigned_to': ticket.assigned_to,
+            'resolution_note': ticket.resolution_note,
+            'resolved_at': ticket.resolved_at.isoformat() if ticket.resolved_at else None,
+            'created_at': ticket.created_at.isoformat() if ticket.created_at else None,
+            'conversation_id': ticket.conversation_id,
+        }
+    }
+

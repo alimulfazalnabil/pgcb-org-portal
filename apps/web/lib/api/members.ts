@@ -18,6 +18,11 @@ import {
   NotificationSettingsResponse,
   AdminEventAttendanceResponse,
   AdminCheckInResult,
+  MemberAIChatResponse,
+  MemberAIConversation,
+  MemberAIConversationDetail,
+  SupportTicketItem,
+  SupportTicketDetail,
 } from './types';
 
 export const membersApi = {
@@ -256,5 +261,35 @@ export const membersApi = {
     const q = status ? `?status=${encodeURIComponent(status)}` : '';
     return request<any>(`/admin/events/${eventId}/registrations${q}`);
   },
+
+  // Phase 7 — AI Assistant & Support Escalation
+  sendMemberAIChat: (data: { message?: string; question?: string; conversation_id?: number | null; language?: string }) =>
+    request<MemberAIChatResponse>('/member/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getMemberAIConversations: () =>
+    request<MemberAIConversation[]>('/member/ai/conversations'),
+  getMemberAIConversationDetail: (conversationId: number) =>
+    request<MemberAIConversationDetail>(`/member/ai/conversations/${conversationId}`),
+  deleteMemberAIConversation: (conversationId: number) =>
+    request<{ ok: boolean; deleted: boolean }>(`/member/ai/conversations/${conversationId}`, {
+      method: 'DELETE',
+    }),
+  createMemberAISupportTicket: (data: {
+    conversation_id?: number | null;
+    subject: string;
+    description: string;
+    category?: string;
+    priority?: string;
+  }) =>
+    request<{ ok: boolean; message: string; ticket: SupportTicketItem }>('/member/ai/support', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getMemberSupportTickets: () =>
+    request<SupportTicketItem[]>('/member/support'),
+  getMemberSupportTicketDetail: (ticketId: number) =>
+    request<SupportTicketDetail>(`/member/support/${ticketId}`),
 };
 

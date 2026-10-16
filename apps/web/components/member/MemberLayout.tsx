@@ -161,7 +161,7 @@ export function MemberLayout({
     {
       label_en: 'AI Assistant',
       label_bn: 'এআই সহকারী',
-      href: '/portal?tab=ai',
+      href: '/member/ai-assistant',
       icon: Sparkles,
       exact: false,
     },

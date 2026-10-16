@@ -1091,3 +1091,25 @@ class MemberSavedContent(Base, TimestampMixin):
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
 
+class SupportTicket(Base, TimestampMixin):
+    __tablename__ = 'support_tickets'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_no: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
+    member_id: Mapped[int | None] = mapped_column(ForeignKey('members.id', ondelete='SET NULL'), nullable=True, index=True)
+    conversation_id: Mapped[int | None] = mapped_column(ForeignKey('ai_conversations.id', ondelete='SET NULL'), nullable=True, index=True)
+    subject: Mapped[str] = mapped_column(String(300))
+    description: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(80), default='GENERAL', index=True)
+    status: Mapped[str] = mapped_column(String(30), default='OPEN', index=True)  # OPEN, IN_PROGRESS, WAITING_FOR_MEMBER, RESOLVED, CLOSED
+    priority: Mapped[str] = mapped_column(String(20), default='NORMAL', index=True)  # LOW, NORMAL, HIGH, URGENT
+    assigned_to: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user = relationship('User', foreign_keys=[user_id])
+    member = relationship('Member', foreign_keys=[member_id])
+    conversation = relationship('AIConversation', foreign_keys=[conversation_id])
+
+
+

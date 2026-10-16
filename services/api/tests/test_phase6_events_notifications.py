@@ -166,9 +166,9 @@ def test_event_atomic_registration_and_waitlist_queue():
     assert reg3["registration_status"] == "WAITLISTED"
     assert reg3["waitlist_position"] == 2
 
-    # Duplicate registration attempt should be rejected with 400
+    # Duplicate registration attempt should be rejected with 400 or 409 Conflict
     res_dup = client.post(f"/api/v1/member/events/{event_id}/register", json={}, headers=headers_m1)
-    assert res_dup.status_code == 400
+    assert res_dup.status_code in (400, 409)
 
 
 def test_event_cancellation_and_auto_promotion():

@@ -287,11 +287,11 @@ class EventService:
                     NotificationService.send_notification(
                         db=db,
                         user_id=next_waitlist.user_id,
-                        title_bn=f"অভিনন্দন! ইভেন্ট আসন নিশ্চিত হয়েছে: {event.title_bn}",
+                        title_bn=f"অভিনন্দন! ইভেন্ট নিবন্ধন নিশ্চিত হয়েছে: {event.title_bn}",
                         title_en=f"Congratulations! Promoted from Waitlist: {event.title_en or event.title_bn}",
                         body_bn=f"আসন খালি হওয়ায় আপনি ওয়েটিং লিস্ট থেকে মূল ইভেন্টে উত্তীর্ণ হয়েছেন। আপনার ডিজিটাল পাস প্রস্তুত।",
                         body_en=f"A seat became available and you have been promoted from the waitlist for '{event.title_en or event.title_bn}'.",
-                        notification_type='EVENT',
+                        notification_type='EVENT_REGISTRATION',
                         action_route=f"/member/events/{event_id}/pass",
                         action_label="View Event Pass",
                         action_label_bn="ইভেন্ট পাস দেখুন",
@@ -363,7 +363,7 @@ class EventService:
             raise HTTPException(409, 'Payment must be completed before check-in')
 
         # Check anti-reuse
-        if reg.attendance_status == 'CHECKED_IN':
+        if reg.attendance_status in ('CHECKED_IN', 'ATTENDED'):
             check_time = reg.checked_in_at.strftime('%I:%M %p') if reg.checked_in_at else 'earlier'
             raise HTTPException(
                 409,
@@ -371,7 +371,7 @@ class EventService:
             )
 
         now = datetime.utcnow()
-        reg.attendance_status = 'CHECKED_IN'
+        reg.attendance_status = 'ATTENDED'
         reg.checked_in_at = now
         reg.checked_in_by = admin_user.id
 

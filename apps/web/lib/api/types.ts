@@ -1143,3 +1143,103 @@ export interface AdminCheckInResult {
   } | null;
 }
 
+export interface MemberAIChatAction {
+  action: string;
+  type?: string;
+  label: string;
+  label_bn?: string;
+  url?: string;
+  is_primary?: boolean;
+}
+
+export interface MemberAIChatSource {
+  document_id?: number;
+  title: string;
+  title_bn?: string;
+  section?: string;
+  page?: number | string;
+  version?: string;
+  snippet?: string;
+  score?: number;
+}
+
+export interface MemberAIConfirmationPayload {
+  action: string;
+  target_url: string;
+  item_type: string;
+  amount_bdt: number;
+  message_bn: string;
+  message_en: string;
+}
+
+export interface MemberAIChatResponse {
+  message: string;
+  answer?: string;
+  answer_en?: string;
+  answer_bn?: string;
+  language: string;
+  actions: MemberAIChatAction[];
+  sources: MemberAIChatSource[];
+  conversation_id?: number | null;
+  intent: string;
+  tools_used: string[];
+  confidence: number;
+  requires_confirmation?: boolean;
+  confirmation?: MemberAIConfirmationPayload | null;
+  security_flagged?: boolean;
+  status: 'ANSWERED' | 'UNANSWERED' | 'BLOCKED_SECURITY';
+}
+
+export interface MemberAIConversation {
+  id: number;
+  title: string;
+  mode: string;
+  language: string;
+  message_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface MemberAIMessageItem {
+  id: number;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  content_bn?: string;
+  content_en?: string;
+  intent?: string;
+  confidence?: number;
+  sources?: MemberAIChatSource[];
+  tools_used?: any[];
+  actions?: MemberAIChatAction[];
+  created_at: string | null;
+}
+
+export interface MemberAIConversationDetail {
+  id: number;
+  title: string;
+  mode: string;
+  language: string;
+  messages: MemberAIMessageItem[];
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SupportTicketItem {
+  id: number;
+  ticket_no: string;
+  subject: string;
+  description: string;
+  category: string;
+  priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+  status: 'OPEN' | 'IN_PROGRESS' | 'WAITING_FOR_MEMBER' | 'RESOLVED' | 'CLOSED';
+  resolution_notes?: string | null;
+  conversation_id?: number | null;
+  created_at: string | null;
+  resolved_at?: string | null;
+}
+
+export interface SupportTicketDetail extends SupportTicketItem {
+  user_name?: string;
+  membership_id?: string;
+}
+
