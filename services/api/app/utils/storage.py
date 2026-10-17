@@ -171,7 +171,7 @@ def validate_upload_bytes(
         raise HTTPException(400, f'Unsupported or mismatched MIME type: {normalized_ct}')
 
     if not _matches_magic_bytes(ext, content):
-        raise HTTPException(400, 'File header magic bytes do not match the declared file type')
+        raise HTTPException(400, 'Invalid file signature: File header magic bytes do not match the declared file type')
 
     scan_upload_security(content, clean_name)
 

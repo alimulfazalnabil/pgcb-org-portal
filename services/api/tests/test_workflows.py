@@ -19,4 +19,4 @@ def test_public_content_and_verification():
 def test_login_and_admin_member_list():
     r=client.post('/api/v1/auth/login',json={'email':'admin@example.org','password':'ChangeMe123!'}); assert r.status_code==200
     cookies=r.cookies
-    r=client.get('/api/v1/admin/members',cookies=cookies); assert r.status_code==200; assert any(m.get('membership_id') == 'PGD-2026-1001' for m in r.json())
+    r=client.get('/api/v1/admin/members?q=PGD-2026-1001',cookies=cookies); assert r.status_code==200; assert any(m.get('membership_id') == 'PGD-2026-1001' for m in r.json())

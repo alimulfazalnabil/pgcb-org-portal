@@ -97,11 +97,16 @@ def list_my_documents(
 @router.post("/member/documents", response_model=MemberDocumentDetail)
 async def upload_document(
     file: UploadFile = File(...),
-    document_type: str = Form(...),
+    document_type: Optional[str] = Form(None),
+    document_type_query: Optional[str] = Query(None, alias="document_type"),
     title: Optional[str] = Form(None),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
+    resolved_type = document_type or document_type_query
+    if not resolved_type:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="document_type is required.")
+
     member = db.scalar(select(Member).where(Member.user_id == user.id))
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member profile not found.")
@@ -110,7 +115,7 @@ async def upload_document(
     doc = create_member_document(
         db=db,
         member=member,
-        document_type=document_type,
+        document_type=resolved_type,
         file_bytes=content,
         original_filename=file.filename or "document.pdf",
         title=title,
@@ -431,7 +436,11 @@ def admin_list_documents(
     if document_type:
         stmt = stmt.where(MemberDocument.document_type == document_type.upper())
     if status and status.upper() != "ALL":
-        stmt = stmt.where(MemberDocument.review_status == status.upper())
+        target_st = status.upper()
+        if target_st in ("UNDER_REVIEW", "PENDING"):
+            stmt = stmt.where(MemberDocument.review_status.in_(["UNDER_REVIEW", "PENDING"]))
+        else:
+            stmt = stmt.where(MemberDocument.review_status == target_st)
     if circle_id:
         stmt = stmt.where(Member.circle_id == circle_id)
     if q and q.strip():
@@ -456,7 +465,8 @@ def admin_list_documents(
             "document_type": d.document_type,
             "title": d.title or d.filename,
             "filename": d.filename,
-            "status": d.review_status,
+            "status": "UNDER_REVIEW" if (d.review_status in ("UNDER_REVIEW", "PENDING") or not d.review_status) else d.review_status,
+            "review_status": d.review_status,
             "version": d.version,
             "file_size": d.file_size,
             "uploaded_at": d.created_at.isoformat() if d.created_at else None,

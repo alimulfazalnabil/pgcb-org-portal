@@ -141,6 +141,7 @@ class CertificateService:
         )
         cls.render_certificate_files(cert, verify_token=token)
         cert._raw_token = token
+        cert.status = 'ISSUED'
         cert._transient_status = 'ISSUED'
         db.add(cert)
         db.flush()

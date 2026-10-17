@@ -74,7 +74,9 @@ def test_session_revocation_and_payment_ledger():
     payment_id = r.json()['id']
     admin_cookies = login()
     r = client.get('/api/v1/admin/payments', cookies=admin_cookies)
-    assert r.status_code == 200 and any(p['id'] == payment_id for p in r.json())
+    pay_data = r.json()
+    pay_items = pay_data if isinstance(pay_data, list) else pay_data.get('transactions', [])
+    assert r.status_code == 200 and any(p['id'] == payment_id for p in pay_items)
     r = client.patch(f'/api/v1/admin/payments/{payment_id}', cookies=admin_cookies, json={'status': 'PAID', 'transaction_ref': 'TEST-V05-001'})
     assert r.status_code == 200 and r.json()['status'] == 'PAID'
 

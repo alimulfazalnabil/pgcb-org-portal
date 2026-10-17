@@ -14,6 +14,11 @@ CONTROLLED_DOCUMENT_TYPES = [
     "PAYMENT_RECEIPT",
     "EVENT_CERTIFICATE",
     "OTHER_APPROVED",
+    "NID",
+    "CERTIFICATE",
+    "PHOTO",
+    "PHOTO_ID",
+    "RECEIPT",
 ]
 
 
@@ -44,8 +49,11 @@ class MemberDocumentListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     type: str
+    document_type: str | None = None
     title: str
     status: str
+    review_status: str | None = None
+    filename: str | None = None
     uploaded_at: str
     verified_at: str | None = None
     expires_at: str | None = None
@@ -61,8 +69,11 @@ class MemberDocumentDetail(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     type: str
+    document_type: str | None = None
     title: str
     status: str
+    review_status: str | None = None
+    filename: str | None = None
     uploaded_at: str
     verified_at: str | None = None
     expires_at: str | None = None
@@ -131,6 +142,7 @@ class MemberCertificateItem(BaseModel):
     revocation_reason: str | None = None
     download_url: str
     preview_url: str
+    view_url: str | None = None
     verify_url: str
 
 

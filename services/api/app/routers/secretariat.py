@@ -393,7 +393,7 @@ def get_executive_analytics(
         e_regs = regs_by_event.get(e.id, [])
         reg_count = len(e_regs)
         checked_in = sum(
-            1 for r in e_regs if getattr(r, 'attendance_status', '') == 'CHECKED_IN' or getattr(r, 'checked_in_at', None) is not None
+            1 for r in e_regs if getattr(r, 'attendance_status', '') in ('CHECKED_IN', 'ATTENDED') or getattr(r, 'checked_in_at', None) is not None
         )
         event_attendance.append({
             'event_id': e.id,

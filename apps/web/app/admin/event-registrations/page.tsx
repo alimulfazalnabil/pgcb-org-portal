@@ -209,6 +209,7 @@ export default function AdminEventRegistrationsPage() {
                       </td>
                       <td className="p-4 text-right space-x-1.5">
                         {reg.attendance_status !== 'CHECKED_IN' &&
+                          reg.attendance_status !== 'ATTENDED' &&
                           reg.registration_status !== 'CANCELLED' && (
                             <button
                               onClick={() => handleCheckIn(reg.id)}

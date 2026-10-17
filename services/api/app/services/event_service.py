@@ -13,7 +13,8 @@ import hmac
 import secrets
 from uuid import uuid4
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -317,6 +318,30 @@ class EventService:
             'promoted_attendee_id': promoted_member_info['registration_id'] if promoted_member_info else None,
             'promoted_waitlist_attendee': promoted_member_info,
         }
+    @staticmethod
+    def check_in_ticket(
+        db: Session,
+        ticket_code: str,
+        admin_user: User,
+        event_id: int | None = None,
+        method: str = 'QR',
+        ip: str | None = None,
+    ) -> dict:
+        if event_id is None:
+            reg = db.scalar(select(EventRegistration).where(EventRegistration.ticket_code == ticket_code))
+            if not reg:
+                raise HTTPException(404, f'No registration found for ticket code: {ticket_code}')
+            event_id = reg.event_id
+        res = EventService.check_in_attendee(
+            db=db,
+            event_id=event_id,
+            token_or_code=ticket_code,
+            admin_user=admin_user,
+            method=method,
+            ip=ip,
+        )
+        res['attendance_status'] = 'CHECKED_IN'
+        return res
 
     @staticmethod
     def check_in_attendee(
@@ -371,9 +396,38 @@ class EventService:
             )
 
         now = datetime.utcnow()
-        reg.attendance_status = 'ATTENDED'
-        reg.checked_in_at = now
-        reg.checked_in_by = admin_user.id
+
+        # Atomic conditional update claiming check-in on the registration row.
+        # This guarantees that under any database engine (PostgreSQL or SQLite),
+        # only ONE concurrent request can transition the record away from un-checked status.
+        # Works equally for member registrations and guest registrations (where member_id is NULL).
+        stmt_atomic = (
+            update(EventRegistration)
+            .where(
+                EventRegistration.id == reg.id,
+                or_(
+                    EventRegistration.attendance_status.is_(None),
+                    EventRegistration.attendance_status.not_in(['CHECKED_IN', 'ATTENDED']),
+                ),
+            )
+            .values(
+                attendance_status='ATTENDED',
+                checked_in_at=now,
+                checked_in_by=admin_user.id,
+            )
+        )
+        res_update = db.execute(stmt_atomic)
+        if res_update.rowcount == 0:
+            db.rollback()
+            latest = db.get(EventRegistration, reg.id)
+            check_time = latest.checked_in_at.strftime('%I:%M %p') if (latest and latest.checked_in_at) else 'earlier'
+            raise HTTPException(
+                409,
+                f"⚠ ALREADY CHECKED IN (Checked in at {check_time}) - Ticket cannot be reused",
+            )
+
+        # Refresh in-memory registration entity with updated state
+        db.refresh(reg)
 
         # Record in EventAttendance table
         att_record = db.scalar(
@@ -459,13 +513,23 @@ class EventService:
                     )
 
         audit(db, admin_user, 'CHECK_IN_ATTENDEE', 'EVENT_REGISTRATION', reg.id, ip)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                409,
+                "⚠ ALREADY CHECKED IN (Duplicate attendance detected) - Ticket cannot be reused",
+            ) from exc
+        except Exception:
+            db.rollback()
+            raise
 
         # Count total checked-in
         total_checked_in = db.scalar(
             select(func.count(EventRegistration.id)).where(
                 EventRegistration.event_id == event_id,
-                EventRegistration.attendance_status == 'CHECKED_IN',
+                EventRegistration.attendance_status.in_(['CHECKED_IN', 'ATTENDED']),
             )
         ) or 0
 

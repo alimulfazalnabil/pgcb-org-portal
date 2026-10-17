@@ -67,8 +67,13 @@ def backup_database(database_url: str, backup_dir: Path, tier: str = "daily") ->
         pg_dump_bin = shutil.which("pg_dump")
         if not pg_dump_bin:
             raise RuntimeError("pg_dump binary not found on PATH for PostgreSQL backup")
+        # Normalize SQLAlchemy dialect prefix for pg_dump CLI
+        pg_dump_url = database_url
+        for prefix in ("postgresql+psycopg://", "postgresql+psycopg2://"):
+            if pg_dump_url.startswith(prefix):
+                pg_dump_url = pg_dump_url.replace(prefix, "postgresql://", 1)
         proc = subprocess.run(
-            [pg_dump_bin, "--no-owner", "--no-privileges", database_url],
+            [pg_dump_bin, "--no-owner", "--no-privileges", pg_dump_url],
             capture_output=True,
             check=True,
         )

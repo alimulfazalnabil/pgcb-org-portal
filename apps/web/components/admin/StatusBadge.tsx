@@ -10,7 +10,7 @@ export function StatusBadge({ status, className = '' }: StatusBadgeProps) {
 
   let colorClasses = 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300';
 
-  if (['ACTIVE', 'APPROVED', 'SUCCESS', 'COMPLETED', 'PUBLISHED', 'VERIFIED', 'PAID'].includes(norm)) {
+  if (['ACTIVE', 'APPROVED', 'SUCCESS', 'COMPLETED', 'PUBLISHED', 'VERIFIED', 'PAID', 'CHECKED_IN', 'ATTENDED', 'CONFIRMED'].includes(norm)) {
     colorClasses = 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/50';
   } else if (['PENDING', 'SUBMITTED', 'DRAFT', 'QUEUED', 'PAYMENT_PENDING'].includes(norm)) {
     colorClasses = 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/50';

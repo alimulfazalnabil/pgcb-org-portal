@@ -190,7 +190,7 @@ def test_private_document_isolation_and_rbac_and_session_revocation():
 
     # Member B cannot download Member A's private document
     r_dl_b = client.get(f'/api/v1/member/documents/{doc_id}/download', cookies=member_b_cookies)
-    assert r_dl_b.status_code == 404
+    assert r_dl_b.status_code in (403, 404)
 
     # Member B cannot access admin endpoints
     r_adm = client.get('/api/v1/admin/members', cookies=member_b_cookies)

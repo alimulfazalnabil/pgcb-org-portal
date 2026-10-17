@@ -38,7 +38,8 @@ def _relative_time_display(dt: datetime, now: datetime) -> tuple[str, str]:
 
 @router.get('/notifications')
 def list_member_notifications(
-    status: str = Query('all', regex='^(all|unread)$'),
+    request: Request,
+    status: str | None = Query(None, pattern='^(all|unread)$'),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(current_user),
@@ -88,6 +89,8 @@ def list_member_notifications(
             'type': n.notification_type,
             'priority': n.priority or 'NORMAL',
             'is_read': n.read_at is not None,
+            'indicator': '○' if n.read_at is not None else '●',
+            'relative_time': time_en,
             'read_at': n.read_at.isoformat() if n.read_at else None,
             'created_at': n.created_at.isoformat() if n.created_at else None,
             'relative_time_en': time_en,
@@ -95,6 +98,10 @@ def list_member_notifications(
             'action': action_data,
             'data': n.data_json,
         })
+
+    # Backward compatibility: legacy callers expecting raw list when no ?status= filter is passed
+    if 'status' not in request.query_params:
+        return items
 
     return {
         'items': items,

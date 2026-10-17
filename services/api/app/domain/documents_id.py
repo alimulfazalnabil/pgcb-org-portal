@@ -34,6 +34,7 @@ from app.schemas.documents_id import (
     PublicMemberVerificationResponse,
 )
 from app.services import BASE_STORAGE, audit, notify
+from app.utils.storage import scan_upload_security, validate_upload_bytes
 
 MAX_PDF_SIZE_BYTES = int(os.getenv("MAX_DOCUMENT_PDF_BYTES", str(10 * 1024 * 1024)))  # 10 MB
 MAX_IMAGE_SIZE_BYTES = int(os.getenv("MAX_DOCUMENT_IMAGE_BYTES", str(5 * 1024 * 1024)))  # 5 MB
@@ -97,40 +98,20 @@ def _generate_opaque_qr_token(member: Member) -> str:
 
 
 def validate_and_save_upload(file_bytes: bytes, original_filename: str) -> tuple[str, str, int, str]:
-    """Validates size, magic bytes and saves to random key on disk."""
-    if not file_bytes:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+    """Validates size, magic bytes and saves to disk with UUID prefix."""
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    clean_name, storage_filename, mime_type = validate_upload_bytes(
+        filename=original_filename,
+        content_type=None,
+        content=file_bytes,
+        max_bytes=max_bytes,
+    )
 
-    clean_name = os.path.basename(original_filename or "document.pdf")
-    ext = os.path.splitext(clean_name)[1].lower()
-    if ext not in SUPPORTED_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file extension '{ext}'. Only PDF, JPG, PNG, and WEBP are accepted.",
-        )
-
-    file_size = len(file_bytes)
-    if ext == ".pdf" and file_size > MAX_PDF_SIZE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"PDF file size exceeds maximum limit of {MAX_PDF_SIZE_BYTES // (1024 * 1024)}MB.",
-        )
-    elif ext != ".pdf" and file_size > MAX_IMAGE_SIZE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Image file size exceeds maximum limit of {MAX_IMAGE_SIZE_BYTES // (1024 * 1024)}MB.",
-        )
-
-    mime_type = _validate_magic_bytes(file_bytes, ext)
-
-    # Generate random storage key avoiding any directory traversal
-    storage_filename = f"doc_{uuid.uuid4().hex[:16]}{ext}"
     storage_path = _get_document_storage_dir() / storage_filename
-
     with open(storage_path, "wb") as f:
         f.write(file_bytes)
 
-    return clean_name, str(storage_path), file_size, mime_type
+    return clean_name, str(storage_path), len(file_bytes), mime_type
 
 
 def create_member_document(
@@ -142,6 +123,8 @@ def create_member_document(
     title: str | None = None,
     user: User | None = None,
 ) -> MemberDocument:
+    clean_name, storage_path, file_size, mime_type = validate_and_save_upload(file_bytes, original_filename)
+
     doc_type = document_type.strip().upper()
     if doc_type not in CONTROLLED_DOCUMENT_TYPES:
         raise HTTPException(
@@ -149,7 +132,6 @@ def create_member_document(
             detail=f"Invalid document category '{document_type}'. Controlled categories: {', '.join(CONTROLLED_DOCUMENT_TYPES)}",
         )
 
-    clean_name, storage_path, file_size, mime_type = validate_and_save_upload(file_bytes, original_filename)
     display_title = title.strip() if title and title.strip() else clean_name
 
     now = datetime.utcnow()
@@ -162,7 +144,7 @@ def create_member_document(
         content_type=mime_type,
         file_size=file_size,
         version=1,
-        review_status="UNDER_REVIEW",
+        review_status="PENDING",
         reviewer_note=None,
         created_at=now,
     )
@@ -177,7 +159,7 @@ def create_member_document(
         storage_path=storage_path,
         content_type=mime_type,
         file_size=file_size,
-        review_status="UNDER_REVIEW",
+        review_status="PENDING",
         reviewer_note=None,
         uploaded_at=now,
         created_at=now,
@@ -190,7 +172,7 @@ def create_member_document(
         action="UPLOAD",
         actor_id=user.id if user else None,
         previous_status=None,
-        new_status="UNDER_REVIEW",
+        new_status="PENDING",
         note="Initial document upload",
         created_at=now,
     )
@@ -338,8 +320,11 @@ def serialize_member_document_list_item(doc: MemberDocument) -> MemberDocumentLi
     return MemberDocumentListItem(
         id=doc.id,
         type=doc.document_type,
+        document_type=doc.document_type,
         title=doc.title or doc.filename or doc.document_type,
-        status=doc.review_status or "UNDER_REVIEW",
+        status="UNDER_REVIEW" if (doc.review_status in ("UNDER_REVIEW", "PENDING")) else (doc.review_status or "UNDER_REVIEW"),
+        review_status=doc.review_status or "PENDING",
+        filename=doc.filename,
         uploaded_at=doc.created_at.isoformat() if doc.created_at else datetime.utcnow().isoformat(),
         verified_at=doc.verified_at.isoformat() if doc.verified_at else None,
         expires_at=doc.expires_at.isoformat() if doc.expires_at else None,
@@ -382,8 +367,11 @@ def serialize_member_document_detail(doc: MemberDocument) -> MemberDocumentDetai
     return MemberDocumentDetail(
         id=doc.id,
         type=doc.document_type,
+        document_type=doc.document_type,
         title=doc.title or doc.filename or doc.document_type,
-        status=doc.review_status or "UNDER_REVIEW",
+        status="UNDER_REVIEW" if (doc.review_status in ("UNDER_REVIEW", "PENDING")) else (doc.review_status or "UNDER_REVIEW"),
+        review_status=doc.review_status or "PENDING",
+        filename=doc.filename,
         uploaded_at=doc.created_at.isoformat() if doc.created_at else datetime.utcnow().isoformat(),
         verified_at=doc.verified_at.isoformat() if doc.verified_at else None,
         expires_at=doc.expires_at.isoformat() if doc.expires_at else None,
@@ -558,6 +546,7 @@ def serialize_member_certificate(cert: Certificate) -> MemberCertificateItem:
         revocation_reason=cert.revocation_reason,
         download_url=f"/api/v1/member/certificates/{cert.id}/download",
         preview_url=f"/api/v1/certificates/{cert_no}.png",
+        view_url=f"/api/v1/certificates/{cert_no}.png",
         verify_url=f"/api/v1/public/verify/certificate/{cert_no}",
     )
 

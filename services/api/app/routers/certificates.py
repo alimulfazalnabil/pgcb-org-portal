@@ -30,7 +30,7 @@ def create_event_certificate(registration_id: int, db: Session = Depends(get_db)
     registration = db.get(EventRegistration, registration_id)
     if not registration:
         raise HTTPException(404, 'Registration not found')
-    if registration.attendance_status != 'CHECKED_IN':
+    if registration.attendance_status not in ('CHECKED_IN', 'ATTENDED'):
         raise HTTPException(409, 'Participant must be checked in before certificate generation')
     event = db.get(Event, registration.event_id)
     if not event:

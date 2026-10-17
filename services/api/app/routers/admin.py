@@ -374,7 +374,7 @@ def stats(_: User = Depends(require_permission('admin.stats')), db: Session = De
         'circles': db.scalar(select(func.count(Circle.id)).where(Circle.active == True)) or 0,
         'media': db.scalar(select(func.count(MediaAsset.id)).where(MediaAsset.published == True)) or 0,
         'event_registrations': db.scalar(select(func.count(EventRegistration.id))) or 0,
-        'checked_in': db.scalar(select(func.count(EventRegistration.id)).where(EventRegistration.attendance_status == 'CHECKED_IN')) or 0,
+        'checked_in': db.scalar(select(func.count(EventRegistration.id)).where(EventRegistration.attendance_status.in_(['CHECKED_IN', 'ATTENDED']))) or 0,
         'payments_pending': db.scalar(select(func.count(PaymentTransaction.id)).where(PaymentTransaction.status == 'PENDING')) or 0,
         'payments_paid': db.scalar(select(func.count(PaymentTransaction.id)).where(PaymentTransaction.status == 'PAID')) or 0,
     }
@@ -472,7 +472,7 @@ def reports_overview(_: User = Depends(require_permission('content.read')), db: 
         },
         'events': {
             'registrations': db.scalar(select(func.count(EventRegistration.id))) or 0,
-            'checked_in': db.scalar(select(func.count(EventRegistration.id)).where(EventRegistration.attendance_status == 'CHECKED_IN')) or 0,
+            'checked_in': db.scalar(select(func.count(EventRegistration.id)).where(EventRegistration.attendance_status.in_(['CHECKED_IN', 'ATTENDED']))) or 0,
             'registered': db.scalar(select(func.count(EventRegistration.id)).where(EventRegistration.registration_status == 'REGISTERED')) or 0,
             'confirmed': db.scalar(select(func.count(EventRegistration.id)).where(EventRegistration.registration_status == 'CONFIRMED')) or 0,
             'series': event_series,
@@ -2193,8 +2193,11 @@ def _apply_check_in(db: Session, admin: User, item: EventRegistration, request: 
         raise HTTPException(409, 'Cancelled registration cannot be checked in')
     if item.payment_status in {'REQUIRED', 'PENDING', 'FAILED'}:
         raise HTTPException(409, 'Payment must be completed before check-in')
-    already_checked = item.attendance_status == 'CHECKED_IN'
-    item.attendance_status = 'CHECKED_IN'; item.checked_in_at = item.checked_in_at or datetime.utcnow(); item.checked_in_by = item.checked_in_by or admin.id
+    already_checked = item.attendance_status in ('CHECKED_IN', 'ATTENDED')
+    if not already_checked:
+        item.attendance_status = 'CHECKED_IN'
+    item.checked_in_at = item.checked_in_at or datetime.utcnow()
+    item.checked_in_by = item.checked_in_by or admin.id
     audit(db, admin, prefix if not already_checked else f'{prefix}_REPEAT', 'EVENT_REGISTRATION', item.id, _actor_ip(request))
     db.commit()
     return {'ok': True, 'already_checked_in': already_checked, 'attendance_status': item.attendance_status}
@@ -2906,7 +2909,7 @@ def admin_list_events(
         checked_in_count = db.scalar(
             select(func.count(EventRegistration.id)).where(
                 EventRegistration.event_id == evt.id,
-                EventRegistration.attendance_status == 'CHECKED_IN',
+                EventRegistration.attendance_status.in_(['CHECKED_IN', 'ATTENDED']),
             )
         ) or 0
 
@@ -3017,7 +3020,7 @@ def admin_get_event(
     checked_in_count = db.scalar(
         select(func.count(EventRegistration.id)).where(
             EventRegistration.event_id == evt.id,
-            EventRegistration.attendance_status == 'CHECKED_IN',
+            EventRegistration.attendance_status.in_(['CHECKED_IN', 'ATTENDED']),
         )
     ) or 0
 

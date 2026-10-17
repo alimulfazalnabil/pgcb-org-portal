@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import quote_plus
 
 from pydantic import model_validator
@@ -68,7 +69,10 @@ class Settings(BaseSettings):
     ai_max_tokens: int = 600
     ai_temperature: float = 0.2
     ai_local_url: str | None = None
-    model_config = SettingsConfigDict(env_file='.env', extra='ignore')
+    model_config = SettingsConfigDict(
+        env_file=('.env', str(Path(__file__).resolve().parents[2] / '.env')),
+        extra='ignore',
+    )
 
     @property
     def is_production_like(self) -> bool:
@@ -123,6 +127,16 @@ class Settings(BaseSettings):
             if self.storage_backend.lower() not in ('local', 'filesystem', 'persistent_disk'):
                 raise ValueError(
                     "Staging/Production storage configuration invalid: STORAGE_BACKEND must be 'local', 'filesystem', or 'persistent_disk'."
+                )
+            if self.database_url.startswith('sqlite'):
+                raise ValueError(
+                    "Staging/Production configuration invalid: DATABASE_URL cannot be SQLite. "
+                    "A valid PostgreSQL connection string ('postgresql+psycopg://...') is required."
+                )
+            if not self.database_url.startswith('postgresql+psycopg://'):
+                raise ValueError(
+                    f"Invalid database driver in DATABASE_URL for staging/production: '{self.database_url.split('://')[0]}'. "
+                    "Must use 'postgresql+psycopg://' (Psycopg 3)."
                 )
             if self.storage_backend.lower() == 'persistent_disk' and (not self.storage_root or self.storage_root == './storage'):
                 self.storage_root = '/var/data/uploads'
