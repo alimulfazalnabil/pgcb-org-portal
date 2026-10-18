@@ -50,7 +50,7 @@ from app.schemas.membership import (
 from app.services import ALLOWED_CONTENT_TYPES, ALLOWED_DOC_TYPES, audit, membership_dates, next_membership_id, notify
 from app.services import BASE_STORAGE
 from app.services.receipt_service import get_fee_schedule, resolve_plan_amount
-from app.utils.storage import get_file_bytes, is_local_path, save_bytes, validate_upload_bytes, scan_upload_security
+from app.utils.storage import delete_file, get_file_bytes, is_local_path, save_bytes, validate_upload_bytes, scan_upload_security
 
 
 try:
@@ -1803,28 +1803,35 @@ def upload_profile_photo(
     existing_doc = db.scalar(
         select(MemberDocument).where(MemberDocument.member_id == m.id, MemberDocument.document_type == 'PHOTO')
     )
-    if existing_doc:
-        existing_doc.filename = f"profile-photo.{detected_ext}"
-        existing_doc.storage_path = stored_path
-        existing_doc.content_type = mime
-        existing_doc.review_status = 'APPROVED'
-        doc = existing_doc
-    else:
-        doc = MemberDocument(
-            member_id=m.id,
-            document_type='PHOTO',
-            filename=f"profile-photo.{detected_ext}",
-            storage_path=stored_path,
-            content_type=mime,
-            review_status='APPROVED',
-        )
-        db.add(doc)
+    old_storage_path = existing_doc.storage_path if existing_doc else None
+    try:
+        if existing_doc:
+            existing_doc.filename = f"profile-photo.{detected_ext}"
+            existing_doc.storage_path = stored_path
+            existing_doc.content_type = mime
+            existing_doc.review_status = 'APPROVED'
+            doc = existing_doc
+        else:
+            doc = MemberDocument(
+                member_id=m.id,
+                document_type='PHOTO',
+                filename=f"profile-photo.{detected_ext}",
+                storage_path=stored_path,
+                content_type=mime,
+                review_status='APPROVED',
+            )
+            db.add(doc)
 
-    m.photo_url = stored_path
-    actor_ip = request.client.host if request.client else None
-    audit(db, user, 'PROFILE_PHOTO_UPDATED', 'MEMBER', m.id, actor_ip)
-    db.commit()
-    db.refresh(m)
+        m.photo_url = stored_path
+        actor_ip = request.client.host if request.client else None
+        audit(db, user, 'PROFILE_PHOTO_UPDATED', 'MEMBER', m.id, actor_ip)
+        db.commit()
+        db.refresh(m)
+    except Exception:
+        db.rollback()
+        if stored_path != old_storage_path:
+            delete_file(stored_path)
+        raise
     return {
         'ok': True,
         'photo_url': m.photo_url,
@@ -2442,37 +2449,44 @@ async def upload_application_document(
         select(MemberDocument)
         .where(MemberDocument.member_id == m.id, MemberDocument.document_type == doc_type_clean)
     )
-    if existing_doc:
-        existing_doc.filename = file.filename or fname
-        existing_doc.storage_path = str(target_path)
-        existing_doc.content_type = file.content_type or 'application/octet-stream'
-        existing_doc.review_status = 'PENDING'
-        doc_obj = existing_doc
-    else:
-        doc_obj = MemberDocument(
-            member_id=m.id,
-            document_type=doc_type_clean,
-            filename=file.filename or fname,
-            storage_path=str(target_path),
-            content_type=file.content_type or 'application/octet-stream',
-            review_status='PENDING',
+    old_storage_path = existing_doc.storage_path if existing_doc else None
+    try:
+        if existing_doc:
+            existing_doc.filename = file.filename or fname
+            existing_doc.storage_path = str(target_path)
+            existing_doc.content_type = file.content_type or 'application/octet-stream'
+            existing_doc.review_status = 'PENDING'
+            doc_obj = existing_doc
+        else:
+            doc_obj = MemberDocument(
+                member_id=m.id,
+                document_type=doc_type_clean,
+                filename=file.filename or fname,
+                storage_path=str(target_path),
+                content_type=file.content_type or 'application/octet-stream',
+                review_status='PENDING',
+            )
+            db.add(doc_obj)
+
+        if m.status in ('DOCUMENTS_REQUIRED', 'PENDING'):
+            m.status = 'UNDER_REVIEW'
+
+        log_audit_action(
+            db=db,
+            request=request,
+            action='DOCUMENT_SUBMITTED',
+            entity='MEMBER_DOCUMENT',
+            entity_id=str(doc_obj.id or doc_type_clean),
+            user=user,
+            new_value={'document_type': doc_type_clean, 'filename': doc_obj.filename},
         )
-        db.add(doc_obj)
 
-    if m.status in ('DOCUMENTS_REQUIRED', 'PENDING'):
-        m.status = 'UNDER_REVIEW'
-
-    log_audit_action(
-        db=db,
-        request=request,
-        action='DOCUMENT_SUBMITTED',
-        entity='MEMBER_DOCUMENT',
-        entity_id=str(doc_obj.id or doc_type_clean),
-        user=user,
-        new_value={'document_type': doc_type_clean, 'filename': doc_obj.filename},
-    )
-
-    db.commit()
+        db.commit()
+    except Exception:
+        db.rollback()
+        if str(target_path) != old_storage_path:
+            delete_file(str(target_path))
+        raise
 
     return {
         'ok': True,
@@ -2602,15 +2616,21 @@ def upload_document(request: Request, document_type: str, file: UploadFile = Fil
         stored = save_bytes(content, f'members/{member.id}', unique_name)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
-    doc = MemberDocument(
-        member_id=member.id, document_type=document_type, filename=clean_name,
-        storage_path=stored, content_type=resolved_ct, review_status='PENDING'
-    )
-    db.add(doc)
-    if document_type == 'PHOTO':
-        member.photo_url = stored
-    audit(db, user, 'UPLOAD_DOCUMENT', 'MEMBER_DOCUMENT', member.id, request.client.host if request.client else None)
-    db.commit(); db.refresh(doc)
+    try:
+        doc = MemberDocument(
+            member_id=member.id, document_type=document_type, filename=clean_name,
+            storage_path=stored, content_type=resolved_ct, review_status='PENDING'
+        )
+        db.add(doc)
+        if document_type == 'PHOTO':
+            member.photo_url = stored
+        audit(db, user, 'UPLOAD_DOCUMENT', 'MEMBER_DOCUMENT', member.id, request.client.host if request.client else None)
+        db.commit()
+        db.refresh(doc)
+    except Exception:
+        db.rollback()
+        delete_file(stored)
+        raise
     return MemberDocumentResponse(
         id=doc.id,
         document_type=doc.document_type,

@@ -236,16 +236,20 @@ def get_file_bytes(storage_path: str) -> bytes:
         raise FileNotFoundError(f'File not found: {storage_path}')
 
 
-def delete_file(storage_path: str) -> bool:
+def delete_file(storage_path: str | Path | None) -> bool:
     """Safely delete a stored file from storage."""
     if not storage_path:
         return False
+    str_path = str(storage_path)
     storage = get_storage()
-    deleted = storage.delete(storage_path)
-    if deleted:
-        return True
     try:
-        candidate = _resolve_within_base_storage(storage_path)
+        deleted = storage.delete(str_path)
+        if deleted:
+            return True
+    except Exception:
+        pass
+    try:
+        candidate = _resolve_within_base_storage(str_path)
         if candidate.exists() and candidate.is_file():
             candidate.unlink()
             return True

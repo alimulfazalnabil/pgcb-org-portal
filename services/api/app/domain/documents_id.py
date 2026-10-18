@@ -34,7 +34,7 @@ from app.schemas.documents_id import (
     PublicMemberVerificationResponse,
 )
 from app.services import BASE_STORAGE, audit, notify
-from app.utils.storage import scan_upload_security, validate_upload_bytes
+from app.utils.storage import delete_file, scan_upload_security, validate_upload_bytes
 
 MAX_PDF_SIZE_BYTES = int(os.getenv("MAX_DOCUMENT_PDF_BYTES", str(10 * 1024 * 1024)))  # 10 MB
 MAX_IMAGE_SIZE_BYTES = int(os.getenv("MAX_DOCUMENT_IMAGE_BYTES", str(5 * 1024 * 1024)))  # 5 MB
@@ -123,8 +123,12 @@ def create_member_document(
     title: str | None = None,
     user: User | None = None,
 ) -> MemberDocument:
-    clean_name, storage_path, file_size, mime_type = validate_and_save_upload(file_bytes, original_filename)
-
+    # 1. Early validation of document_type before saving file
+    if not document_type:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="document_type is required.",
+        )
     doc_type = document_type.strip().upper()
     if doc_type not in CONTROLLED_DOCUMENT_TYPES:
         raise HTTPException(
@@ -132,54 +136,62 @@ def create_member_document(
             detail=f"Invalid document category '{document_type}'. Controlled categories: {', '.join(CONTROLLED_DOCUMENT_TYPES)}",
         )
 
+    # 2. Validate upload bytes and write file to disk
+    clean_name, storage_path, file_size, mime_type = validate_and_save_upload(file_bytes, original_filename)
     display_title = title.strip() if title and title.strip() else clean_name
-
     now = datetime.utcnow()
-    doc = MemberDocument(
-        member_id=member.id,
-        document_type=doc_type,
-        title=display_title,
-        filename=clean_name,
-        storage_path=storage_path,
-        content_type=mime_type,
-        file_size=file_size,
-        version=1,
-        review_status="PENDING",
-        reviewer_note=None,
-        created_at=now,
-    )
-    db.add(doc)
-    db.flush()
 
-    # Create initial version
-    version_row = DocumentVersion(
-        document_id=doc.id,
-        version_number=1,
-        filename=clean_name,
-        storage_path=storage_path,
-        content_type=mime_type,
-        file_size=file_size,
-        review_status="PENDING",
-        reviewer_note=None,
-        uploaded_at=now,
-        created_at=now,
-    )
-    db.add(version_row)
+    # 3. Database operations with atomic rollback and cleanup on failure
+    try:
+        doc = MemberDocument(
+            member_id=member.id,
+            document_type=doc_type,
+            title=display_title,
+            filename=clean_name,
+            storage_path=storage_path,
+            content_type=mime_type,
+            file_size=file_size,
+            version=1,
+            review_status="PENDING",
+            reviewer_note=None,
+            created_at=now,
+        )
+        db.add(doc)
+        db.flush()
 
-    # Create audit/verification event
-    event = DocumentVerificationEvent(
-        document_id=doc.id,
-        action="UPLOAD",
-        actor_id=user.id if user else None,
-        previous_status=None,
-        new_status="PENDING",
-        note="Initial document upload",
-        created_at=now,
-    )
-    db.add(event)
-    db.commit()
-    db.refresh(doc)
-    return doc
+        # Create initial version
+        version_row = DocumentVersion(
+            document_id=doc.id,
+            version_number=1,
+            filename=clean_name,
+            storage_path=storage_path,
+            content_type=mime_type,
+            file_size=file_size,
+            review_status="PENDING",
+            reviewer_note=None,
+            uploaded_at=now,
+            created_at=now,
+        )
+        db.add(version_row)
+
+        # Create audit/verification event
+        event = DocumentVerificationEvent(
+            document_id=doc.id,
+            action="UPLOAD",
+            actor_id=user.id if user else None,
+            previous_status=None,
+            new_status="PENDING",
+            note="Initial document upload",
+            created_at=now,
+        )
+        db.add(event)
+        db.commit()
+        db.refresh(doc)
+        return doc
+    except Exception:
+        db.rollback()
+        delete_file(storage_path)
+        raise
 
 
 def replace_member_document(
@@ -189,50 +201,64 @@ def replace_member_document(
     original_filename: str,
     user: User | None = None,
 ) -> MemberDocument:
+    # Capture original storage path to guarantee it is preserved under all failure conditions
+    original_storage_path = document.storage_path
     clean_name, storage_path, file_size, mime_type = validate_and_save_upload(file_bytes, original_filename)
     new_version_num = (document.version or 1) + 1
     previous_status = document.review_status
 
     now = datetime.utcnow()
-    # Update current document record
-    document.version = new_version_num
-    document.filename = clean_name
-    document.storage_path = storage_path
-    document.content_type = mime_type
-    document.file_size = file_size
-    document.review_status = "UNDER_REVIEW"
-    document.reviewer_note = None
-    document.verified_at = None
+    try:
+        # Update current document record
+        document.version = new_version_num
+        document.filename = clean_name
+        document.storage_path = storage_path
+        document.content_type = mime_type
+        document.file_size = file_size
+        document.review_status = "UNDER_REVIEW"
+        document.reviewer_note = None
+        document.verified_at = None
 
-    # Add new immutable version row
-    version_row = DocumentVersion(
-        document_id=document.id,
-        version_number=new_version_num,
-        filename=clean_name,
-        storage_path=storage_path,
-        content_type=mime_type,
-        file_size=file_size,
-        review_status="UNDER_REVIEW",
-        reviewer_note=None,
-        uploaded_at=now,
-        created_at=now,
-    )
-    db.add(version_row)
+        # Add new immutable version row
+        version_row = DocumentVersion(
+            document_id=document.id,
+            version_number=new_version_num,
+            filename=clean_name,
+            storage_path=storage_path,
+            content_type=mime_type,
+            file_size=file_size,
+            review_status="UNDER_REVIEW",
+            reviewer_note=None,
+            uploaded_at=now,
+            created_at=now,
+        )
+        db.add(version_row)
 
-    # Add event
-    event = DocumentVerificationEvent(
-        document_id=document.id,
-        action="REPLACE",
-        actor_id=user.id if user else None,
-        previous_status=previous_status,
-        new_status="UNDER_REVIEW",
-        note=f"Member submitted revision (Version {new_version_num})",
-        created_at=now,
-    )
-    db.add(event)
-    db.commit()
-    db.refresh(document)
-    return document
+        # Add event
+        event = DocumentVerificationEvent(
+            document_id=document.id,
+            action="REPLACE",
+            actor_id=user.id if user else None,
+            previous_status=previous_status,
+            new_status="UNDER_REVIEW",
+            note=f"Member submitted revision (Version {new_version_num})",
+            created_at=now,
+        )
+        db.add(event)
+        db.flush()
+        db.commit()
+        db.refresh(document)
+        return document
+    except Exception:
+        db.rollback()
+        # Clean up ONLY the newly created file, NEVER delete the original document file
+        if storage_path and storage_path != original_storage_path:
+            delete_file(storage_path)
+        try:
+            db.refresh(document)
+        except Exception:
+            pass
+        raise
 
 
 def verify_document_by_admin(
