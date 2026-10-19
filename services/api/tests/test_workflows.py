@@ -1,5 +1,6 @@
 import os
-os.environ['DATABASE_URL'] = 'sqlite:///./test_workflows.db'
+if 'DATABASE_URL' not in os.environ:
+    os.environ['DATABASE_URL'] = 'sqlite:///./test_workflows.db'
 from fastapi.testclient import TestClient
 from app.main import app
 from app.db.session import Base, engine, SessionLocal

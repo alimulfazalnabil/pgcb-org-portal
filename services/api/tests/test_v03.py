@@ -1,5 +1,6 @@
 import os
-os.environ['DATABASE_URL'] = 'sqlite:///./test_v03.db'
+if 'DATABASE_URL' not in os.environ:
+    os.environ['DATABASE_URL'] = 'sqlite:///./test_v03.db'
 
 from fastapi.testclient import TestClient
 from io import BytesIO
