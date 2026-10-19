@@ -4,6 +4,23 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.models import AuditLog, Member, Notification, User
 from app.core.config import settings
+def set_base_storage(new_path: Path | str) -> Path:
+    """Set and synchronize BASE_STORAGE across all loaded application modules."""
+    global BASE_STORAGE
+    resolved = Path(new_path).resolve()
+    resolved.mkdir(parents=True, exist_ok=True)
+    BASE_STORAGE = resolved
+    import sys
+    for mod in list(sys.modules.values()):
+        if mod and getattr(mod, '__name__', '').startswith('app.'):
+            if hasattr(mod, 'BASE_STORAGE'):
+                try:
+                    setattr(mod, 'BASE_STORAGE', resolved)
+                except Exception:
+                    pass
+    return resolved
+
+
 try:
     BASE_STORAGE = Path(settings.storage_root).resolve()
     BASE_STORAGE.mkdir(parents=True, exist_ok=True)
@@ -73,6 +90,7 @@ __all__ = [
     'MAX_UPLOAD_BYTES',
     'ALLOWED_CONTENT_TYPES',
     'BASE_STORAGE',
+    'set_base_storage',
     'EmailService',
     'MembershipService',
     'EventService',

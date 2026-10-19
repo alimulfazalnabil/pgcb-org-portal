@@ -23,4 +23,8 @@ services/api/storage/cards/*
 !services/api/storage/**/.gitkeep
 backups/
 services/api/backups/
+# Ephemeral test storage directories
+services/api/tests/test_storage_isolated/
+services/api/tests/.test_storage/
+.test_storage/
 
