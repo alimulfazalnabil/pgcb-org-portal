@@ -311,10 +311,12 @@ def confirm_event_registration_payment(
         return None
 
     status = getattr(payment, "status", None)
-    if status is not None:
-        status_val = status.value if hasattr(status, "value") else str(status)
-        if status_val.upper() not in ("PAID", "SUCCESS", "COMPLETED"):
-            return None
+    if not status:
+        return None
+
+    status_val = (status.value if hasattr(status, "value") else str(status)).strip().upper()
+    if status_val not in ("PAID", "SUCCESS", "COMPLETED"):
+        return None
 
     reg = db.get(EventRegistration, payment.event_registration_id)
     if not reg:

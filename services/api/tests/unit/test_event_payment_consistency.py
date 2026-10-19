@@ -11,6 +11,7 @@ from app.core.security import create_access_token, hash_password
 from app.db.session import SessionLocal
 from app.main import app
 from app.models.core import Event, EventRegistration, Member, User, PaymentTransaction as CorePaymentTransaction
+from app.models.payments import PaymentStatus
 from app.routers.payments import admin_reconcile_payment
 from app.services.event_service import EventService
 from app.services.receipt_service import confirm_event_registration_payment
@@ -517,3 +518,137 @@ def test_sandbox_simulation_confirms_event_registration():
         reg_after2 = db.get(EventRegistration, reg_id)
         assert reg_after2.payment_status == "PAID"
         assert reg_after2.registration_status == "CONFIRMED"
+
+
+def test_missing_and_none_payment_status_rejected_safely():
+    """
+    8. Verifies that transactions with missing status, None, or empty/whitespace strings
+       are safely rejected by confirm_event_registration_payment() without modifying the registration.
+    """
+    with SessionLocal() as db:
+        admin, member, user, event = _setup_test_environment(db, fee_amount=500)
+
+        reg = EventRegistration(
+            event_id=event.id,
+            user_id=user.id,
+            member_id=member.id,
+            name=user.name_bn,
+            email=f"guard_{user.email}",
+            ticket_code=f"TKT-GUARD-{uuid.uuid4().hex[:8].upper()}",
+            registration_status="REGISTERED",
+            payment_status="REQUIRED",
+            attendance_status="NOT_CHECKED_IN",
+            registered_at=datetime.utcnow(),
+        )
+        db.add(reg)
+        db.commit()
+        reg_id = reg.id
+        event_id = event.id
+
+        # Case A: Object with completely missing 'status' attribute
+        class MissingStatusPayment:
+            event_registration_id = reg_id
+
+        res_missing = confirm_event_registration_payment(db, MissingStatusPayment())
+        assert res_missing is None
+
+        # Case B: Object with status = None
+        class NoneStatusPayment:
+            event_registration_id = reg_id
+            status = None
+
+        res_none = confirm_event_registration_payment(db, NoneStatusPayment())
+        assert res_none is None
+
+        # Case C: Object with empty or whitespace status
+        class WhitespaceStatusPayment:
+            event_registration_id = reg_id
+            status = "   "
+
+        res_ws = confirm_event_registration_payment(db, WhitespaceStatusPayment())
+        assert res_ws is None
+
+        # Case D: Real CorePaymentTransaction model instance with status set to None
+        tx = CorePaymentTransaction(
+            user_id=user.id,
+            member_id=member.id,
+            event_registration_id=reg_id,
+            purpose="EVENT",
+            amount=500,
+            currency="BDT",
+        )
+        tx.status = None
+
+        res_tx_none = confirm_event_registration_payment(db, tx)
+        assert res_tx_none is None
+
+        # Verify registration state remains untouched across all guards
+        db.commit()
+        reg_check = db.get(EventRegistration, reg_id)
+        assert reg_check.payment_status == "REQUIRED"
+        assert reg_check.registration_status == "REGISTERED"
+
+        # Check-in remains rejected
+        with pytest.raises(HTTPException) as exc_info:
+            EventService.check_in_attendee(db, event_id, reg_check.ticket_code, admin)
+        assert exc_info.value.status_code == 409
+        assert "Payment must be completed before check-in" in exc_info.value.detail
+
+
+def test_enum_and_case_insensitive_status_accepted():
+    """
+    9. Verifies that enum values (PaymentStatus.PAID) and case-insensitive strings
+       ('paid', 'SUCCESS', 'completed') safely confirm event registrations.
+    """
+    with SessionLocal() as db:
+        admin, member, user, event = _setup_test_environment(db, fee_amount=500)
+
+        # 9A: PaymentStatus Enum
+        reg_enum = EventRegistration(
+            event_id=event.id,
+            user_id=user.id,
+            member_id=member.id,
+            name=user.name_bn,
+            email=f"enum_{user.email}",
+            ticket_code=f"TKT-ENUM-{uuid.uuid4().hex[:8].upper()}",
+            registration_status="REGISTERED",
+            payment_status="REQUIRED",
+            attendance_status="NOT_CHECKED_IN",
+            registered_at=datetime.utcnow(),
+        )
+        db.add(reg_enum)
+        db.commit()
+
+        class EnumPayment:
+            event_registration_id = reg_enum.id
+            status = PaymentStatus.PAID
+
+        res_enum = confirm_event_registration_payment(db, EnumPayment())
+        assert res_enum is not None
+        assert reg_enum.payment_status == "PAID"
+        assert reg_enum.registration_status == "CONFIRMED"
+
+        # 9B: Lowercase string 'paid'
+        reg_str = EventRegistration(
+            event_id=event.id,
+            user_id=user.id,
+            member_id=member.id,
+            name=user.name_bn,
+            email=f"str_{user.email}",
+            ticket_code=f"TKT-STR-{uuid.uuid4().hex[:8].upper()}",
+            registration_status="REGISTERED",
+            payment_status="REQUIRED",
+            attendance_status="NOT_CHECKED_IN",
+            registered_at=datetime.utcnow(),
+        )
+        db.add(reg_str)
+        db.commit()
+
+        class LowercasePayment:
+            event_registration_id = reg_str.id
+            status = "paid"
+
+        res_str = confirm_event_registration_payment(db, LowercasePayment())
+        assert res_str is not None
+        assert reg_str.payment_status == "PAID"
+        assert reg_str.registration_status == "CONFIRMED"

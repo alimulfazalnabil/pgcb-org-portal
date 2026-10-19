@@ -2228,30 +2228,92 @@ def payments(status: str | None = None, purpose: str | None = None, limit: int =
 
 @router.patch('/payments/{payment_id}')
 def update_payment(payment_id: int, payload: PaymentStatusUpdate, request: Request, admin: User = Depends(require_permission('finance.write')), db: Session = Depends(get_db)):
-    allowed = {'PENDING', 'PAID', 'FAILED', 'REFUNDED', 'CANCELLED'}
-    if payload.status not in allowed: raise HTTPException(400, 'Invalid payment status')
+    tgt_status = (payload.status or '').strip().upper()
+
+    # 1. Prevent refund workflow bypass: direct admins to dedicated refund route
+    if tgt_status in ('REFUNDED', 'PARTIALLY_REFUNDED'):
+        db.rollback()
+        raise HTTPException(
+            400,
+            "Refunds cannot be processed via generic status update. "
+            "Please use the dedicated refund endpoint POST /api/v1/payments/admin/payments/{payment_id}/refund",
+        )
+
+    allowed = {'PENDING', 'PAID', 'FAILED', 'CANCELLED'}
+    if tgt_status not in allowed:
+        db.rollback()
+        raise HTTPException(400, 'Invalid payment status')
+
     item = db.get(PaymentTransaction, payment_id)
-    if not item: raise HTTPException(404, 'Payment not found')
-    item.status = payload.status
-    if payload.transaction_ref is not None: item.transaction_ref = payload.transaction_ref
-    if payload.status == 'PAID':
-        from app.services.receipt_service import activate_membership_from_payment, ensure_receipt_metadata
+    if not item:
+        db.rollback()
+        raise HTTPException(404, 'Payment not found')
+
+    # 2. Protect manual payment reconciliation: require adequate reference / evidence when marking PAID
+    if tgt_status == 'PAID':
+        cand_ref = payload.transaction_ref if payload.transaction_ref is not None else item.transaction_ref
+        effective_ref = (cand_ref or '').strip()
+        if not effective_ref:
+            db.rollback()
+            raise HTTPException(
+                400,
+                "Payment cannot be marked PAID without adequate transaction-reference or reconciliation evidence. "
+                "Please provide a transaction_ref or use the reconciliation endpoint POST /api/v1/payments/admin/payments/{payment_id}/reconcile",
+            )
+
+    # 3. Enforce payment state transitions using existing payment state machine
+    from app.services.payment_service import transition_payment_status
+    try:
+        transition_payment_status(item, tgt_status)
+    except HTTPException:
+        db.rollback()
+        raise
+
+    # 4. Handle reference update if non-empty string provided
+    if payload.transaction_ref is not None:
+        trimmed_ref = payload.transaction_ref.strip()
+        if trimmed_ref:
+            item.transaction_ref = trimmed_ref
+
+    # 5. Handle successful payment confirmation and related records
+    if tgt_status == 'PAID':
+        from app.services.receipt_service import (
+            activate_membership_from_payment,
+            confirm_event_registration_payment,
+            ensure_receipt_metadata,
+        )
         ensure_receipt_metadata(item)
+
+        # Populate provider transaction ID and reconciliation audit metadata
+        ref_for_prov = item.transaction_ref or (payload.transaction_ref and payload.transaction_ref.strip())
+        if not item.provider_transaction_id and ref_for_prov:
+            item.provider_transaction_id = ref_for_prov
+
+        payload_data = dict(item.provider_payload or {})
+        payload_data["reconciled_by"] = admin.id
+        payload_data["reconciliation_note"] = "Admin payment status update"
+        payload_data["reconciled_at"] = datetime.utcnow().isoformat()
+        item.provider_payload = payload_data
+
         if item.purpose in {'MEMBERSHIP', 'RENEWAL', 'APPLICATION'} and item.member_id:
             member = db.get(Member, item.member_id)
             if not member:
+                db.rollback()
                 raise HTTPException(409, 'Member not found for renewal')
             activate_membership_from_payment(db, item)
-    if item.event_registration_id:
-        reg = db.get(EventRegistration, item.event_registration_id)
-        if reg:
-            if payload.status == 'PAID':
-                reg.payment_status = 'PAID'
-                if reg.registration_status == 'REGISTERED':
-                    reg.registration_status = 'CONFIRMED'
-            elif payload.status == 'FAILED': reg.payment_status = 'FAILED'
-            elif payload.status == 'REFUNDED': reg.payment_status = 'REFUNDED'
-    audit(db, admin, 'UPDATE_PAYMENT', 'PAYMENT', item.id, _actor_ip(request)); db.commit()
+
+        if item.event_registration_id:
+            confirm_event_registration_payment(db, item)
+    elif tgt_status in ('FAILED', 'CANCELLED'):
+        # For non-paid terminal transitions, maintain consistency without revoking already confirmed access
+        if item.event_registration_id:
+            reg = db.get(EventRegistration, item.event_registration_id)
+            if reg and reg.payment_status != 'PAID':
+                reg.payment_status = tgt_status
+
+    audit(db, admin, 'UPDATE_PAYMENT', 'PAYMENT', item.id, _actor_ip(request))
+    db.commit()
+    db.refresh(item)
     return {'ok': True, 'status': item.status, 'receipt_no': item.receipt_no}
 
 @router.get('/notification-deliveries')
