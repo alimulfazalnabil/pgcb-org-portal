@@ -19,6 +19,7 @@ from app.services.receipt_service import (
     activate_membership_from_payment,
     build_receipt_payload,
     calculate_official_fee,
+    confirm_event_registration_payment,
     ensure_receipt_metadata,
     generate_receipt_pdf_bytes,
     get_fee_schedule,
@@ -134,6 +135,8 @@ async def handle_payment_webhook(
         if core_tx.status in ("PAID", "SUCCESS"):
             if gateway_status in ("FAILED", "CANCELLED", "EXPIRED"):
                 raise HTTPException(status_code=409, detail=f"Illegal payment state transition: {core_tx.status} -> {gateway_status}")
+            confirm_event_registration_payment(db, core_tx)
+            db.commit()
             return {"status": "already_processed", "idempotent_replay": True, "receipt_no": core_tx.receipt_no}
 
         if gateway_status == "SUCCESS":
@@ -141,6 +144,7 @@ async def handle_payment_webhook(
                 core_tx.provider_transaction_id = provider_trx_id
                 transition_payment_status(core_tx, "PAID")
                 ensure_receipt_metadata(core_tx)
+                confirm_event_registration_payment(db, core_tx)
                 activate_membership_from_payment(db, core_tx)
                 webhook_log.is_processed = True
                 db.commit()
@@ -182,12 +186,15 @@ async def handle_payment_webhook(
         raise HTTPException(status_code=404, detail="Transaction not found")
 
     if transaction.status in (PaymentStatus.PAID, "PAID", "SUCCESS"):
+        confirm_event_registration_payment(db, transaction)
+        db.commit()
         return {"status": "already_processed"}
 
     if gateway_status == "SUCCESS":
         if payment_service.verify_payment(provider_trx_id, expected_amount=float(transaction.amount)):
             transaction.status = PaymentStatus.PAID
             transaction.completed_at = datetime.utcnow()
+            confirm_event_registration_payment(db, transaction)
             webhook_log.is_processed = True
             webhook_log.transaction_id = transaction.id
             db.commit()
@@ -367,6 +374,8 @@ def create_checkout_intent(
         user,
         membership_plan_id=payload.membership_plan_id,
     )
+    if registration:
+        registration.payment_status = 'PENDING'
 
     item = CorePaymentTransaction(
         user_id=user.id,
@@ -441,6 +450,8 @@ def confirm_payment_transaction(
 
     # Idempotency check: if already PAID/SUCCESS, return existing result without re-processing
     if payment.status in ("PAID", "SUCCESS"):
+        confirm_event_registration_payment(db, payment)
+        db.commit()
         return {
             "id": payment.id,
             "status": payment.status,
@@ -473,6 +484,7 @@ def confirm_payment_transaction(
     payment.provider_transaction_id = ref_to_verify
     transition_payment_status(payment, "PAID")
     ensure_receipt_metadata(payment)
+    confirm_event_registration_payment(db, payment)
     activate_membership_from_payment(db, payment)
     db.commit()
     db.refresh(payment)
@@ -539,6 +551,8 @@ def callback_payment_transaction(
     if payment.status in ("PAID", "SUCCESS"):
         if target_status in ("FAILED", "CANCELLED", "EXPIRED"):
             raise HTTPException(409, f"Illegal payment state transition: {payment.status} -> {target_status}")
+        confirm_event_registration_payment(db, payment)
+        db.commit()
         return {
             "id": payment.id,
             "payment_id": payment.id,
@@ -581,6 +595,7 @@ def callback_payment_transaction(
     payment.provider_transaction_id = prov_trx_id
     transition_payment_status(payment, "PAID")
     ensure_receipt_metadata(payment)
+    confirm_event_registration_payment(db, payment)
     activate_membership_from_payment(db, payment)
     db.commit()
     db.refresh(payment)
@@ -1038,6 +1053,7 @@ def admin_reconcile_payment(
 
     transition_payment_status(payment, "PAID")
     ensure_receipt_metadata(payment)
+    confirm_event_registration_payment(db, payment)
     activate_membership_from_payment(db, payment)
 
     payload_data = dict(payment.provider_payload or {})
@@ -1149,6 +1165,8 @@ def simulate_sandbox_payment_webhook(
         raise HTTPException(400, "Tampered payment amount does not match server record")
 
     if core_tx.status in ("PAID", "SUCCESS"):
+        confirm_event_registration_payment(db, core_tx)
+        db.commit()
         return {
             "status": "already_processed",
             "idempotent_replay": True,
@@ -1177,6 +1195,7 @@ def simulate_sandbox_payment_webhook(
         core_tx.transaction_ref = sim_trx_id
     transition_payment_status(core_tx, "PAID")
     ensure_receipt_metadata(core_tx)
+    confirm_event_registration_payment(db, core_tx)
     activate_membership_from_payment(db, core_tx)
 
     webhook_log = PaymentWebhook(

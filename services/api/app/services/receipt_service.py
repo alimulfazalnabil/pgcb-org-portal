@@ -17,7 +17,7 @@ import qrcode
 
 from app.core.config import settings
 from app.domain.membership import renew_membership
-from app.models import Certificate, Event, Member, MembershipRenewal, Notification, PaymentTransaction, SiteSetting, User
+from app.models import Certificate, Event, EventRegistration, Member, MembershipRenewal, Notification, PaymentTransaction, SiteSetting, User
 from app.services import next_membership_id
 from app.services.email import EmailService
 
@@ -294,6 +294,38 @@ def activate_membership_from_payment(
 
     return member
 
+
+def confirm_event_registration_payment(
+    db: Session,
+    payment: Any,
+) -> EventRegistration | None:
+    """
+    Synchronize event registration status upon successful payment verification.
+    If the payment is linked to an EventRegistration and is in a paid/successful state:
+    - Sets EventRegistration.payment_status to 'PAID'.
+    - Updates EventRegistration.registration_status from 'REGISTERED' to 'CONFIRMED'.
+    - Preserves other statuses such as 'WAITLISTED' or 'CANCELLED'.
+    - Idempotent: safe to invoke repeatedly on duplicate callbacks or replays.
+    """
+    if not payment or not getattr(payment, "event_registration_id", None):
+        return None
+
+    status = getattr(payment, "status", None)
+    if status is not None:
+        status_val = status.value if hasattr(status, "value") else str(status)
+        if status_val.upper() not in ("PAID", "SUCCESS", "COMPLETED"):
+            return None
+
+    reg = db.get(EventRegistration, payment.event_registration_id)
+    if not reg:
+        return None
+
+    reg.payment_status = "PAID"
+    if reg.registration_status == "REGISTERED":
+        reg.registration_status = "CONFIRMED"
+
+    db.flush()
+    return reg
 
 
 def build_receipt_payload(db: Session, payment: PaymentTransaction) -> dict:

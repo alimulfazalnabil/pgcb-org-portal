@@ -22,6 +22,7 @@ from app.services import audit, notify
 from app.services.email import EmailService
 from app.services.receipt_service import (
     activate_membership_from_payment,
+    confirm_event_registration_payment,
     ensure_receipt_metadata,
     resolve_plan_amount,
 )
@@ -351,6 +352,8 @@ class PaymentService:
         if trx.status in ('SUCCESS', 'PAID'):
             if is_failure_attempt:
                 raise HTTPException(409, f'Illegal payment state transition: {trx.status} -> {incoming_status}')
+            confirm_event_registration_payment(db, trx)
+            db.commit()
             return trx
 
         # If transaction is already in a terminal failure/refunded state, forbid re-completing via callback
@@ -380,6 +383,7 @@ class PaymentService:
             trx.provider_payload = merged_payload
             trx.updated_at = datetime.utcnow()
             ensure_receipt_metadata(trx)
+            confirm_event_registration_payment(db, trx)
             activate_membership_from_payment(db, trx)
             audit(db, actor_user, 'COMPLETE_PAYMENT', 'PAYMENT', trx.id, ip)
 

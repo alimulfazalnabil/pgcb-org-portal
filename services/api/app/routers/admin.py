@@ -2245,7 +2245,10 @@ def update_payment(payment_id: int, payload: PaymentStatusUpdate, request: Reque
     if item.event_registration_id:
         reg = db.get(EventRegistration, item.event_registration_id)
         if reg:
-            if payload.status == 'PAID': reg.payment_status = 'PAID'
+            if payload.status == 'PAID':
+                reg.payment_status = 'PAID'
+                if reg.registration_status == 'REGISTERED':
+                    reg.registration_status = 'CONFIRMED'
             elif payload.status == 'FAILED': reg.payment_status = 'FAILED'
             elif payload.status == 'REFUNDED': reg.payment_status = 'REFUNDED'
     audit(db, admin, 'UPDATE_PAYMENT', 'PAYMENT', item.id, _actor_ip(request)); db.commit()

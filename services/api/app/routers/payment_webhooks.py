@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.integrations.payments import get_payment_provider, parse_webhook, payment_status_from_provider, verify_hmac_signature
 from app.models import EventRegistration, PaymentTransaction, PaymentWebhookEvent
-from app.services.receipt_service import activate_membership_from_payment, ensure_receipt_metadata
+from app.services.receipt_service import activate_membership_from_payment, confirm_event_registration_payment, ensure_receipt_metadata
 
 router = APIRouter(prefix='/payments/webhooks', tags=['payment-webhooks'])
 
@@ -60,6 +60,7 @@ async def receive_webhook(provider: str, request: Request, x_signature: str | No
             event.processed_at = datetime.utcnow()
             db.commit()
             raise HTTPException(409, f'Illegal payment state transition: {payment.status} -> {status}')
+        confirm_event_registration_payment(db, payment)
         event.processing_status = 'ALREADY_PROCESSED'
         event.processed_at = datetime.utcnow()
         db.commit()
@@ -91,10 +92,7 @@ async def receive_webhook(provider: str, request: Request, x_signature: str | No
 
     if status == 'PAID':
         ensure_receipt_metadata(payment)
-        if payment.event_registration_id:
-            registration = db.get(EventRegistration, payment.event_registration_id)
-            if registration:
-                registration.payment_status = 'PAID'
+        confirm_event_registration_payment(db, payment)
         if payment.purpose in {'MEMBERSHIP', 'MEMBERSHIP_FEE', 'RENEWAL', 'APPLICATION'}:
             activate_membership_from_payment(db, payment)
 
