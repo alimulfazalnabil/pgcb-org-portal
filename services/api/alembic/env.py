@@ -18,6 +18,11 @@ elif db_url.startswith('postgresql://'):
 elif db_url.startswith('postgresql+psycopg2://'):
     db_url = db_url.replace('postgresql+psycopg2://', 'postgresql+psycopg://', 1)
 
+from app.db.safety import is_test_migration_active, validate_test_database_url
+
+if is_test_migration_active(settings.app_env):
+    validate_test_database_url(db_url, app_env=settings.app_env)
+
 config.set_main_option('sqlalchemy.url', db_url.replace('%', '%%'))
 if config.config_file_name:
     fileConfig(config.config_file_name)

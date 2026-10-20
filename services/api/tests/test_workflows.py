@@ -6,7 +6,13 @@ from app.main import app
 from app.db.session import Base, engine, SessionLocal
 from app.db.seed import main as seed_main
 
-Base.metadata.create_all(bind=engine)
+from app.db.safety import validate_test_database_url, assert_destructive_database_permitted
+
+def setup_module():
+    validate_test_database_url(str(engine.url))
+    assert_destructive_database_permitted(str(engine.url), action_name="test_workflows_setup", app_env="test")
+    Base.metadata.create_all(bind=engine)
+
 client = TestClient(app)
 
 def test_public_content_and_verification():

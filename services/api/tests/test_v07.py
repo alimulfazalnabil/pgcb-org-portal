@@ -13,9 +13,15 @@ from app.db.seed import main as seed_main
 from app.models import Event, EventRegistration, Member, MembershipRenewal, PaymentTransaction, User
 from app.core.security import hash_password
 
-Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
-seed_main()
+from app.db.safety import validate_test_database_url, assert_destructive_database_permitted
+
+def setup_module():
+    validate_test_database_url(str(engine.url))
+    assert_destructive_database_permitted(str(engine.url), action_name="test_v07_setup", app_env="test")
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    seed_main()
+
 client = TestClient(app)
 
 def reset_demo_accounts():

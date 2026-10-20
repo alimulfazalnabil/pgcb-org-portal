@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import hash_password
+from app.db.safety import assert_destructive_database_permitted, validate_test_database_url
 from app.db.session import Base, SessionLocal, engine
 from app.models import (
     Circle,
@@ -93,6 +94,13 @@ def seed_synthetic_members(db: Session, count: int = 2000) -> int:
     Strictly forbidden in staging/production environments.
     Never uses real personal data.
     """
+    db_bind = db.get_bind()
+    bind_url = str(db_bind.url) if db_bind is not None else str(engine.url)
+    assert_destructive_database_permitted(
+        bind_url,
+        action_name="seed_synthetic_members",
+        app_env=settings.app_env,
+    )
     if settings.is_production_like:
         raise RuntimeError('Synthetic member seeding is forbidden in staging/production environments.')
 
@@ -184,7 +192,15 @@ def main(synthetic_count: int = 0, production_only: bool = False, import_officia
     env_mode = settings.app_env.lower()
     is_prod_like = settings.is_production_like or production_only
 
+    if env_mode == 'test':
+        validate_test_database_url(str(engine.url), app_env=settings.app_env)
+
     if not is_prod_like:
+        assert_destructive_database_permitted(
+            str(engine.url),
+            action_name="seed_main_create_all",
+            app_env=settings.app_env,
+        )
         Base.metadata.create_all(bind=engine)
         if str(engine.url).startswith('sqlite'):
             try:
@@ -200,6 +216,16 @@ def main(synthetic_count: int = 0, production_only: bool = False, import_officia
                 pass
 
     db = SessionLocal()
+    db_bind = db.get_bind()
+    db_url_str = str(db_bind.url) if db_bind is not None else str(engine.url)
+    if env_mode == 'test':
+        validate_test_database_url(db_url_str, app_env=settings.app_env)
+    if not is_prod_like:
+        assert_destructive_database_permitted(
+            db_url_str,
+            action_name="seed_main_write",
+            app_env=settings.app_env,
+        )
     try:
         from app.models import Role
         from app.core.rbac import ROLE_PERMISSIONS
