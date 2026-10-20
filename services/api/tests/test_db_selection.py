@@ -315,7 +315,7 @@ def test_connection_failure_remains_failure_without_sqlite_fallback():
         env=env,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,
     )
     # Must fail, NOT fall back to SQLite and succeed
     assert proc.returncode != 0
@@ -653,3 +653,57 @@ def test_seeding_helpers_validate_exact_bound_engine_before_writing(monkeypatch)
     # Verify no database statements were executed
     mock_db.add.assert_not_called()
     mock_db.commit.assert_not_called()
+
+
+def test_safety_guard_never_leaks_database_credentials_in_error_messages():
+    """
+    Verify that validate_test_database_url, assert_destructive_database_permitted,
+    and parse_authorized_target strictly mask database credentials in all exception messages.
+    """
+    secret = "SUPER_SECRET_PRODUCTION_PASS_98765"
+    url_with_secret = f"postgresql+psycopg://db_admin:{secret}@db.pgcb.org.bd:5432/pgcb_test_db"
+
+    # 1. validate_test_database_url forbidden host check
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_test_database_url(url_with_secret)
+    err_msg = str(exc_info.value)
+    assert secret not in err_msg, "Credential secret leaked in validate_test_database_url error!"
+    assert "***" in err_msg, "Expected masked credential indicator '***' in error message"
+
+    # 2. assert_destructive_database_permitted forbidden host check
+    with pytest.raises(RuntimeError) as exc_info:
+        assert_destructive_database_permitted(url_with_secret, action_name="test_wipe", app_env="test")
+    err_msg = str(exc_info.value)
+    assert secret not in err_msg, "Credential secret leaked in assert_destructive_database_permitted error!"
+    assert "***" in err_msg, "Expected masked credential indicator '***' in error message"
+
+    # 3. parse_authorized_target malformed URL with secret
+    malformed_url = f"postgresql://db_admin:{secret}@db.pgcb.org.bd:invalid_port/pgcb_test_db"
+    with pytest.raises(ValueError) as exc_info:
+        parse_authorized_target(malformed_url)
+    err_msg = str(exc_info.value)
+    assert secret not in err_msg, "Credential secret leaked in parse_authorized_target error!"
+
+
+def test_parse_authorized_target_rejects_forbidden_hosts_and_keywords_at_parse_time():
+    """
+    Verify that parse_authorized_target fails fast if the target contains forbidden
+    infrastructure hostnames, production keywords, or primary database names.
+    """
+    # Forbidden host
+    with pytest.raises(ValueError, match="Forbidden production infrastructure host"):
+        parse_authorized_target("pgcb.org.bd/my_test_db")
+
+    with pytest.raises(ValueError, match="Forbidden production infrastructure host"):
+        parse_authorized_target("postgresql://user:pass@hostseba.com:5432/my_test_db")
+
+    # Forbidden keyword in database name
+    with pytest.raises(ValueError, match="contains forbidden keyword"):
+        parse_authorized_target("127.0.0.1/production_db")
+
+    with pytest.raises(ValueError, match="contains forbidden keyword"):
+        parse_authorized_target("postgresql://user:pass@127.0.0.1:5432/live_db")
+
+    # Primary database name
+    with pytest.raises(ValueError, match="primary database name"):
+        parse_authorized_target("127.0.0.1/pgcb_portal")

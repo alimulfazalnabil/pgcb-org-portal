@@ -100,17 +100,19 @@ def apply_to_database(data: dict) -> dict:
 
     db = SessionLocal()
     db_bind = db.get_bind()
-    if db_bind is not None:
-        from app.core.config import settings
-        from app.db.safety import validate_test_database_url, assert_destructive_database_permitted
-        if settings.app_env.lower() == 'test':
-            validate_test_database_url(str(db_bind.url), app_env=settings.app_env)
-        elif not settings.is_production_like:
-            assert_destructive_database_permitted(
-                str(db_bind.url),
-                action_name="import_official_members",
-                app_env=settings.app_env,
-            )
+    from app.core.config import settings
+    from app.db.safety import validate_test_database_url, assert_destructive_database_permitted
+    from app.db.session import engine
+    bind_url = str(db_bind.url) if db_bind is not None else str(engine.url)
+
+    if settings.app_env.lower() == 'test':
+        validate_test_database_url(bind_url, app_env=settings.app_env)
+    elif not settings.is_production_like:
+        assert_destructive_database_permitted(
+            bind_url,
+            action_name="import_official_members",
+            app_env=settings.app_env,
+        )
     created_circles = 0
     created_users = 0
     updated_members = 0

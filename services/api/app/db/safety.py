@@ -8,6 +8,7 @@ test fixtures, and destructive operations (drop, create, synthetic seed, test re
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from urllib.parse import unquote
 from sqlalchemy.engine import make_url
@@ -51,6 +52,18 @@ APPROVED_TEST_DB_NAMES = frozenset({
 APPROVED_TEST_DB_SUFFIXES = ("_test", "_test_db")
 
 
+def mask_url_credentials(url: str) -> str:
+    """Mask user credentials in database URLs to prevent credential leakage in error messages and logs."""
+    if not url or not str(url).strip():
+        return ""
+    try:
+        u = make_url(url)
+        return u.render_as_string(hide_password=True)
+    except Exception:
+        # Regex fallback for malformed or unparseable URLs containing credentials
+        return re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', str(url))
+
+
 def parse_authorized_target(target_str: str) -> tuple[str, int | None, str]:
     """
     Parse AUTHORIZED_TEST_DB_TARGET into (host, port, database).
@@ -72,13 +85,22 @@ def parse_authorized_target(target_str: str) -> tuple[str, int | None, str]:
             d = unquote(u.database or "").lower()
             if not h or not d:
                 raise ValueError()
+            for f_host in FORBIDDEN_HOSTS:
+                if f_host in h:
+                    raise ValueError(f"Forbidden production infrastructure host '{h}' in AUTHORIZED_TEST_DB_TARGET")
+            if any(keyword in d for keyword in FORBIDDEN_DB_KEYWORDS):
+                raise ValueError(f"Database name '{d}' in AUTHORIZED_TEST_DB_TARGET contains forbidden keyword")
+            if d in PRIMARY_DB_NAMES:
+                raise ValueError(f"Database name '{d}' in AUTHORIZED_TEST_DB_TARGET is the primary database name")
             return h, p, d
         except Exception as exc:
-            raise ValueError(f"Malformed URL in AUTHORIZED_TEST_DB_TARGET: {target}") from exc
+            if isinstance(exc, ValueError) and ("Forbidden" in str(exc) or "forbidden" in str(exc) or "primary database" in str(exc)):
+                raise
+            raise ValueError(f"Malformed URL in AUTHORIZED_TEST_DB_TARGET: {mask_url_credentials(target)}") from exc
 
     if "/" not in target:
         raise ValueError(
-            f"Malformed AUTHORIZED_TEST_DB_TARGET '{target}'. "
+            f"Malformed AUTHORIZED_TEST_DB_TARGET '{mask_url_credentials(target)}'. "
             "Must be in format 'host[:port]/database' or 'postgresql://...'"
         )
 
@@ -89,10 +111,19 @@ def parse_authorized_target(target_str: str) -> tuple[str, int | None, str]:
         d = unquote(u.database or "").lower()
         if not h or not d:
             raise ValueError()
+        for f_host in FORBIDDEN_HOSTS:
+            if f_host in h:
+                raise ValueError(f"Forbidden production infrastructure host '{h}' in AUTHORIZED_TEST_DB_TARGET")
+        if any(keyword in d for keyword in FORBIDDEN_DB_KEYWORDS):
+            raise ValueError(f"Database name '{d}' in AUTHORIZED_TEST_DB_TARGET contains forbidden keyword")
+        if d in PRIMARY_DB_NAMES:
+            raise ValueError(f"Database name '{d}' in AUTHORIZED_TEST_DB_TARGET is the primary database name")
         return h, p, d
     except Exception as exc:
+        if isinstance(exc, ValueError) and ("Forbidden" in str(exc) or "forbidden" in str(exc) or "primary database" in str(exc)):
+            raise
         raise ValueError(
-            f"Malformed AUTHORIZED_TEST_DB_TARGET '{target}'. Expected 'host[:port]/database'."
+            f"Malformed AUTHORIZED_TEST_DB_TARGET '{mask_url_credentials(target)}'. Expected 'host[:port]/database'."
         ) from exc
 
 
@@ -104,7 +135,7 @@ def validate_test_database_url(url: str, app_env: str | None = None) -> None:
     unquoted_raw = unquote(url).lower().replace('\\', '/')
     if "pgcb_portal.db" in unquoted_raw or "pgcb.db" in unquoted_raw:
         raise RuntimeError(
-            f"SAFETY VIOLATION: Test suite cannot run against primary database file: {url}. "
+            f"SAFETY VIOLATION: Test suite cannot run against primary database file: {mask_url_credentials(url)}. "
             "Tests must never modify or connect to 'pgcb_portal.db'."
         )
 
@@ -115,7 +146,7 @@ def validate_test_database_url(url: str, app_env: str | None = None) -> None:
     try:
         parsed_url = make_url(url)
     except Exception as exc:
-        raise RuntimeError(f"SAFETY VIOLATION: Invalid database URL format: {url}") from exc
+        raise RuntimeError(f"SAFETY VIOLATION: Invalid database URL format: {mask_url_credentials(url)}") from exc
 
     # Unconditional check: SQLite primary database references
     if parsed_url.drivername.startswith("sqlite"):
@@ -124,24 +155,24 @@ def validate_test_database_url(url: str, app_env: str | None = None) -> None:
             db_unquoted = unquote(db_file).lower().replace('\\', '/')
             if "pgcb_portal" in db_unquoted or "pgcb.db" in db_unquoted:
                 raise RuntimeError(
-                    f"SAFETY VIOLATION: SQLite database target references primary database: {url}"
+                    f"SAFETY VIOLATION: SQLite database target references primary database: {mask_url_credentials(url)}"
                 )
             try:
                 resolved_target = Path(unquote(db_file)).resolve()
                 primary_portal = (Path(__file__).resolve().parents[2] / "pgcb_portal.db").resolve()
                 if resolved_target == primary_portal:
                     raise RuntimeError(
-                        f"SAFETY VIOLATION: SQLite database path resolves to primary database: {url}"
+                        f"SAFETY VIOLATION: SQLite database path resolves to primary database: {mask_url_credentials(url)}"
                     )
                 if resolved_target.name.lower() in ("pgcb_portal.db", "pgcb.db"):
                     raise RuntimeError(
-                        f"SAFETY VIOLATION: SQLite database filename matches primary database: {url}"
+                        f"SAFETY VIOLATION: SQLite database filename matches primary database: {mask_url_credentials(url)}"
                     )
                 if resolved_target.exists() and primary_portal.exists():
                     try:
                         if os.path.samefile(resolved_target, primary_portal):
                             raise RuntimeError(
-                                f"SAFETY VIOLATION: SQLite database path is an alias/link to primary database: {url}"
+                                f"SAFETY VIOLATION: SQLite database path is an alias/link to primary database: {mask_url_credentials(url)}"
                             )
                     except (OSError, ValueError):
                         pass
@@ -159,7 +190,7 @@ def validate_test_database_url(url: str, app_env: str | None = None) -> None:
     for f_host in FORBIDDEN_HOSTS:
         if f_host in host:
             raise RuntimeError(
-                f"SAFETY VIOLATION: Test DATABASE_URL targets production infrastructure ({host}): {url}"
+                f"SAFETY VIOLATION: Test DATABASE_URL targets production infrastructure ({host}): {mask_url_credentials(url)}"
             )
 
     # 2. Unconditional check: Forbidden database names/keywords
@@ -297,7 +328,7 @@ def assert_destructive_database_permitted(
         if "pgcb_portal.db" in unquoted_raw or "pgcb.db" in unquoted_raw:
             raise RuntimeError(
                 f"SAFETY VIOLATION: Destructive test operation '{action_name}' cannot target "
-                f"primary database file: {url}."
+                f"primary database file: {mask_url_credentials(url)}."
             )
         # In test mode, enforce full test database authorization
         validate_test_database_url(url, app_env=effective_env)
@@ -307,7 +338,7 @@ def assert_destructive_database_permitted(
     try:
         parsed_url = make_url(url)
     except Exception as exc:
-        raise RuntimeError(f"SAFETY VIOLATION: Invalid database URL format for '{action_name}': {url}") from exc
+        raise RuntimeError(f"SAFETY VIOLATION: Invalid database URL format for '{action_name}': {mask_url_credentials(url)}") from exc
 
     if not parsed_url.drivername.startswith("sqlite"):
         host = (parsed_url.host or "").lower().strip("[]")
@@ -317,13 +348,13 @@ def assert_destructive_database_permitted(
             if f_host in host:
                 raise RuntimeError(
                     f"SAFETY VIOLATION: Destructive operation '{action_name}' targets "
-                    f"forbidden production infrastructure host '{host}': {url}"
+                    f"forbidden production infrastructure host '{host}': {mask_url_credentials(url)}"
                 )
 
         if any(keyword in database for keyword in FORBIDDEN_DB_KEYWORDS):
             raise RuntimeError(
                 f"SAFETY VIOLATION: Destructive operation '{action_name}' targets "
-                f"forbidden database '{database}' containing production keywords: {url}"
+                f"forbidden database '{database}' containing production keywords: {mask_url_credentials(url)}"
             )
 
 
