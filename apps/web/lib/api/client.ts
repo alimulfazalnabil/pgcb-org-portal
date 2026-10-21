@@ -6,10 +6,15 @@
 function resolveServerApiUrl(): string {
   const internalUrl = (process.env.INTERNAL_API_URL || '').trim();
   const publicUrl = (process.env.NEXT_PUBLIC_API_URL || '').trim();
+  const isProd = process.env.NODE_ENV === 'production';
+  const defaultTarget = isProd
+    ? 'https://api.powergriddiprocoush.org'
+    : 'http://127.0.0.1:8000';
+
   const candidate =
     internalUrl ||
     (publicUrl && !publicUrl.startsWith('/') ? publicUrl : '') ||
-    'http://127.0.0.1:8000';
+    defaultTarget;
 
   let normalized = candidate.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
   if (!/^https?:\/\//i.test(normalized)) {

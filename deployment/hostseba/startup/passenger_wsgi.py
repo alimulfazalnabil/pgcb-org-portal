@@ -1,36 +1,27 @@
 """
 HostSeba / CloudLinux Phusion Passenger Entrypoint for PGCB FastAPI Backend.
 Located at: deployment/hostseba/startup/passenger_wsgi.py
+Delegates to services/api/passenger_wsgi.py
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
-API_DIR = Path(__file__).resolve().parents[3] / "services" / "api"
-if not (API_DIR / "app" / "main.py").is_file():
-    # If symlinked or placed at repo root or services/api
-    for candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parent / "services" / "api"):
-        if (candidate / "app" / "main.py").is_file():
-            API_DIR = candidate
+_API_DIR = Path(__file__).resolve().parents[3] / "services" / "api"
+if not (_API_DIR / "passenger_wsgi.py").is_file():
+    for candidate in (
+        Path(__file__).resolve().parent,
+        Path(__file__).resolve().parents[1] / "services" / "api",
+        Path(__file__).resolve().parents[2] / "services" / "api",
+    ):
+        if (candidate / "passenger_wsgi.py").is_file():
+            _API_DIR = candidate
             break
 
-if str(API_DIR) not in sys.path:
-    sys.path.insert(0, str(API_DIR))
+if str(_API_DIR) not in sys.path:
+    sys.path.insert(0, str(_API_DIR))
 
-os.environ.setdefault("APP_ENV", "production")
+import passenger_wsgi  # noqa: E402
 
-from app.main import app as asgi_app  # noqa: E402
-
-try:
-    from a2wsgi import ASGIMiddleware
-except ImportError as exc:
-    raise RuntimeError(
-        "Critical Deployment Error: 'a2wsgi' is required to run the FastAPI ASGI "
-        "application under Phusion Passenger WSGI. Ensure 'a2wsgi' is installed "
-        "in your Python environment (pip install -r requirements.txt)."
-    ) from exc
-
-# Export standard WSGI callable for LiteSpeed / Phusion Passenger
-application = ASGIMiddleware(asgi_app)
+application = passenger_wsgi.application

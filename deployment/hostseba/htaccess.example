@@ -1,6 +1,6 @@
 # ==============================================================================
-# PGCB Organization Portal — HostSeba / cPanel Apache & LiteSpeed Configuration
-# Copy this file to ~/public_html/.htaccess
+# PGCB Organization Portal — HostSeba / cPanel Main Domain Configuration
+# Copy this file to ~/public_html/.htaccess for powergriddiprocoush.org
 # ==============================================================================
 
 RewriteEngine On
@@ -18,10 +18,10 @@ RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
     Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 </IfModule>
 
-# 3. Deny direct access to hidden files, git, and configuration files
+# 3. Deny direct access to source code, git, and configuration files
 RewriteRule ^(\.git|\.env|\.venv|package\.json|package-lock\.json|tsconfig\.json) - [F,L]
 
-# 4. Static Public Uploads Caching (if served directly from storage)
+# 4. Static Public Uploads Caching (if served from filesystem)
 <IfModule mod_expires.c>
     ExpiresActive On
     ExpiresByType image/jpeg "access plus 1 month"
@@ -31,19 +31,14 @@ RewriteRule ^(\.git|\.env|\.venv|package\.json|package-lock\.json|tsconfig\.json
 </IfModule>
 
 # 5. Routing Architecture:
-# Pattern 1 (Reverse Proxy to Node.js Frontend + FastAPI Backend):
-# Ensure mod_proxy and mod_proxy_http are enabled in cPanel/Apache.
 #
-# Route /backend/* to FastAPI Backend (port 8000 or internal socket):
-RewriteRule ^backend/(.*)$ http://127.0.0.1:8000/$1 [P,L]
-ProxyPassReverse /backend/ http://127.0.0.1:8000/
+# Pattern A: Proxy /backend/* to Passenger API subdomain:
+# All frontend requests to /backend/* are securely forwarded to the FastAPI Passenger subdomain
+RewriteRule ^backend/(.*)$ https://api.powergriddiprocoush.org/$1 [P,L]
+ProxyPassReverse /backend/ https://api.powergriddiprocoush.org/
 
-# Route all other web traffic to Next.js Frontend (port 3000):
+# Route web traffic to Next.js Frontend (port 3000 if PM2/Node process, or Passenger):
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.*)$ http://127.0.0.1:3000/$1 [P,L]
 ProxyPassReverse / http://127.0.0.1:3000/
-
-# Pattern 2 (Alternative: cPanel Python App + Subdomain Routing):
-# If using api.pgcb.org.bd for FastAPI and pgcb.org.bd for Next.js,
-# configure each subdomain in cPanel directly without reverse proxy rules.
