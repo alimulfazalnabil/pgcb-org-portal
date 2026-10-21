@@ -3,7 +3,19 @@ from __future__ import annotations
 import io
 import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import os
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def preserve_app_env(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "test")
+    yield
 
 
 def test_passenger_wsgi_entrypoint_and_adapter():
@@ -68,3 +80,12 @@ def test_passenger_wsgi_fails_clearly_without_a2wsgi(monkeypatch):
 
     assert "Critical Deployment Error" in str(exc_info.value)
     assert "a2wsgi" in str(exc_info.value)
+
+
+def test_services_api_passenger_wsgi_entrypoint():
+    """Verify that services/api/passenger_wsgi.py exposes a valid WSGI callable."""
+    import passenger_wsgi
+    from a2wsgi import ASGIMiddleware
+
+    assert hasattr(passenger_wsgi, "application")
+    assert isinstance(passenger_wsgi.application, ASGIMiddleware)

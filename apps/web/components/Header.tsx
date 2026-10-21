@@ -12,7 +12,7 @@ export function Header() {
   const [urgentNotice, setUrgentNotice] = useState<Notice | null>(null);
   const [settings, setSettings] = useState<Record<string, string>>({
     contact_phone: '+880-2-9553663',
-    contact_email: 'info@pgcb.gov.bd',
+    contact_email: 'info@powergriddiprocoush.org',
     address_bn: 'পিজিসিবি ভবন, আফতাবনগর, ঢাকা-১২১২',
     address_en: 'PGCB Bhaban, Aftabnagar, Dhaka-1212',
   });

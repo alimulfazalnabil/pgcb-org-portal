@@ -27,4 +27,5 @@ services/api/backups/
 services/api/tests/test_storage_isolated/
 services/api/tests/.test_storage/
 .test_storage/
+dist/
 

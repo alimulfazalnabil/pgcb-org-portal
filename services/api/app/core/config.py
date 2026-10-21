@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     storage_backend: str = 'local'
     storage_root: str = './storage'
     storage_dir: str | None = None
+    upload_dir: str | None = None
     mfa_encryption_key: str | None = None
     rate_limit_enabled: bool = True
     redis_rate_limit_enabled: bool = False
@@ -86,8 +87,11 @@ class Settings(BaseSettings):
         if not self.allowed_origins and self.cors_origins:
             self.allowed_origins = self.cors_origins
 
-        if (not self.storage_root or self.storage_root == './storage') and self.storage_dir:
-            self.storage_root = self.storage_dir
+        if not self.storage_root or self.storage_root == './storage':
+            if self.storage_dir:
+                self.storage_root = self.storage_dir
+            elif self.upload_dir:
+                self.storage_root = self.upload_dir
 
         if self.db_host and self.db_user and self.db_password:
             sslmode = self.db_sslmode or ('disable' if self.db_host in ('localhost', '127.0.0.1') else 'require')

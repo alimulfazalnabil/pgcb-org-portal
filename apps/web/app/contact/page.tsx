@@ -57,7 +57,7 @@ export default function ContactPage() {
     language === 'en'
       ? settings.contact_address_en || 'PGCB Bhaban, Avenue-3, Jahurul Islam City, Aftabnagar, Badda, Dhaka-1212'
       : settings.contact_address_bn || 'পিজিসিবি ভবন, এভিনিউ-৩, জহুরুল ইসলাম সিটি, আফতাবনগর, বাড্ডা, ঢাকা-১২১২';
-  const contactEmail = settings.contact_email || 'info@pgcb.org.bd';
+  const contactEmail = settings.contact_email || 'info@powergriddiprocoush.org';
   const contactPhone = settings.contact_phone || '+880-2-55046731';
   const officeHoursDisplay =
     language === 'en'

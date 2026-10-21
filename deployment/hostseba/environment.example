@@ -39,11 +39,11 @@ MAX_UPLOAD_MB=10
 
 # 5. SMTP Email Configuration
 REQUIRE_EMAIL_VERIFICATION=true
-SMTP_HOST=mail.pgcb.org.bd
+SMTP_HOST=mail.powergriddiprocoush.org
 SMTP_PORT=587
-SMTP_USER=noreply@pgcb.org.bd
+SMTP_USER=info@powergriddiprocoush.org
 SMTP_PASS=CHANGE_ME_SMTP_PASSWORD
-SMTP_FROM=noreply@pgcb.org.bd
+SMTP_FROM=info@powergriddiprocoush.org
 SMTP_USE_TLS=true
 
 # 6. Payment Gateways (Keep in sandbox/test mode until live merchant credentials are verified)

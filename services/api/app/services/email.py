@@ -63,7 +63,7 @@ def _wrap_html_template(title: str, content_html: str) -> str:
     </div>
     <div class="footer">
       <p>&copy; {os.getenv('APP_YEAR', '2026')} Power Grid Bangladesh PLC. All rights reserved.</p>
-      <p>This is an automated system notification. Please do not reply directly to this email.</p>
+      <p>This is an automated system notification. For official inquiries, contact info@powergriddiprocoush.org.</p>
     </div>
   </div>
 </body>
@@ -77,7 +77,7 @@ class EmailService:
         port = int(os.getenv("SMTP_PORT", "587"))
         username = os.getenv("SMTP_USERNAME")
         password = os.getenv("SMTP_PASSWORD")
-        from_email = os.getenv("SMTP_FROM", "noreply@pgcb-portal.gov.bd")
+        from_email = os.getenv("SMTP_FROM", "info@powergriddiprocoush.org")
 
         if not host:
             logger.info(f"[DEV EMAIL LOG] To: {to_email} | Subject: {subject}\n{body_text}\n---")

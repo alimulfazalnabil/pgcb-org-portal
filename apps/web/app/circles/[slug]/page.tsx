@@ -258,7 +258,7 @@ export default function CircleDetailPage() {
                 <div>
                   <dt className="text-xs font-bold uppercase tracking-wider text-slate-400">{t('ইমেইল', 'Email')}</dt>
                   <dd className="font-mono text-slate-700 mt-0.5">
-                    {detail.contact?.email || 'info@pgcb.org.bd'}
+                    {detail.contact?.email || 'info@powergriddiprocoush.org'}
                   </dd>
                 </div>
                 <div>

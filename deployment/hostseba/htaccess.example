@@ -1,0 +1,49 @@
+# ==============================================================================
+# PGCB Organization Portal — HostSeba / cPanel Apache & LiteSpeed Configuration
+# Copy this file to ~/public_html/.htaccess
+# ==============================================================================
+
+RewriteEngine On
+
+# 1. Force HTTPS
+RewriteCond %{HTTPS} !=on
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# 2. Security Headers
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+</IfModule>
+
+# 3. Deny direct access to hidden files, git, and configuration files
+RewriteRule ^(\.git|\.env|\.venv|package\.json|package-lock\.json|tsconfig\.json) - [F,L]
+
+# 4. Static Public Uploads Caching (if served directly from storage)
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/jpeg "access plus 1 month"
+    ExpiresByType image/png "access plus 1 month"
+    ExpiresByType image/webp "access plus 1 month"
+    ExpiresByType application/pdf "access plus 1 week"
+</IfModule>
+
+# 5. Routing Architecture:
+# Pattern 1 (Reverse Proxy to Node.js Frontend + FastAPI Backend):
+# Ensure mod_proxy and mod_proxy_http are enabled in cPanel/Apache.
+#
+# Route /backend/* to FastAPI Backend (port 8000 or internal socket):
+RewriteRule ^backend/(.*)$ http://127.0.0.1:8000/$1 [P,L]
+ProxyPassReverse /backend/ http://127.0.0.1:8000/
+
+# Route all other web traffic to Next.js Frontend (port 3000):
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ http://127.0.0.1:3000/$1 [P,L]
+ProxyPassReverse / http://127.0.0.1:3000/
+
+# Pattern 2 (Alternative: cPanel Python App + Subdomain Routing):
+# If using api.pgcb.org.bd for FastAPI and pgcb.org.bd for Next.js,
+# configure each subdomain in cPanel directly without reverse proxy rules.

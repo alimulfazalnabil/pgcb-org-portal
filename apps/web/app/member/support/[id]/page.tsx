@@ -236,7 +236,7 @@ export default function MemberSupportTicketDetailPage() {
                 </div>
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200">
                   <Mail className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>support@pgcb.org.bd</span>
+                  <span>info@powergriddiprocoush.org</span>
                 </div>
               </div>
             </div>

@@ -440,7 +440,7 @@ const BN_TO_EN_PHRASES: Array<[string, string]> = [
   ['প্রচার ও প্রকাশনা সম্পাদক', 'Publicity & Publication Secretary'],
   ['কার্যনির্বাহী সদস্য', 'Executive Member'],
   ['📞 হেল্পলাইন: +৮৮০ ২ ৯৫৫৩৬৬৩', '📞 Helpline: +880 2 9553663'],
-  ['✉️ ইমেইল: info@pgcb.gov.bd', '✉️ Email: info@pgcb.gov.bd'],
+  ['✉️ ইমেইল: info@powergriddiprocoush.org', '✉️ Email: info@powergriddiprocoush.org'],
   ['📍 প্রধান কার্যালয়: পিজিসিবি ভবন, আফতাবনগর, ঢাকা', '📍 Head Office: PGCB Bhaban, Aftabnagar, Dhaka'],
   ['ইমেইল:', 'Email:'],
   ['ফোন:', 'Phone:'],

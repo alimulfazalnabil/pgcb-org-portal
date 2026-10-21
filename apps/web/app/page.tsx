@@ -380,7 +380,7 @@ export default function HomePage() {
               </p>
               <div className="space-y-2 text-xs font-medium">
                 <div>{t('📞 হেল্পলাইন: +৮৮০ ২ ৯৫৫৩৬৬৩', '📞 Helpline: +880 2 9553663')}</div>
-                <div>{t('✉️ ইমেইল: info@pgcb.gov.bd', '✉️ Email: info@pgcb.gov.bd')}</div>
+                <div>{t('✉️ ইমেইল: info@powergriddiprocoush.org', '✉️ Email: info@powergriddiprocoush.org')}</div>
                 <div>{t('📍 প্রধান কার্যালয়: পিজিসিবি ভবন, আফতাবনগর, ঢাকা', '📍 Head Office: PGCB Bhaban, Aftabnagar, Dhaka')}</div>
               </div>
             </div>

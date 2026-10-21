@@ -110,7 +110,7 @@ export default function AdminSettingsPage() {
                 <label className="font-semibold text-foreground">সচিবালয় ইমেইল</label>
                 <input
                   type="email"
-                  value={settings['contact_email'] || 'secretariat@pgcb.org.bd'}
+                  value={settings['contact_email'] || 'info@powergriddiprocoush.org'}
                   onChange={(e) => updateKey('contact_email', e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-border bg-surface text-foreground focus:outline-none focus:border-primary text-xs font-mono"
                 />

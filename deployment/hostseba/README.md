@@ -31,12 +31,14 @@ Once your HostSeba hosting account becomes active, record the following environm
 /home/<cpanel_user>/
 ├── pgcb-org-portal/
 │   ├── apps/web/                     # Next.js 15 Frontend (port 3000)
-│   ├── services/api/                 # FastAPI Backend (port 8000)
+│   ├── services/api/                 # FastAPI Backend
 │   │   ├── alembic/                  # PostgreSQL migrations
+│   │   ├── passenger_wsgi.py         # cPanel Phusion Passenger WSGI entrypoint
 │   │   └── scripts/                  # Production contract, backup, & PGD-TEST-0001 verification
 │   └── deployment/hostseba/
 │       ├── README.md
 │       ├── environment.example
+│       ├── htaccess.example
 │       ├── startup/
 │       │   ├── passenger_wsgi.py
 │       │   ├── start_api.sh
@@ -88,8 +90,44 @@ Once your HostSeba hosting account becomes active, record the following environm
 
 ---
 
-## Step 5 & 6 — Build & Start Services
+## Step 5 & 6 — Configure & Start Services
 
+### Method A — cPanel GUI (CloudLinux Python & Node.js Selectors — Recommended for Shared Hosting)
+
+#### 1. FastAPI Backend (Phusion Passenger)
+In cPanel, open **Setup Python App**:
+- **Python version**: Select `3.11` (or highest available 3.11+).
+- **Application root**: `pgcb-org-portal/services/api`
+- **Application URL**: `api.pgcb.org.bd` (or `/backend`)
+- **Application startup file**: `passenger_wsgi.py`
+- **Application Entry point**: `application`
+- Click **Create**.
+- Under "Configuration files", enter `requirements.txt` and click **Run Pip Install** (or install via SSH).
+- Click **Restart** to spawn Passenger workers.
+
+#### 2. Next.js Frontend (Node.js Selector)
+In cPanel, open **Setup Node.js App**:
+- **Node.js version**: Select `20.x LTS` (or highest available 18+).
+- **Application root**: `pgcb-org-portal/apps/web`
+- **Application URL**: `pgcb.org.bd` (root domain)
+- **Application startup file**: `node_modules/next/dist/bin/next` (with argument `start`) or use PM2.
+- Under "Environment variables", set:
+  - `NODE_ENV`: `production`
+  - `PORT`: `3000`
+  - `INTERNAL_API_URL`: `http://127.0.0.1:8000` (or `https://api.pgcb.org.bd`)
+  - `NEXT_PUBLIC_API_URL`: `/backend`
+
+#### 3. Apache / LiteSpeed Reverse Proxy (.htaccess)
+Copy the production configuration template to your web root:
+```bash
+cp ~/pgcb-org-portal/deployment/hostseba/htaccess.example ~/public_html/.htaccess
+```
+
+---
+
+### Method B — CLI Process Execution (VPS / Dedicated / Interactive Shell)
+
+If running in an unconstrained environment with background daemon permissions:
 ```bash
 # Start FastAPI Backend (Port 8000)
 bash ~/pgcb-org-portal/deployment/hostseba/startup/start_api.sh

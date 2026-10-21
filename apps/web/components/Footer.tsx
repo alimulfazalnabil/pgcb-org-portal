@@ -60,7 +60,7 @@ export function Footer() {
             {t('পিজিসিবি প্রধান কার্যালয়, আফতাবনগর, ঢাকা-১২১২', 'PGCB Head Office, Aftabnagar, Dhaka-1212')}
           </p>
           <p style={{ fontSize: '14px', color: '#94a3b8', margin: '0 0 12px 0' }}>
-            {t('ইমেইল:', 'Email:')} <a href="mailto:info@pgcb.gov.bd" className="text-emerald-400">info@pgcb.gov.bd</a>
+            {t('ইমেইল:', 'Email:')} <a href="mailto:info@powergriddiprocoush.org" className="text-emerald-400">info@powergriddiprocoush.org</a>
           </p>
           <div style={{ display: 'flex', gap: '12px', fontSize: '13px', color: '#64748b', flexWrap: 'wrap' }}>
             <Link href="/privacy" className="hover:text-slate-300">{t('গোপনীয়তা', 'Privacy Policy')}</Link>

@@ -30,7 +30,7 @@ def public_settings(db: Session = Depends(get_db)):
     settings_dict = {
         'org_name_bn': 'পাওয়ার গ্রিড কোম্পানি অব বাংলাদেশ (পিজিসিবি)',
         'org_name_en': 'Power Grid Company of Bangladesh (PGCB)',
-        'contact_email': 'info@pgcb.gov.bd',
+        'contact_email': 'info@powergriddiprocoush.org',
         'contact_phone': '+880-2-9553663',
         'address_bn': 'পিজিসিবি ভবন, আফতাবনগর, ঢাকা-১২১২',
         'address_en': 'PGCB Bhaban, Aftabnagar, Dhaka-1212',
