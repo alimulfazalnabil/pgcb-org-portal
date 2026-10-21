@@ -677,12 +677,34 @@ def test_safety_guard_never_leaks_database_credentials_in_error_messages():
     assert secret not in err_msg, "Credential secret leaked in assert_destructive_database_permitted error!"
     assert "***" in err_msg, "Expected masked credential indicator '***' in error message"
 
-    # 3. parse_authorized_target malformed URL with secret
+    # 3. parse_authorized_target malformed URL with secret and invalid port
     malformed_url = f"postgresql://db_admin:{secret}@db.pgcb.org.bd:invalid_port/pgcb_test_db"
     with pytest.raises(ValueError) as exc_info:
         parse_authorized_target(malformed_url)
     err_msg = str(exc_info.value)
     assert secret not in err_msg, "Credential secret leaked in parse_authorized_target error!"
+    assert "***" in err_msg, "Expected masked credential indicator '***' in malformed target error"
+
+    # 4. validate_test_database_url malformed URL with secret and invalid port
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_test_database_url(malformed_url)
+    err_msg = str(exc_info.value)
+    assert secret not in err_msg, "Credential secret leaked in validate_test_database_url malformed error!"
+    assert "***" in err_msg, "Expected masked credential indicator '***' in malformed URL error"
+
+    # 5. assert_destructive_database_permitted malformed URL with secret and invalid port
+    with pytest.raises(RuntimeError) as exc_info:
+        assert_destructive_database_permitted(malformed_url, action_name="test_wipe", app_env="dev")
+    err_msg = str(exc_info.value)
+    assert secret not in err_msg, "Credential secret leaked in assert_destructive_database_permitted malformed error!"
+    assert "***" in err_msg, "Expected masked credential indicator '***' in malformed URL error"
+
+    # 6. parse_authorized_target forbidden target with credentials
+    target_with_secret = f"postgresql://db_admin:{secret}@hostseba.com:5432/my_test_db"
+    with pytest.raises(ValueError) as exc_info:
+        parse_authorized_target(target_with_secret)
+    err_msg = str(exc_info.value)
+    assert secret not in err_msg, "Credential secret leaked in parse_authorized_target forbidden host error!"
 
 
 def test_parse_authorized_target_rejects_forbidden_hosts_and_keywords_at_parse_time():
