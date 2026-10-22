@@ -19,10 +19,10 @@ REFRESH_TOKEN_EXPIRE_MINUTES=10080
 AUTH_COOKIE_SECURE=true
 AUTH_COOKIE_SAMESITE=lax
 
-# 3. Domain, Proxy & Rate Limiting (Cloudflare -> HostSeba Nginx/Apache -> App)
-FRONTEND_URL=https://pgcb.org.bd
-ALLOWED_ORIGINS=https://pgcb.org.bd,https://www.pgcb.org.bd
-INTERNAL_API_URL=http://127.0.0.1:8000
+# 3. Domain, Proxy & Rate Limiting (HostSeba LiteSpeed / Passenger)
+FRONTEND_URL=https://powergriddiprocoush.org
+ALLOWED_ORIGINS=https://powergriddiprocoush.org,https://www.powergriddiprocoush.org,https://api.powergriddiprocoush.org
+INTERNAL_API_URL=https://api.powergriddiprocoush.org
 NEXT_PUBLIC_API_URL=/backend
 TRUSTED_PROXY_COUNT=1
 RATE_LIMIT_ENABLED=true

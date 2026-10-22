@@ -36,6 +36,7 @@ else:
 _VENV_CANDIDATES = [
     API_DIR / ".venv",
     API_DIR.parent.parent / ".venv",
+    Path("/home/powergri/virtualenv/repositories/pgcb-org-portal/services/api/3.11"),
     Path.home() / "virtualenv" / "repositories" / "pgcb-org-portal" / "services" / "api" / "3.11",
     Path.home() / "virtualenv" / "services" / "api" / "3.11",
 ]

@@ -92,33 +92,43 @@ Once your HostSeba hosting account becomes active, record the following environm
 
 ## Step 5 & 6 — Configure & Start Services
 
-### Method A — cPanel GUI (CloudLinux Python & Node.js Selectors — Recommended for Shared Hosting)
+### Method A — cPanel GUI (CloudLinux Python & Node.js Selectors — Recommended for HostSeba Shared Hosting)
+
+#### 0. Subdomain Document Root Verification
+In cPanel, open **Domains** (or **Subdomains**):
+- Verify the document root for `api.powergriddiprocoush.org`:
+  - It must point to `/home/powergri/api.powergriddiprocoush.org` (or a dedicated public directory).
+  - **Caution:** If entered as `/home/powergri/api.powergriddiprocoush.org` during subdomain creation, cPanel often prefixes the home directory again, producing `/home/powergri/home/powergri/api.powergriddiprocoush.org`. If this happened, click the document root path or edit icon in cPanel Domains and change it to `api.powergriddiprocoush.org`.
+- Copy the API subdomain `.htaccess` template into the API document root:
+  ```bash
+  cp ~/pgcb-org-portal/deployment/hostseba/api_subdomain_htaccess.example /home/powergri/api.powergriddiprocoush.org/.htaccess
+  ```
 
 #### 1. FastAPI Backend (Phusion Passenger)
 In cPanel, open **Setup Python App**:
-- **Python version**: Select `3.11` (or highest available 3.11+).
-- **Application root**: `pgcb-org-portal/services/api`
-- **Application URL**: `api.pgcb.org.bd` (or `/backend`)
+- **Python version**: Select `3.11`.
+- **Application root**: `repositories/pgcb-org-portal/services/api` (or relative path from `/home/powergri`)
+- **Application URL**: `api.powergriddiprocoush.org`
 - **Application startup file**: `passenger_wsgi.py`
 - **Application Entry point**: `application`
-- Click **Create**.
+- Click **Create** (or **Save**).
 - Under "Configuration files", enter `requirements.txt` and click **Run Pip Install** (or install via SSH).
 - Click **Restart** to spawn Passenger workers.
 
 #### 2. Next.js Frontend (Node.js Selector)
 In cPanel, open **Setup Node.js App**:
-- **Node.js version**: Select `20.x LTS` (or highest available 18+).
-- **Application root**: `pgcb-org-portal/apps/web`
-- **Application URL**: `pgcb.org.bd` (root domain)
-- **Application startup file**: `node_modules/next/dist/bin/next` (with argument `start`) or use PM2.
+- **Node.js version**: Select `20.x LTS` (or `22.x`).
+- **Application root**: `repositories/pgcb-org-portal/apps/web`
+- **Application URL**: `powergriddiprocoush.org` (root domain)
+- **Application startup file**: `server.js` (or `node_modules/next/dist/bin/next` start)
 - Under "Environment variables", set:
   - `NODE_ENV`: `production`
   - `PORT`: `3000`
-  - `INTERNAL_API_URL`: `http://127.0.0.1:8000` (or `https://api.pgcb.org.bd`)
+  - `INTERNAL_API_URL`: `https://api.powergriddiprocoush.org`
   - `NEXT_PUBLIC_API_URL`: `/backend`
 
 #### 3. Apache / LiteSpeed Reverse Proxy (.htaccess)
-Copy the production configuration template to your web root:
+Copy the production configuration template to your main web root:
 ```bash
 cp ~/pgcb-org-portal/deployment/hostseba/htaccess.example ~/public_html/.htaccess
 ```
