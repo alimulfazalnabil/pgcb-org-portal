@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     storage_dir: str | None = None
     upload_dir: str | None = None
     mfa_encryption_key: str | None = None
+    allow_sqlite_in_production: bool = False
     rate_limit_enabled: bool = True
     redis_rate_limit_enabled: bool = False
     redis_url: str = 'redis://localhost:6379/0'
@@ -155,11 +156,18 @@ class Settings(BaseSettings):
                     "Staging/Production storage configuration invalid: STORAGE_BACKEND must be 'local', 'filesystem', or 'persistent_disk'."
                 )
             if self.database_url.startswith('sqlite'):
-                raise ValueError(
-                    "Staging/Production configuration invalid: DATABASE_URL cannot be SQLite. "
-                    "A valid PostgreSQL connection string ('postgresql+psycopg://...') is required."
-                )
-            if not self.database_url.startswith('postgresql+psycopg://'):
+                if not self.allow_sqlite_in_production:
+                    raise ValueError(
+                        "Staging/Production configuration invalid: DATABASE_URL cannot be SQLite. "
+                        "A valid PostgreSQL connection string ('postgresql+psycopg://...') is required. "
+                        "To explicitly permit SQLite in staging/production, set ALLOW_SQLITE_IN_PRODUCTION=true."
+                    )
+                if self.database_url.startswith('sqlite:///./'):
+                    relative_file = self.database_url[len('sqlite:///./'):]
+                    api_dir = Path(__file__).resolve().parent.parent.parent
+                    resolved_path = api_dir / relative_file
+                    self.database_url = f"sqlite:///{resolved_path.as_posix()}"
+            elif not self.database_url.startswith('postgresql+psycopg://'):
                 raise ValueError(
                     f"Invalid database driver in DATABASE_URL for staging/production: '{self.database_url.split('://')[0]}'. "
                     "Must use 'postgresql+psycopg://' (Psycopg 3)."

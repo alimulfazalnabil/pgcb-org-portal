@@ -32,6 +32,11 @@ else:
                 sys.path.insert(0, str(API_DIR))
             break
 
+try:
+    os.chdir(API_DIR)
+except Exception:
+    pass
+
 # 2. Auto-detect and activate virtualenv if not already active
 _VENV_CANDIDATES = [
     API_DIR / ".venv",

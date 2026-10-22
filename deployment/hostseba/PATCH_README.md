@@ -50,8 +50,16 @@ fi
 1. Verify that `wsgi.py` and `passenger_wsgi.py` exist in `/home/powergri/repositories/pgcb-org-portal/services/api/`.
 2. Log into cPanel and open **Setup Python App**.
 3. Select the application for `api.powergriddiprocoush.org`.
-4. Click **Save** to force CloudLinux and LiteSpeed to regenerate their application bindings.
-5. Click **Restart** (or run `touch /home/powergri/repositories/pgcb-org-portal/services/api/tmp/restart.txt`).
+4. In **Environment variables**:
+   - Ensure `JWT_SECRET` is configured (minimum 32 random characters).
+   - If using the existing SQLite database (`pgcb_portal.db`), add:
+     - Name: `ALLOW_SQLITE_IN_PRODUCTION`
+     - Value: `true`
+   - If using a PostgreSQL database on Hostseba, add:
+     - Name: `DATABASE_URL`
+     - Value: `postgresql+psycopg://<user>:<password>@127.0.0.1:5432/<dbname>`
+5. Click **Save** to apply the environment variables and force CloudLinux/LiteSpeed to regenerate bindings.
+6. Click **Restart** (or run `touch /home/powergri/repositories/pgcb-org-portal/services/api/tmp/restart.txt`).
 
 ---
 

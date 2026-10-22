@@ -26,6 +26,16 @@ PYEOF
 chmod 644 "$API_DIR/wsgi.py"
 echo "      wsgi.py created successfully."
 
+# Ensure ALLOW_SQLITE_IN_PRODUCTION=true in .env if DATABASE_URL is not configured
+if [ ! -f "$API_DIR/.env" ]; then
+    echo "ALLOW_SQLITE_IN_PRODUCTION=true" > "$API_DIR/.env"
+    chmod 600 "$API_DIR/.env"
+    echo "      Created $API_DIR/.env with ALLOW_SQLITE_IN_PRODUCTION=true"
+elif ! grep -q "ALLOW_SQLITE_IN_PRODUCTION" "$API_DIR/.env" && ! grep -q "DATABASE_URL" "$API_DIR/.env"; then
+    echo "ALLOW_SQLITE_IN_PRODUCTION=true" >> "$API_DIR/.env"
+    echo "      Added ALLOW_SQLITE_IN_PRODUCTION=true to $API_DIR/.env"
+fi
+
 # 2. Generate hardened .htaccess
 echo "[2/5] Writing clean .htaccess..."
 HTACCESS_CONTENT=$(cat <<'HTEOF'
