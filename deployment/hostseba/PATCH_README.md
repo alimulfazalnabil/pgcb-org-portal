@@ -32,18 +32,26 @@ cd /home/powergri/repositories/pgcb-org-portal
 unzip -o hostseba-update-api-fix.zip
 ```
 
-### Step 2: Install API DocumentRoot `.htaccess`
-Copy the sanitized Passenger configuration into the active API document root:
+### Step 2: Install API DocumentRoot `.htaccess` in Both Target Locations
+Because LiteSpeed's active VirtualHost might still point to the old nested directory pending an Apache configuration rebuild, deploy the `.htaccess` to **both** paths so Passenger engages regardless of vhost state:
 ```bash
+# 1. Primary document root
 cp /home/powergri/repositories/pgcb-org-portal/deployment/hostseba/api_subdomain_htaccess.example /home/powergri/api.powergriddiprocoush.org/.htaccess
 chmod 644 /home/powergri/api.powergriddiprocoush.org/.htaccess
+
+# 2. Nested document root (if it exists, bridge it so requests don't 404 while vhost updates)
+if [ -d "/home/powergri/home/powergri/api.powergriddiprocoush.org" ]; then
+    cp /home/powergri/repositories/pgcb-org-portal/deployment/hostseba/api_subdomain_htaccess.example /home/powergri/home/powergri/api.powergriddiprocoush.org/.htaccess
+    chmod 644 /home/powergri/home/powergri/api.powergriddiprocoush.org/.htaccess
+fi
 ```
 
 ### Step 3: Synchronize cPanel Python Selector & Restart App
-1. Log into cPanel and open **Setup Python App**.
-2. Select the application for `api.powergriddiprocoush.org`.
-3. Click **Save** to ensure cPanel synchronizes its internal map with `/home/powergri/api.powergriddiprocoush.org`.
-4. Click **Restart** (or run `touch /home/powergri/repositories/pgcb-org-portal/services/api/tmp/restart.txt`).
+1. Verify that `wsgi.py` and `passenger_wsgi.py` exist in `/home/powergri/repositories/pgcb-org-portal/services/api/`.
+2. Log into cPanel and open **Setup Python App**.
+3. Select the application for `api.powergriddiprocoush.org`.
+4. Click **Save** to force CloudLinux and LiteSpeed to regenerate their application bindings.
+5. Click **Restart** (or run `touch /home/powergri/repositories/pgcb-org-portal/services/api/tmp/restart.txt`).
 
 ---
 

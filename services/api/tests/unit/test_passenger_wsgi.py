@@ -71,6 +71,15 @@ def test_deployment_startup_passenger_wsgi_delegation():
     assert isinstance(deployment_passenger.application, ASGIMiddleware)
 
 
+def test_services_api_wsgi_py_entrypoint():
+    """Verify that services/api/wsgi.py exposes a valid WSGI callable for LiteSpeed."""
+    import wsgi
+    from a2wsgi import ASGIMiddleware
+
+    assert hasattr(wsgi, "application")
+    assert isinstance(wsgi.application, ASGIMiddleware)
+
+
 def test_passenger_wsgi_health_liveness():
     """Verify that /health returns HTTP 200 with service metadata."""
     import passenger_wsgi
