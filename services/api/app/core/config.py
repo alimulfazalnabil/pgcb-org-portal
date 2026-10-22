@@ -71,7 +71,13 @@ class Settings(BaseSettings):
     ai_temperature: float = 0.2
     ai_local_url: str | None = None
     model_config = SettingsConfigDict(
-        env_file=('.env', str(Path(__file__).resolve().parents[2] / '.env')),
+        env_file=(
+            '.env',
+            str(Path(__file__).resolve().parents[2] / '.env'),
+            str(Path(__file__).resolve().parents[2] / '.env.production'),
+            str(Path(__file__).resolve().parents[3] / '.env'),
+            str(Path(__file__).resolve().parents[3] / '.env.production'),
+        ),
         extra='ignore',
     )
 
@@ -81,8 +87,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def validate_production(self) -> 'Settings':
-        if self.jwt_secret.startswith('dev-only-secret') and self.secret_key:
-            self.jwt_secret = self.secret_key
+        # Strip accidental whitespace or surrounding quotes from secret keys
+        if self.jwt_secret:
+            self.jwt_secret = self.jwt_secret.strip().strip("'\"")
+        if self.secret_key:
+            self.secret_key = self.secret_key.strip().strip("'\"")
+
+        # Allow SECRET_KEY or JWT_SECRET_KEY as aliases for JWT_SECRET
+        if self.jwt_secret.startswith('dev-only-secret'):
+            import os
+            alt_secret = self.secret_key or os.environ.get('JWT_SECRET_KEY') or os.environ.get('SECRET_KEY')
+            if alt_secret:
+                self.jwt_secret = alt_secret.strip().strip("'\"")
 
         if not self.allowed_origins and self.cors_origins:
             self.allowed_origins = self.cors_origins
@@ -124,9 +140,15 @@ class Settings(BaseSettings):
             self.allowed_origins = ','.join(normalized_list)
 
         if self.app_env.lower() in ('production', 'staging'):
-            if self.jwt_secret.startswith('dev-only-secret') or len(self.jwt_secret) < 32:
+            if not self.jwt_secret or self.jwt_secret.startswith('dev-only-secret'):
                 raise ValueError(
-                    'JWT_SECRET must be configured with at least 32 characters in staging/production.'
+                    'JWT_SECRET is missing or using the development placeholder. '
+                    'A valid random secret with at least 32 characters must be configured in staging/production.'
+                )
+            if len(self.jwt_secret) < 32:
+                raise ValueError(
+                    f'JWT_SECRET is too short ({len(self.jwt_secret)} characters). '
+                    'Staging/production requires at least 32 characters.'
                 )
             if self.storage_backend.lower() not in ('local', 'filesystem', 'persistent_disk'):
                 raise ValueError(

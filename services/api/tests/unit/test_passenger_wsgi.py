@@ -171,8 +171,8 @@ def test_create_fallback_application_diagnostic():
     assert "***" in detail
 
 
-def test_passenger_wsgi_startup_fallback_when_a2wsgi_missing(monkeypatch):
-    """Verify that if a2wsgi fails to import, passenger_wsgi sets application to fallback."""
+def test_passenger_wsgi_fails_fast_in_production_when_dependency_missing(monkeypatch):
+    """Verify that in production, startup errors raise exceptions rather than serving fallback."""
     import builtins
 
     real_import = builtins.__import__
@@ -183,16 +183,38 @@ def test_passenger_wsgi_startup_fallback_when_a2wsgi_missing(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", mock_import)
+    monkeypatch.delenv("ALLOW_STARTUP_FALLBACK", raising=False)
+    monkeypatch.setenv("APP_ENV", "production")
 
-    # Unload passenger_wsgi and re-import under mock
+    sys.modules.pop("passenger_wsgi", None)
+    with pytest.raises(RuntimeError) as exc_info:
+        import passenger_wsgi
+    assert "a2wsgi" in str(exc_info.value)
+    sys.modules.pop("passenger_wsgi", None)
+
+
+def test_passenger_wsgi_fallback_allowed_when_explicitly_configured(monkeypatch):
+    """Verify that when ALLOW_STARTUP_FALLBACK=true, application exposes a safe 500 handler."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        if name == "a2wsgi":
+            raise ImportError("No module named 'a2wsgi'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+    monkeypatch.setenv("ALLOW_STARTUP_FALLBACK", "true")
+
     sys.modules.pop("passenger_wsgi", None)
     import passenger_wsgi
 
+    assert passenger_wsgi.application is not None
     status, headers, body = _invoke_wsgi(passenger_wsgi.application, path="/health")
     assert status.startswith("500")
     data = json.loads(body)
     assert data.get("status") == "error"
     assert "a2wsgi" in data.get("detail", "")
 
-    # Cleanup sys.modules to restore state
     sys.modules.pop("passenger_wsgi", None)

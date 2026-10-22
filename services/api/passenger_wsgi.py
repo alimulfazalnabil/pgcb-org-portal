@@ -46,7 +46,24 @@ for venv_path in _VENV_CANDIDATES:
         sys.path.insert(0, str(site_packages[0]))
         break
 
+# 3. Explicitly load environment variables from .env files if present (without overriding existing environment)
+try:
+    from dotenv import load_dotenv
+
+    for env_candidate in (
+        API_DIR / ".env",
+        API_DIR / ".env.production",
+        API_DIR.parent.parent / ".env",
+        API_DIR.parent.parent / ".env.production",
+    ):
+        if env_candidate.is_file():
+            load_dotenv(env_candidate, override=False)
+except ImportError:
+    pass
+
 os.environ.setdefault("APP_ENV", "production")
+_APP_ENV = os.environ.get("APP_ENV", "production").lower()
+_IS_PRODUCTION = _APP_ENV in ("production", "staging")
 
 
 def mask_sensitive_data(text: str) -> str:
@@ -100,7 +117,7 @@ def _log_startup_error(exc: Exception) -> str:
 
 
 def create_fallback_application(exc: Exception):
-    """Create an emergency WSGI callable returning a safe diagnostic 500 response."""
+    """Create an emergency WSGI callable returning a safe diagnostic 500 response (dev/debug only)."""
     def _fallback_application(environ, start_response):
         status = "500 Internal Server Error"
         headers = [
@@ -121,7 +138,7 @@ def create_fallback_application(exc: Exception):
     return _fallback_application
 
 
-# 3. Attempt application initialization with graceful WSGI fallback on error
+# 4. Attempt application initialization with strict fail-fast behavior in production
 application = None
 _startup_error_detail: str | None = None
 
@@ -141,4 +158,8 @@ try:
 
 except Exception as startup_exc:
     _startup_error_detail = _log_startup_error(startup_exc)
+    allow_dev_fallback = os.environ.get("ALLOW_STARTUP_FALLBACK", "").lower() in ("true", "1", "yes")
+    if _IS_PRODUCTION and not allow_dev_fallback:
+        # In staging/production, fail immediately and loudly so startup failures are unmistakable
+        raise startup_exc
     application = create_fallback_application(startup_exc)
