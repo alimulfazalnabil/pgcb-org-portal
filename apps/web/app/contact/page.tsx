@@ -65,9 +65,9 @@ export default function ContactPage() {
       : settings.office_hours_bn || 'রবিবার – বৃহস্পতিবার, সকাল ৯:০০ – বিকাল ৫:০০';
 
   return (
-    <div className="bg-slate-50 min-h-screen py-10 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 sm:p-10 text-white shadow-xl mb-10">
+        <div className="relative mb-8 overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 p-6 text-white shadow-xl sm:rounded-3xl sm:p-10 md:mb-10">
           <span className="inline-flex items-center px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 mb-3">
             CENTRAL SECRETARIAT • CONTACT & SUPPORT
           </span>
@@ -130,7 +130,7 @@ export default function ContactPage() {
                   'আবেদন ট্র্যাকিং বা ডিজিটাল আইডি কার্ড যাচাইয়ের জন্য আপনার মেম্বারশিপ আইডি (যেমন: ',
                   'For application tracking or digital ID card verification, please mention your Membership ID (e.g., '
                 )}
-                <code className="text-emerald-300">PGD-2026-0001</code>
+                <code className="text-emerald-300">[Membership ID]</code>
                 {t(') অথবা এমপ্লয়ি আইডি উল্লেখ করুন।', ') or Employee ID.')}
               </p>
             </div>
