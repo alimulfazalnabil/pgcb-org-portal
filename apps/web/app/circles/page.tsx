@@ -60,7 +60,7 @@ export default function CirclesPage() {
             <div className="grid grid-cols-2 gap-4 shrink-0">
               <div className="bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-4 sm:p-5 text-center">
                 <div className="text-2xl sm:text-3xl font-extrabold text-emerald-400">
-                  {formatNumber(circles.length || 20)}
+                  {loading ? '—' : formatNumber(circles.length)}
                 </div>
                 <div className="text-xs font-bold uppercase tracking-wider text-slate-300 mt-1">
                   {t('সক্রিয় শাখা / সার্কেল', 'Active Branches / Circles')}
@@ -68,7 +68,7 @@ export default function CirclesPage() {
               </div>
               <div className="bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-4 sm:p-5 text-center">
                 <div className="text-2xl sm:text-3xl font-extrabold text-amber-300">
-                  {formatNumber(totalActiveMembers > 0 ? totalActiveMembers : 1457)}
+                  {loading ? '—' : formatNumber(totalActiveMembers)}
                 </div>
                 <div className="text-xs font-bold uppercase tracking-wider text-slate-300 mt-1">
                   {t('তালিকাভুক্ত প্রকৌশলী', 'Registered Engineers')}
