@@ -12,7 +12,10 @@ import {
   Download,
   Search,
   Award,
-  ChevronRight
+  ChevronRight,
+  BookOpen,
+  Image as ImageIcon,
+  PlayCircle
 } from 'lucide-react';
 import { api, PublicStats, Notice, CircularItem, CommitteeItem } from '../lib/api';
 import { LoadingState } from '../components/ui/LoadingState';
@@ -25,6 +28,10 @@ export default function HomePage() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [circulars, setCirculars] = useState<CircularItem[]>([]);
   const [leader, setLeader] = useState<CommitteeItem | null>(null);
+  const [circles, setCircles] = useState<any[]>([]);
+  const [publications, setPublications] = useState<any[]>([]);
+  const [events, setEvents] = useState<any[]>([]);
+  const [media, setMedia] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -34,7 +41,11 @@ export default function HomePage() {
       api.getNotices({ limit: 4 }),
       api.getCirculars({ limit: 4 }),
       api.getCommittee(),
-    ]).then(([statsRes, noticesRes, circularsRes, committeeRes]) => {
+      api.getCircles(),
+      api.getJournals(),
+      api.getEvents(true),
+      api.getMedia(),
+    ]).then(([statsRes, noticesRes, circularsRes, committeeRes, circlesRes, publicationsRes, eventsRes, mediaRes]) => {
       if (!isMounted) return;
 
       if (statsRes.status === 'fulfilled') {
@@ -47,9 +58,13 @@ export default function HomePage() {
         setCirculars(circularsRes.value);
       }
       if (committeeRes.status === 'fulfilled' && committeeRes.value.length > 0) {
-        const president = committeeRes.value.find((m) => m.designation_bn.includes('সভাপতি')) || committeeRes.value[0];
+        const president = committeeRes.value.find((m) => m.designation_bn?.includes('সভাপতি')) || committeeRes.value[0];
         setLeader(president);
       }
+      if (circlesRes.status === 'fulfilled') setCircles(Array.isArray(circlesRes.value) ? circlesRes.value.slice(0, 3) : []);
+      if (publicationsRes.status === 'fulfilled') setPublications(Array.isArray(publicationsRes.value) ? publicationsRes.value.slice(0, 3) : []);
+      if (eventsRes.status === 'fulfilled') setEvents(Array.isArray(eventsRes.value) ? eventsRes.value.slice(0, 3) : []);
+      if (mediaRes.status === 'fulfilled') setMedia(Array.isArray(mediaRes.value) ? mediaRes.value.slice(0, 4) : []);
       setLoading(false);
     });
 
@@ -385,6 +400,46 @@ export default function HomePage() {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* Featured public content: Grid Circles, publications, events and media */}
+      <section className="bg-white py-12 md:py-16">
+        <div className="max-w-7xl mx-auto px-6 space-y-14">
+          <section aria-labelledby="home-circles-heading">
+            <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700 mb-2">{t('আঞ্চলিক নেটওয়ার্ক', 'Regional network')}</p>
+                <h2 id="home-circles-heading" className="text-2xl md:text-3xl font-extrabold text-slate-900">{t('গ্রিড সার্কেলসমূহ', 'Grid Circles')}</h2>
+                <p className="text-sm text-slate-600 mt-2 max-w-2xl">{t('সারা দেশের শাখা ও আঞ্চলিক প্রকৌশলী ইউনিটগুলো দেখুন।', 'Explore the regional engineering units and branch circles across the country.')}</p>
+              </div>
+              <Link href="/circles" className="inline-flex items-center gap-2 text-sm font-bold text-emerald-700 hover:text-emerald-900">{t('সব সার্কেল দেখুন', 'View all circles')} <ArrowRight size={16} /></Link>
+            </div>
+            {loading ? <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{[1,2,3].map(n => <div key={n} className="h-40 rounded-2xl bg-slate-100 animate-pulse" />)}</div> :
+              circles.length ? <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{circles.map((circle) => <article key={circle.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-6 hover:border-emerald-300 hover:shadow-md transition-all"><div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center mb-4"><MapPin size={21}/></div><h3 className="font-extrabold text-slate-900 text-lg">{pick(circle, 'name', circle.name_bn || circle.name_en || t('গ্রিড সার্কেল', 'Grid Circle'))}</h3><p className="text-sm text-slate-600 mt-2 line-clamp-2">{pick(circle, 'description', circle.description_bn || circle.description_en || '')}</p><p className="text-xs font-semibold text-slate-500 mt-4">{formatNumber(Number(circle.active_members) || 0)} {t('সদস্য', 'members')}</p><Link href={`/circles/${encodeURIComponent(circle.slug || String(circle.id))}`} className="mt-4 inline-flex items-center gap-1 text-sm font-bold text-emerald-700">{t('বিস্তারিত', 'Explore circle')} <ArrowRight size={14}/></Link></article>)}</div> :
+              <EmptyState icon="📍" title={t('সার্কেল তথ্য পাওয়া যায়নি', 'No circle data available')} description={t('তথ্য যুক্ত হলে এখানে দেখানো হবে।', 'Circle information will appear here when available.')} />}
+          </section>
+
+          <section aria-labelledby="home-publications-heading">
+            <div className="flex flex-wrap items-end justify-between gap-4 mb-6"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700 mb-2">{t('জ্ঞান ও গবেষণা', 'Knowledge and research')}</p><h2 id="home-publications-heading" className="text-2xl md:text-3xl font-extrabold text-slate-900">{t('প্রকাশনা ও জার্নাল', 'Publications & Journals')}</h2></div><Link href="/journal" className="inline-flex items-center gap-2 text-sm font-bold text-emerald-700">{t('সব প্রকাশনা', 'All publications')} <ArrowRight size={16}/></Link></div>
+            {loading ? <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{[1,2,3].map(n=><div key={n} className="h-44 rounded-2xl bg-slate-100 animate-pulse"/>)}</div> :
+              publications.length ? <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{publications.map((item:any)=><article key={item.id} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md transition-shadow"><div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center mb-4"><BookOpen size={20}/></div><p className="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2">{item.category || item.edition || t('প্রকাশনা', 'Publication')}</p><h3 className="font-extrabold text-slate-900 leading-snug">{pick(item, 'title', item.title_bn || item.title_en || t('শিরোনাম পাওয়া যায়নি', 'Untitled publication'))}</h3><p className="text-sm text-slate-600 mt-2 line-clamp-3">{pick(item, 'summary', item.abstract_bn || item.summary_bn || item.description_bn || '')}</p><Link href={`/journal/${item.id}`} className="mt-4 inline-flex items-center gap-1 text-sm font-bold text-emerald-700">{t('পড়ুন', 'Read publication')} <ArrowRight size={14}/></Link></article>)}</div> :
+              <EmptyState icon="📚" title={t('কোনো প্রকাশনা পাওয়া যায়নি', 'No publications available')} description={t('নতুন জার্নাল প্রকাশিত হলে এখানে দেখানো হবে।', 'New publications will appear here when published.')} />}
+          </section>
+
+          <section aria-labelledby="home-events-heading">
+            <div className="flex flex-wrap items-end justify-between gap-4 mb-6"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700 mb-2">{t('সাম্প্রতিক কার্যক্রম', 'What’s happening')}</p><h2 id="home-events-heading" className="text-2xl md:text-3xl font-extrabold text-slate-900">{t('ইভেন্ট ও কার্যক্রম', 'Events & Activities')}</h2></div><Link href="/events" className="inline-flex items-center gap-2 text-sm font-bold text-emerald-700">{t('সব ইভেন্ট', 'All events')} <ArrowRight size={16}/></Link></div>
+            {loading ? <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{[1,2,3].map(n=><div key={n} className="h-44 rounded-2xl bg-slate-100 animate-pulse"/>)}</div> :
+              events.length ? <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{events.map((ev:any)=><article key={ev.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="h-36 bg-slate-100 overflow-hidden">{ev.cover_image_url ? <img src={ev.cover_image_url} alt="" className="w-full h-full object-cover" loading="lazy"/> : <div className="h-full flex items-center justify-center text-emerald-800"><Calendar size={32}/></div>}</div><div className="p-5"><p className="text-xs font-bold text-emerald-700 mb-2">{ev.event_date ? formatDate(ev.event_date) : t('তারিখ শীঘ্রই জানানো হবে', 'Date to be announced')}</p><h3 className="font-extrabold text-slate-900">{pick(ev, 'title', ev.title_bn || ev.title_en || t('ইভেন্ট', 'Event'))}</h3><p className="text-sm text-slate-600 mt-2 line-clamp-2">{pick(ev, 'description', ev.description_bn || ev.description_en || '')}</p><p className="text-xs text-slate-500 mt-3">{pick(ev, 'location', ev.location_bn || ev.location_en || '')}</p></div></article>)}</div> :
+              <EmptyState icon="📅" title={t('কোনো আসন্ন ইভেন্ট নেই', 'No upcoming events')} description={t('নতুন ইভেন্ট ঘোষণা করা হলে এখানে দেখানো হবে।', 'Upcoming activities will appear here when announced.')} />}
+          </section>
+
+          <section aria-labelledby="home-media-heading">
+            <div className="flex flex-wrap items-end justify-between gap-4 mb-6"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700 mb-2">{t('ছবি ও ভিডিও', 'Photos and video')}</p><h2 id="home-media-heading" className="text-2xl md:text-3xl font-extrabold text-slate-900">{t('ইভেন্ট গ্যালারি', 'Event Gallery')}</h2></div><Link href="/media" className="inline-flex items-center gap-2 text-sm font-bold text-emerald-700">{t('মিডিয়া গ্যালারি', 'View media gallery')} <ArrowRight size={16}/></Link></div>
+            {loading ? <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{[1,2,3,4].map(n=><div key={n} className="h-36 rounded-2xl bg-slate-100 animate-pulse"/>)}</div> :
+              media.length ? <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{media.map((item:any)=><Link key={item.id} href="/media" className="group relative overflow-hidden rounded-2xl bg-slate-900 min-h-36 aspect-[4/3]">{item.cover_image_url || item.thumbnail_url || item.file_url ? <img src={item.cover_image_url || item.thumbnail_url || item.file_url} alt={pick(item, 'title', item.title_bn || item.title_en || '')} className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy"/> : <div className="absolute inset-0 flex items-center justify-center text-white/80"><ImageIcon size={28}/></div>}<div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/90 to-transparent p-3 pt-8 text-white text-sm font-bold">{pick(item, 'title', item.title_bn || item.title_en || t('কার্যক্রমের ছবি', 'Activity photo'))}{String(item.media_type || item.type || '').toLowerCase().includes('video') && <PlayCircle className="inline ml-2" size={15}/>}</div></Link>)}</div> :
+              <EmptyState icon="🖼️" title={t('মিডিয়া পাওয়া যায়নি', 'No media available')} description={t('ছবি ও ভিডিও যুক্ত হলে এখানে দেখানো হবে।', 'Published photos and videos will appear here.')} />}
+          </section>
         </div>
       </section>
     </div>
