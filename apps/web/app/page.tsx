@@ -80,7 +80,7 @@ export default function HomePage() {
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px]"></div>
         <div className="absolute -top-24 -right-24 w-96 h-96 bg-accent opacity-20 rounded-full blur-3xl pointer-events-none"></div>
 
-        <div className="relative max-w-7xl mx-auto px-6 flex flex-col items-start">
+        <div className="relative max-w-7xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-8 lg:gap-12 items-center">\n          <div className="flex flex-col items-start">
           <span className="inline-flex items-center gap-1.5 py-1 px-3.5 rounded-full bg-secondary/50 border border-secondary text-accent text-xs font-semibold tracking-wider mb-5">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
             {t('অফিসিয়াল ডিজিটাল পোর্টাল · PGCB', 'Official Digital Portal · PGCB')}
@@ -115,6 +115,28 @@ export default function HomePage() {
               {t('আবেদন ট্র্যাকিং', 'Track Application')}
             </Link>
           </div>
+          <aside aria-label={t('সাম্প্রতিক নোটিশ', 'Latest notices')} className="w-full rounded-2xl border border-white/15 bg-slate-950/35 p-5 sm:p-6 shadow-2xl backdrop-blur-sm">
+            <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-4">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-300">{t('আপডেট', 'Stay informed')}</p>
+                <h2 className="mt-1 text-lg font-extrabold text-white">{t('সাম্প্রতিক নোটিশ', 'Latest notices')}</h2>
+              </div>
+              <Link href="/notices" className="inline-flex items-center gap-1 text-xs font-bold text-emerald-200 hover:text-white">{t('সব দেখুন', 'View all')} <ArrowRight size={14}/></Link>
+            </div>
+            <div className="mt-3 divide-y divide-white/10">
+              {loading ? <p className="py-5 text-sm text-slate-300">{t('নোটিশ লোড হচ্ছে…', 'Loading notices…')}</p> :
+                notices.length ? notices.slice(0, 3).map((notice) => <Link key={notice.id} href={`/notices/${notice.id}`} className="block rounded-lg px-2 py-3 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
+                  <div className="mb-1 flex items-center gap-2">
+                    {notice.priority === 'URGENT' && <span className="rounded bg-red-500/20 px-2 py-0.5 text-[10px] font-extrabold text-red-200">{t('জরুরি', 'URGENT')}</span>}
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-200">{notice.category}</span>
+                  </div>
+                  <p className="line-clamp-2 text-sm font-semibold leading-relaxed text-white">{pick(notice, 'title', notice.title_bn)}</p>
+                  <p className="mt-1 text-[11px] text-slate-400">{notice.published_at ? formatDate(notice.published_at) : t('তারিখ নেই', 'Date unavailable')}</p>
+                </Link>) :
+                <p className="py-5 text-sm text-slate-300">{t('বর্তমানে কোনো প্রকাশিত নোটিশ নেই।', 'No published notices are available right now.')}</p>}
+            </div>
+            <Link href="/circulars" className="mt-3 inline-flex items-center gap-2 text-xs font-bold text-emerald-200 hover:text-white">{t('সার্কুলার দেখুন', 'Browse circulars')} <ArrowRight size={14}/></Link>
+          </aside>
         </div>
       </section>
 
