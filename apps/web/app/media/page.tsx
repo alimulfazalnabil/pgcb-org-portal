@@ -25,9 +25,9 @@ export default function MediaPage() {
   }, [items, filter]);
 
   return (
-    <div className="bg-slate-50 min-h-screen py-10 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 sm:p-10 text-white shadow-xl mb-10">
+        <div className="relative mb-8 overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 p-6 text-white shadow-xl sm:rounded-3xl sm:p-10 md:mb-10">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div>
               <span className="inline-flex items-center px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 mb-3">
@@ -121,11 +121,7 @@ export default function MediaPage() {
                         {pick(
                           item,
                           'description',
-                          item.description_bn ||
-                            t(
-                              'ডিপ্রকৌস (পিজিসিবি)-এর অফিসিয়াল সাংগঠনিক কার্যক্রম ও কারিগরি অধিবেশনের দৃশ্যপট।',
-                              'Official organizational activities and technical sessions of Diprokous (PGCB).'
-                            )
+                          item.description_bn || item.description_en || ''
                         )}
                       </p>
                     </div>
@@ -143,7 +139,7 @@ export default function MediaPage() {
         {/* Lightbox Modal */}
         {selected && (
           <div
-            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm"
             onClick={() => setSelected(null)}
           >
             <div

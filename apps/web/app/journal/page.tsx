@@ -44,9 +44,9 @@ export default function JournalPage() {
   }, [items, query, category]);
 
   return (
-    <div className="bg-slate-50 min-h-screen py-10 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 sm:p-10 text-white shadow-xl mb-10">
+        <div className="relative mb-8 overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 p-6 text-white shadow-xl sm:rounded-3xl sm:p-10 md:mb-10">
           <span className="inline-flex items-center px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 mb-3">
             TECHNICAL JOURNAL & RESEARCH ARCHIVE
           </span>
@@ -147,7 +147,7 @@ export default function JournalPage() {
                     {pick(
                       item,
                       'abstract',
-                      item.abstract_bn || t('পাওয়ার গ্রিড ট্রান্সমিশন ও সাবস্টেশন ইঞ্জিনিয়ারিং গবেষণা সারসংক্ষেপ।', 'Power grid transmission and substation engineering research abstract.')
+                      item.abstract_bn || item.abstract_en || ''
                     )}
                   </p>
                 </div>

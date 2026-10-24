@@ -107,16 +107,46 @@ export default function AdminDashboardPage() {
         subtitle="সদস্যপদ, নোটিশ, ইভেন্ট ও সাংগঠনিক কার্যক্রমের কেন্দ্রীয় নিয়ন্ত্রণ ব্যবস্থা"
       />
 
-      <div className="p-6 md:p-8 space-y-8 max-w-7xl">
+      <div className="p-4 sm:p-6 md:p-8 space-y-6 md:space-y-8 max-w-7xl w-full">
+        {/* Reference-aligned dashboard banner */}
+        <section className="relative overflow-hidden rounded-2xl md:rounded-3xl bg-gradient-to-r from-slate-950 via-emerald-950 to-slate-900 p-6 sm:p-8 text-white shadow-lg">
+          <div aria-hidden="true" className="absolute -right-12 -top-16 h-56 w-56 rounded-full bg-emerald-400/10 blur-3xl" />
+          <div className="relative flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+            <div className="max-w-2xl">
+              <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-200">
+                <ShieldCheck size={13} /> PGCB • Secure Administration
+              </span>
+              <h1 className="mt-4 text-2xl font-extrabold tracking-tight sm:text-3xl">সুপার অ্যাডমিন ড্যাশবোর্ড</h1>
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-300">সদস্য, আবেদন, বিজ্ঞপ্তি ও প্রাতিষ্ঠানিক কার্যক্রম এক জায়গা থেকে পরিচালনা করুন।</p>
+            </div>
+            <div className="text-xs font-semibold text-emerald-100/80">{loading ? 'ডেটা লোড হচ্ছে…' : 'লাইভ প্রশাসনিক সারাংশ'}</div>
+          </div>
+        </section>
+
+        {/* Four primary dashboard destinations */}
+        <nav aria-label="প্রশাসনিক প্রধান বিভাগ" className="grid grid-cols-2 gap-2 rounded-2xl border border-border bg-card p-2 sm:grid-cols-4 sm:gap-3">
+          {[
+            { label: 'Overview', bn: 'সারসংক্ষেপ', href: '/admin', active: true },
+            { label: 'Members', bn: 'সদস্য', href: '/admin/members', active: false },
+            { label: 'Applications', bn: 'আবেদন', href: '/admin/applications', active: false },
+            { label: 'Notices', bn: 'নোটিশ', href: '/admin/notices', active: false },
+          ].map((tab) => (
+            <Link key={tab.href} href={tab.href} aria-current={tab.active ? 'page' : undefined}
+              className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${tab.active ? 'bg-primary text-white shadow-sm' : 'text-secondary hover:bg-surface hover:text-foreground'}`}>
+              <span>{tab.bn}</span><span className="hidden text-xs font-medium opacity-75 sm:inline">{tab.label}</span>
+            </Link>
+          ))}
+        </nav>
+
         {/* KPI Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {kpiCards.map((kpi, idx) => {
             const Icon = kpi.icon;
             return (
               <Link
                 key={idx}
                 href={kpi.href}
-                className="bg-card border border-border hover:border-primary/40 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group"
+                className="bg-card border border-border hover:border-primary/40 rounded-2xl p-5 sm:p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group min-h-36"
               >
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-secondary">{kpi.title}</span>
