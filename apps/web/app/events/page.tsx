@@ -21,9 +21,9 @@ export default function EventsPage() {
   }, [upcomingOnly]);
 
   return (
-    <div className="bg-slate-50 min-h-screen py-10 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 sm:p-10 text-white shadow-xl mb-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+        <div className="relative mb-8 flex flex-col gap-6 overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 p-6 text-white shadow-xl sm:rounded-3xl sm:p-10 md:mb-10 md:flex-row md:items-center md:justify-between">
           <div>
             <span className="inline-flex items-center px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 mb-3">
               CONFERENCES, COUNCILS & WORKSHOPS
@@ -110,7 +110,7 @@ export default function EventsPage() {
                     {pick(
                       ev,
                       'location',
-                      ev.location_bn || t('পিজিসিবি প্রধান কার্যালয় অডিটোরিয়াম, ঢাকা', 'PGCB Head Office Auditorium, Dhaka')
+                      ev.location_bn || ev.location_en || t('স্থান ঘোষণা করা হয়নি', 'Venue not announced')
                     )}
                   </p>
 
@@ -118,7 +118,7 @@ export default function EventsPage() {
                     {pick(
                       ev,
                       'description',
-                      ev.description_bn || t('ডিপ্রকৌস (পিজিসিবি)-এর অফিসিয়াল প্রতিনিধি সম্মেলন ও কারিগরি অধিবেশন।', 'Official representative conference and technical session of Diprokous (PGCB).')
+                      ev.description_bn || ev.description_en || ''
                     )}
                   </p>
                 </div>
