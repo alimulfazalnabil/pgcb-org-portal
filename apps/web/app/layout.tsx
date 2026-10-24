@@ -9,7 +9,7 @@ import { LanguageProvider } from '@/lib/i18n';
 export const metadata: Metadata = {
   title: 'পাওয়ার গ্রিড ডিপ্লোমা প্রকৌশল সমিতি',
   description: 'বাংলাদেশব্যাপী ডিপ্লোমা প্রকৌশলীদের জন্য আধুনিক সাংগঠনিক ওয়েবসাইট, সদস্য পোর্টাল ও যাচাইকরণ ব্যবস্থা.',
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://example.org'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://pgcb.org.bd'),
   manifest: '/manifest.webmanifest',
   openGraph: {
     title: 'পাওয়ার গ্রিড ডিপ্লোমা প্রকৌশল সমিতি',
