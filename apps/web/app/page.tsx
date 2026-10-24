@@ -80,7 +80,8 @@ export default function HomePage() {
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px]"></div>
         <div className="absolute -top-24 -right-24 w-96 h-96 bg-accent opacity-20 rounded-full blur-3xl pointer-events-none"></div>
 
-        <div className="relative max-w-7xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-8 lg:gap-12 items-center">\n          <div className="flex flex-col items-start">
+        <div className="relative max-w-7xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-8 lg:gap-12 items-center">
+          <div className="flex flex-col items-start">
           <span className="inline-flex items-center gap-1.5 py-1 px-3.5 rounded-full bg-secondary/50 border border-secondary text-accent text-xs font-semibold tracking-wider mb-5">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
             {t('অফিসিয়াল ডিজিটাল পোর্টাল · PGCB', 'Official Digital Portal · PGCB')}
@@ -114,6 +115,7 @@ export default function HomePage() {
             >
               {t('আবেদন ট্র্যাকিং', 'Track Application')}
             </Link>
+          </div>
           </div>
           <aside aria-label={t('সাম্প্রতিক নোটিশ', 'Latest notices')} className="w-full rounded-2xl border border-white/15 bg-slate-950/35 p-5 sm:p-6 shadow-2xl backdrop-blur-sm">
             <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-4">
