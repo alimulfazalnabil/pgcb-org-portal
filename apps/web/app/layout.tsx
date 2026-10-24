@@ -15,6 +15,7 @@ export const metadata: Metadata = {
     title: 'পাওয়ার গ্রিড ডিপ্লোমা প্রকৌশল সমিতি',
     description: 'Institutional website, member portal and verification platform',
     type: 'website',
+    url: 'https://powergriddiprocoush.org',
   },
   robots: { index: true, follow: true },
 };
