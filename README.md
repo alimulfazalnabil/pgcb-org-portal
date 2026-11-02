@@ -73,7 +73,7 @@ The documented security controls include TOTP multi-factor authentication and im
 
 ## 03 — Application architecture
 
-![PGCB portal architecture](docs/architecture.svg)
+![PGCB portal architecture](https://raw.githubusercontent.com/alimulfazalnabil/pgcb-org-portal/main/docs/architecture.svg)
 
 ~~~mermaid
 flowchart TB
