@@ -52,6 +52,19 @@ def mask_sensitive(text: str) -> str:
     """Mask database passwords and secret values from strings."""
     if not text:
         return ""
+
+    def _mask_db_url(m: re.Match) -> str:
+        user = m.group(1)
+        host = m.group(3)
+        port = m.group(4) or ""
+        path = m.group(5) or ""
+        return f"://{user}:***@{host}{port}{path}"
+
+    text = re.sub(
+        r"://([^\s/:@]+):(\S+)@([a-zA-Z0-9_.-]+|\[[a-fA-F0-9:]+\])(:\d+)?(/?[^\s]*)",
+        _mask_db_url,
+        text,
+    )
     text = re.sub(r"://([^/\s:]+):([^/\s@]+)@", r"://\1:***@", text)
     text = re.sub(
         r"(password|db_password|secret|key|token)\s*([=:])\s*([\"']?)([^\"'\s&,]+)\3",

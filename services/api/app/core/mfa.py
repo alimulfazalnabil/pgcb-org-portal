@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import struct
 import time
@@ -14,6 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
@@ -77,8 +80,10 @@ def decrypt_secret(value: str | None) -> str | None:
         if settings.mfa_encryption_key:
             try:
                 return _legacy_derived_fernet().decrypt(value.encode()).decode()
-            except (InvalidToken, ValueError, TypeError):
+            except (InvalidToken, ValueError, TypeError) as exc:
+                logger.warning("MFA secret decryption failed with both primary and fallback keys: %s", exc)
                 return None
+        logger.warning("MFA secret decryption failed with primary key; no fallback configured.")
         return None
 
 
