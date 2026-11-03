@@ -101,6 +101,16 @@ class Settings(BaseSettings):
             if alt_secret:
                 self.jwt_secret = alt_secret.strip().strip("'\"")
 
+        if self.mfa_encryption_key:
+            self.mfa_encryption_key = self.mfa_encryption_key.strip().strip("'\"")
+            try:
+                from cryptography.fernet import Fernet
+                Fernet(self.mfa_encryption_key.encode())
+            except Exception as exc:
+                raise ValueError(
+                    f"MFA_ENCRYPTION_KEY is invalid: must be a 32-byte urlsafe base64 string. Details: {exc}"
+                )
+
         if not self.allowed_origins and self.cors_origins:
             self.allowed_origins = self.cors_origins
 

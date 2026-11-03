@@ -62,7 +62,7 @@ class DiskStorageBackend(StorageBackend):
         """
         try:
             self.root_dir.mkdir(parents=True, exist_ok=True)
-            for sub in ('public', 'members', 'cards', 'certificates'):
+            for sub in ('public', 'members', 'cards', 'certificates', 'documents', 'member_documents'):
                 (self.root_dir / sub).mkdir(parents=True, exist_ok=True)
 
             # Test write access with a canary file

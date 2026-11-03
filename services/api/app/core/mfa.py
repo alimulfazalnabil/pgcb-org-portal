@@ -50,12 +50,16 @@ def otpauth_uri(secret: str, email: str, issuer: str = 'PGCB Organization Portal
     return f'otpauth://totp/{label}?secret={secret}&issuer={issuer_q}&algorithm=SHA1&digits=6&period=30'
 
 
+def _legacy_derived_fernet() -> Fernet:
+    derived = base64.urlsafe_b64encode(hashlib.sha256(settings.jwt_secret.encode()).digest())
+    return Fernet(derived)
+
+
 def _fernet() -> Fernet:
     configured = settings.mfa_encryption_key
     if configured:
         return Fernet(configured.encode())
-    derived = base64.urlsafe_b64encode(hashlib.sha256(settings.jwt_secret.encode()).digest())
-    return Fernet(derived)
+    return _legacy_derived_fernet()
 
 
 def encrypt_secret(secret: str) -> str:
@@ -68,6 +72,13 @@ def decrypt_secret(value: str | None) -> str | None:
     try:
         return _fernet().decrypt(value.encode()).decode()
     except (InvalidToken, ValueError, TypeError):
+        # Fallback to legacy derived Fernet key if configured key failed,
+        # allowing seamless key rotation without invalidating existing enrolled MFA secrets
+        if settings.mfa_encryption_key:
+            try:
+                return _legacy_derived_fernet().decrypt(value.encode()).decode()
+            except (InvalidToken, ValueError, TypeError):
+                return None
         return None
 
 

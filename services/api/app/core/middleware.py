@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 import time
+from urllib.parse import urlparse
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -9,6 +10,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.core.cache import is_never_cached_path, is_selectively_cached_path, portal_cache
+from app.core.config import settings
 from app.core.metrics import REQUEST_COUNT, REQUEST_LATENCY
 
 
@@ -80,6 +82,18 @@ def _apply_security_headers(response: Response, request: Request, request_id: st
     response.headers['Server-Timing'] = f'app;dur={elapsed * 1000:.1f}'
 
 
+def get_allowed_origins() -> set[str]:
+    origins = {settings.frontend_url.rstrip('/')}
+    if settings.allowed_origins:
+        for o in settings.allowed_origins.split(','):
+            cleaned = o.strip().rstrip('/')
+            if cleaned:
+                origins.add(cleaned)
+    if not settings.is_production_like:
+        origins.update({'http://localhost:3000', 'http://127.0.0.1:3000', 'http://testserver', 'http://localhost'})
+    return origins
+
+
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get('X-Request-ID') or uuid.uuid4().hex
@@ -87,6 +101,41 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         started = time.perf_counter()
         path = request.url.path
         method = request.method.upper()
+
+        # CSRF Protection: For state-changing requests authenticated via session cookie,
+        # validate the Origin or Referer against allowed CORS origins.
+        if method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            has_cookie = settings.cookie_name in request.cookies
+            has_bearer = request.headers.get('Authorization', '').startswith('Bearer ')
+            if has_cookie and not has_bearer:
+                origin = request.headers.get('Origin')
+                referer = request.headers.get('Referer')
+                allowed = get_allowed_origins()
+
+                is_valid_origin = False
+                if origin:
+                    clean_origin = origin.strip().rstrip('/')
+                    is_valid_origin = clean_origin in allowed
+                elif referer:
+                    try:
+                        parsed = urlparse(referer)
+                        clean_referer_origin = f"{parsed.scheme}://{parsed.netloc}".rstrip('/')
+                        is_valid_origin = clean_referer_origin in allowed
+                    except Exception:
+                        is_valid_origin = False
+                elif not settings.is_production_like:
+                    # In development/test environments without Origin/Referer, permit programmatic requests
+                    is_valid_origin = True
+
+                if not is_valid_origin:
+                    elapsed = time.perf_counter() - started
+                    csrf_resp = Response(
+                        content='{"detail":"CSRF origin verification failed"}',
+                        status_code=403,
+                        media_type='application/json',
+                    )
+                    _apply_security_headers(csrf_resp, request, request_id, elapsed)
+                    return csrf_resp
 
         # Selective Cache lookup for public GET routes
         cache_key = None

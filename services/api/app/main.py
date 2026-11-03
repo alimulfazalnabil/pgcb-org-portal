@@ -149,7 +149,7 @@ cors_origins = [settings.frontend_url.rstrip('/')]
 if settings.allowed_origins:
     cors_origins.extend([o.strip().rstrip('/') for o in settings.allowed_origins.split(',') if o.strip()])
 if settings.app_env.lower() in ('development', 'dev', 'test', 'testing', 'local'):
-    cors_origins.extend(['http://localhost:3000', 'http://127.0.0.1:3000'])
+    cors_origins.extend(['http://localhost:3000', 'http://127.0.0.1:3000', 'http://testserver', 'http://localhost'])
 cors_origins = list(dict.fromkeys(cors_origins))
 
 app.add_middleware(
@@ -157,7 +157,7 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allow_headers=['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID'],
+    allow_headers=['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID', 'X-CSRF-Token', 'Accept'],
 )
 
 app.include_router(auth.router, prefix='/api/v1')
@@ -203,20 +203,31 @@ def root():
 @app.get('/healthz', include_in_schema=False)
 @app.get('/api/v1/health')
 def health():
+    db_status = 'unavailable'
+    app_status = 'degraded'
+    db = SessionLocal()
+    try:
+        db.execute(text('SELECT 1'))
+        db_status = 'connected'
+        app_status = 'ok'
+    except Exception as exc:
+        logger.warning(f"[HEALTH CHECK WARNING] Database check failed: {exc}")
+    finally:
+        db.close()
+
     return {
-        'status': 'ok',
-        'database': 'connected',
+        'status': app_status,
+        'database': db_status,
         'service': 'pgcb-api',
         'version': '1.0.0-rc1',
         'environment': settings.app_env,
     }
 
 
-
-
 @app.get('/live')
 def live():
     return {'status': 'alive', 'service': 'pgcb-api', 'version': '1.0.0-rc1'}
+
 
 @app.get('/metrics')
 def metrics(request: Request):
@@ -230,6 +241,7 @@ def metrics(request: Request):
     body, media_type = render_metrics()
     return Response(content=body, media_type=media_type)
 
+
 @app.get('/ready')
 @app.get('/readyz', include_in_schema=False)
 def ready():
@@ -239,10 +251,9 @@ def ready():
         return {'status': 'ready', 'database': 'ok'}
     except Exception as exc:
         logger.error(f"[READINESS ERROR] Database health check failed: {exc}")
-        return Response(
-            content='{"status":"not_ready","database":"error"}',
+        return JSONResponse(
             status_code=503,
-            media_type='application/json'
+            content={'status': 'not_ready', 'database': 'error', 'detail': 'Database unavailable'},
         )
     finally:
         db.close()

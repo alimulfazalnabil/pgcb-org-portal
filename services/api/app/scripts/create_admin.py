@@ -11,6 +11,12 @@ import argparse
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
+
+# Ensure services/api is on sys.path for direct execution (e.g., cPanel Setup Python App)
+_API_DIR = Path(__file__).resolve().parent.parent.parent
+if str(_API_DIR) not in sys.path:
+    sys.path.insert(0, str(_API_DIR))
 
 from sqlalchemy import select
 from app.core.security import hash_password

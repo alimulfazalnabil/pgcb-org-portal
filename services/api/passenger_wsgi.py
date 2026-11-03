@@ -47,6 +47,8 @@ _VENV_CANDIDATES = [
 ]
 for venv_path in _VENV_CANDIDATES:
     site_packages = list(venv_path.glob("lib/python*/site-packages"))
+    if not site_packages:
+        site_packages = list(venv_path.glob("Lib/site-packages"))
     if site_packages and str(site_packages[0]) not in sys.path:
         sys.path.insert(0, str(site_packages[0]))
         break
