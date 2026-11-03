@@ -60,10 +60,47 @@ class DiskStorageBackend(StorageBackend):
         Create root_dir and standard subdirectories.
         Called on application startup lifespan.
         """
+        STANDARD_SUBDIRS = (
+            'public',
+            'members',
+            'cards',
+            'certificates',
+            'documents',
+            'member_documents',
+            'uploads',
+            'uploads/documents',
+            'uploads/members',
+            'uploads/public',
+        )
         try:
             self.root_dir.mkdir(parents=True, exist_ok=True)
-            for sub in ('public', 'members', 'cards', 'certificates', 'documents', 'member_documents'):
-                (self.root_dir / sub).mkdir(parents=True, exist_ok=True)
+            if os.name == 'posix':
+                try:
+                    os.chmod(self.root_dir, 0o750)
+                except OSError:
+                    pass
+
+            for sub in STANDARD_SUBDIRS:
+                sub_path = self.root_dir / sub
+                sub_path.mkdir(parents=True, exist_ok=True)
+                if os.name == 'posix':
+                    try:
+                        os.chmod(sub_path, 0o750)
+                    except OSError:
+                        pass
+
+            try:
+                from app.core.config import settings
+                if getattr(settings, 'upload_dir', None):
+                    upload_p = Path(settings.upload_dir).resolve()
+                    upload_p.mkdir(parents=True, exist_ok=True)
+                    if os.name == 'posix':
+                        try:
+                            os.chmod(upload_p, 0o750)
+                        except OSError:
+                            pass
+            except Exception:
+                pass
 
             # Test write access with a canary file
             canary = self.root_dir / '.write_test'

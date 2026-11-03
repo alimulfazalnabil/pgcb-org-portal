@@ -277,3 +277,66 @@ def test_isolation_guard_fails_when_storage_writer_pointed_at_repo_root():
     from app.core.config import settings
     active_storage = Path(settings.storage_root).resolve()
     check_storage_isolated(active_storage)
+
+
+def test_uploads_directory_and_subdirectories_created_on_init():
+    """Verify that ensure_root_exists creates 'uploads' and its subdirectories."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        storage = DiskStorageBackend(root_dir=tmpdir)
+        storage.ensure_root_exists()
+
+        expected = [
+            "public",
+            "members",
+            "cards",
+            "certificates",
+            "documents",
+            "member_documents",
+            "uploads",
+            "uploads/documents",
+            "uploads/members",
+            "uploads/public",
+        ]
+        for sub in expected:
+            sub_path = Path(tmpdir) / sub
+            assert sub_path.exists() and sub_path.is_dir(), f"Expected directory {sub} was not created"
+
+
+def test_symlink_traversal_rejection():
+    """Verify that symlinks attempting to escape root_dir are blocked."""
+    with tempfile.TemporaryDirectory() as outside_dir, tempfile.TemporaryDirectory() as storage_dir:
+        outside_file = Path(outside_dir) / "secret.txt"
+        outside_file.write_text("super-secret")
+
+        symlink_path = Path(storage_dir) / "evil_symlink"
+        try:
+            os.symlink(outside_file, symlink_path)
+        except (OSError, NotImplementedError):
+            pytest.skip("Symlink creation not permitted in this environment")
+
+        backend = DiskStorageBackend(root_dir=storage_dir)
+        with pytest.raises(ValueError, match="Path traversal"):
+            backend._resolve_candidate(symlink_path)
+
+
+def test_failed_upload_cleanup_preserves_existing_files():
+    """Verify that cleanup after a failed upload does not touch pre-existing files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        storage = DiskStorageBackend(root_dir=tmpdir)
+        storage.ensure_root_exists()
+
+        # Existing file
+        existing_path = storage.save(b"pre-existing content", "uploads/documents", "doc_v1.pdf")
+        assert storage.exists(existing_path)
+
+        # New file simulating failed upload
+        failed_path = storage.save(b"partial/failed content", "uploads/documents", "doc_v2_failed.pdf")
+        assert storage.exists(failed_path)
+
+        # Cleanup only the failed upload
+        storage.delete(failed_path)
+
+        # Existing file MUST remain intact
+        assert not storage.exists(failed_path)
+        assert storage.exists(existing_path)
+        assert storage.read(existing_path) == b"pre-existing content"

@@ -89,6 +89,13 @@ def run_migrations() -> int:
         masked_url = mask_sensitive(settings.database_url)
         logger.info("Target Database URL: %s", masked_url)
 
+        if settings.is_production_like and settings.database_url.startswith("sqlite") and not getattr(settings, "allow_sqlite_in_production", False):
+            raise RuntimeError(
+                "CRITICAL DEPLOYMENT ERROR: Staging and Production environments require a managed "
+                "PostgreSQL database. Running migrations against SQLite in production is strictly prohibited "
+                "unless ALLOW_SQLITE_IN_PRODUCTION=true is explicitly set."
+            )
+
         ini_path = API_DIR / "alembic.ini"
         if not ini_path.is_file():
             raise FileNotFoundError(f"Missing alembic.ini configuration file at: {ini_path}")

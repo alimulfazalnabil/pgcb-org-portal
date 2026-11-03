@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     upload_dir: str | None = None
     mfa_encryption_key: str | None = None
     allow_sqlite_in_production: bool = False
+    docs_enabled: bool = False
     rate_limit_enabled: bool = True
     redis_rate_limit_enabled: bool = False
     redis_url: str = 'redis://localhost:6379/0'

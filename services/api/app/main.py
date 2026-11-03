@@ -49,10 +49,16 @@ async def lifespan(app: FastAPI):
     logger.info("[SHUTDOWN] PGCB Portal API shutting down")
 
 
+_is_prod = settings.is_production_like
+_docs_enabled = getattr(settings, 'docs_enabled', False) if _is_prod else True
+
 app = FastAPI(
     title='PGCB Organization Portal API',
     version='1.0.0-rc1',
     description='Institutional website, membership portal, CMS, events, payments, verification, observability and production API.',
+    docs_url='/docs' if _docs_enabled else None,
+    redoc_url='/redoc' if _docs_enabled else None,
+    openapi_url='/openapi.json' if _docs_enabled else None,
     lifespan=lifespan,
 )
 
