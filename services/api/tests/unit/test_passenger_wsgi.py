@@ -92,7 +92,7 @@ def test_passenger_wsgi_health_liveness():
 
 
 def test_passenger_wsgi_health_succeeds_even_when_db_down(monkeypatch):
-    """Verify that /health is a pure liveness probe that succeeds even if DB is unavailable."""
+    """Verify that /health reports degraded status truthfully and doesn't crash when DB is down."""
     import passenger_wsgi
 
     # Mock SessionLocal to raise an error if invoked
@@ -103,7 +103,14 @@ def test_passenger_wsgi_health_succeeds_even_when_db_down(monkeypatch):
     status, headers, body = _invoke_wsgi(passenger_wsgi.application, path="/health")
     assert status.startswith("200")
     data = json.loads(body)
-    assert data.get("status") == "ok"
+    assert data.get("status") == "degraded"
+    assert data.get("database") == "unavailable"
+
+    # And verify that /live remains fully functional as a pure process liveness probe
+    live_status, _, live_body = _invoke_wsgi(passenger_wsgi.application, path="/live")
+    assert live_status.startswith("200")
+    live_data = json.loads(live_body)
+    assert live_data.get("status") == "alive"
 
 
 def test_passenger_wsgi_ready_failure_on_db_down(monkeypatch):

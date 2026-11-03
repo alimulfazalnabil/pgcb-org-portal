@@ -205,15 +205,20 @@ def root():
 def health():
     db_status = 'unavailable'
     app_status = 'degraded'
-    db = SessionLocal()
+    db = None
     try:
+        db = SessionLocal()
         db.execute(text('SELECT 1'))
         db_status = 'connected'
         app_status = 'ok'
     except Exception as exc:
         logger.warning(f"[HEALTH CHECK WARNING] Database check failed: {exc}")
     finally:
-        db.close()
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
 
     return {
         'status': app_status,
@@ -245,8 +250,9 @@ def metrics(request: Request):
 @app.get('/ready')
 @app.get('/readyz', include_in_schema=False)
 def ready():
-    db = SessionLocal()
+    db = None
     try:
+        db = SessionLocal()
         db.execute(text('SELECT 1'))
         return {'status': 'ready', 'database': 'ok'}
     except Exception as exc:
@@ -256,4 +262,8 @@ def ready():
             content={'status': 'not_ready', 'database': 'error', 'detail': 'Database unavailable'},
         )
     finally:
-        db.close()
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
