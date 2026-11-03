@@ -13,14 +13,13 @@ These variables are configured in cPanel $\to$ **Setup Python App** $\to$ **Envi
 | Variable Name | Required | Default Value | Example / Recommended Value | Description |
 | :--- | :---: | :--- | :--- | :--- |
 | `APP_ENV` | **Yes** | `development` | `production` | Application mode. Use `production` on HostSeba to enforce security validators. |
-| `DATABASE_URL` | **Yes** | `sqlite:///./pgcb_portal.db` | `postgresql+psycopg://user:pass@localhost:5432/dbname` | Full Psycopg 3 connection URL. Must use `postgresql+psycopg://`. |
+| `DATABASE_URL` | **Yes** | `sqlite:///./pgcb_portal.db` | `postgresql+psycopg://<CPANEL_DB_USER>:<URL_ENCODED_PASSWORD>@localhost:5432/<CPANEL_DB_NAME>` | Full Psycopg 3 connection URL. Must use `postgresql+psycopg://`. |
 | `DB_HOST` | No | `None` | `localhost` | Database host (used if `DATABASE_URL` is omitted). |
 | `DB_PORT` | No | `5432` | `5432` | Database port. |
-| `DB_NAME` | No | `pgcb_portal` | `powergri_pgcb_prod` | Database name. |
-| `DB_USER` | No | `None` | `powergri_pgcbuser` | Database username. |
-| `DB_PASSWORD` | No | `None` | `MySecretPassword123!` | Database password (URL-encoded automatically). |
+| `DB_NAME` | No | `pgcb_portal` | `<CPANEL_DB_NAME>` | Database name. |
+| `DB_USER` | No | `None` | `<CPANEL_DB_USER>` | Database username. |
+| `DB_PASSWORD` | No | `None` | `*(URL-encoded password)*` | Database password (URL-encoded automatically). |
 | `DB_SSLMODE` | No | `prefer` | `prefer` | SSL mode for PostgreSQL connection. |
-| `ALLOW_SQLITE_IN_PRODUCTION` | No | `false` | `false` | Safeguard: Must be `false` in production. Only set `true` for emergency SQLite fallback. |
 | `ALLOW_STARTUP_FALLBACK` | No | `false` | `false` | If `false`, crashes immediately with masked traceback on misconfiguration. |
 | `JWT_SECRET` | **Yes** | *dev-only placeholder* | *(64-character random string)* | Cryptographic key for HS256 JWT tokens. Must be $\ge 32$ characters in production. |
 | `SECRET_KEY` | No | `None` | *(same as JWT_SECRET)* | Alias for `JWT_SECRET`. |

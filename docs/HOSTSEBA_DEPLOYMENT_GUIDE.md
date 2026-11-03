@@ -94,7 +94,7 @@ Uploaded member documents, receipts, and photos must be stored safely outside th
 | Name | Value | Description |
 | :--- | :--- | :--- |
 | `APP_ENV` | `production` | Enforces production security and strict validation |
-| `DATABASE_URL` | `postgresql+psycopg://powergri_pgcbuser:YOUR_DB_PASSWORD@localhost:5432/powergri_pgcb_prod` | Full Psycopg 3 connection string |
+| `DATABASE_URL` | `postgresql+psycopg://<CPANEL_DB_USER>:<URL_ENCODED_PASSWORD>@localhost:5432/<CPANEL_DB_NAME>` | Full Psycopg 3 connection string |
 | `JWT_SECRET` | *(64-character random string)* | Used for HS256 signing of auth tokens |
 | `MFA_ENCRYPTION_KEY` | *(32-byte base64 Fernet key)* | For encrypting TOTP secrets |
 | `FRONTEND_URL` | `https://powergriddiprocoush.org` | Primary frontend domain |
@@ -102,7 +102,6 @@ Uploaded member documents, receipts, and photos must be stored safely outside th
 | `STORAGE_BACKEND` | `local` | HostSeba filesystem storage |
 | `STORAGE_ROOT` | `/home/powergri/storage` | Persistent storage root outside web root |
 | `UPLOAD_DIR` | `/home/powergri/storage/uploads` | Uploaded document storage directory |
-| `ALLOW_SQLITE_IN_PRODUCTION` | `false` | Safeguard: Prevents fallback to SQLite |
 | `ALLOW_STARTUP_FALLBACK` | `false` | Fails fast on misconfiguration |
 | `RATE_LIMIT_ENABLED` | `true` | Enables in-memory sliding window rate limiting |
 | `COOKIE_NAME` | `pgcb_access_token` | Session cookie identifier |

@@ -85,7 +85,7 @@ The repository includes a dedicated backup utility: `services/api/scripts/backup
 ### 3.2 Manual Backups via cPanel phpPgAdmin
 If you prefer exporting backups directly through the web browser:
 1. In cPanel, navigate to **Databases $\to$ phpPgAdmin**.
-2. Click your database (`powergri_pgcb_prod`) in the left sidebar.
+2. Click your database (`<CPANEL_DB_NAME>`) in the left sidebar.
 3. Click the **Export** tab in the top navigation.
 4. Select:
    - Format: **SQL**
@@ -99,12 +99,12 @@ If you prefer exporting backups directly through the web browser:
 
 ### Restoring via cPanel phpPgAdmin
 1. Log in to cPanel $\to$ **phpPgAdmin**.
-2. Select your target database (`powergri_pgcb_prod`).
+2. Select your target database (`<CPANEL_DB_NAME>`).
 3. Click **SQL** in the top navigation.
 4. Upload or paste your SQL backup script.
 5. Click **Execute**.
 
 ### Restoring via Command Line
 ```bash
-gunzip -c /home/powergri/storage/backups/pgcb_backup_20261103.sql.gz | psql -U powergri_pgcbuser -d powergri_pgcb_prod -h localhost
+gunzip -c /home/powergri/storage/backups/pgcb_backup_20261103.sql.gz | psql -U <CPANEL_DB_USER> -d <CPANEL_DB_NAME> -h localhost
 ```

@@ -73,7 +73,7 @@ def test_production_allows_secret_key_as_alias(monkeypatch):
 
 
 def test_production_rejects_sqlite_database_url(monkeypatch):
-    """Verify that production rejects SQLite database URLs by default."""
+    """Verify that production rejects SQLite database URLs unconditionally."""
     monkeypatch.setenv("APP_ENV", "production")
     with pytest.raises(ValidationError) as exc_info:
         Settings(
@@ -82,35 +82,45 @@ def test_production_rejects_sqlite_database_url(monkeypatch):
             jwt_secret=SYNTHETIC_TEST_SECRET,
         )
     assert "DATABASE_URL cannot be SQLite" in str(exc_info.value)
-    assert "ALLOW_SQLITE_IN_PRODUCTION=true" in str(exc_info.value)
 
 
-def test_production_allows_sqlite_when_explicitly_permitted(monkeypatch):
-    """Verify that production allows SQLite when allow_sqlite_in_production is True."""
+def test_production_rejects_sqlite_even_with_legacy_override_kwarg(monkeypatch):
+    """Verify that production rejects SQLite even if allow_sqlite_in_production is passed."""
     monkeypatch.setenv("APP_ENV", "production")
-    s = Settings(
-        app_env="production",
-        database_url="sqlite:///./pgcb_portal.db",
-        jwt_secret=SYNTHETIC_TEST_SECRET,
-        allow_sqlite_in_production=True,
-    )
-    assert s.database_url.startswith("sqlite")
-    # Verify that relative path ./pgcb_portal.db got normalized to absolute path
-    assert "./" not in s.database_url
-    assert "pgcb_portal.db" in s.database_url
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            app_env="production",
+            database_url="sqlite:///./pgcb_portal.db",
+            jwt_secret=SYNTHETIC_TEST_SECRET,
+            allow_sqlite_in_production=True,
+        )
+    assert "DATABASE_URL cannot be SQLite" in str(exc_info.value)
 
 
-def test_production_allows_sqlite_via_env_var(monkeypatch):
-    """Verify that ALLOW_SQLITE_IN_PRODUCTION=true env var allows SQLite in production."""
+def test_production_rejects_sqlite_even_with_legacy_env_var(monkeypatch):
+    """Verify that ALLOW_SQLITE_IN_PRODUCTION=true env var cannot bypass SQLite prohibition."""
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ALLOW_SQLITE_IN_PRODUCTION", "true")
     monkeypatch.setenv("JWT_SECRET", SYNTHETIC_TEST_SECRET)
-    s = Settings(
-        app_env="production",
-        database_url="sqlite:///./pgcb_portal.db",
-    )
-    assert s.database_url.startswith("sqlite")
-    assert s.allow_sqlite_in_production is True
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            app_env="production",
+            database_url="sqlite:///./pgcb_portal.db",
+        )
+    assert "DATABASE_URL cannot be SQLite" in str(exc_info.value)
+
+
+def test_staging_rejects_sqlite_unconditionally(monkeypatch):
+    """Verify that staging environment also rejects SQLite unconditionally."""
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("ALLOW_SQLITE_IN_PRODUCTION", "true")
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            app_env="staging",
+            database_url="sqlite:///./pgcb_portal.db",
+            jwt_secret=SYNTHETIC_TEST_SECRET,
+        )
+    assert "DATABASE_URL cannot be SQLite" in str(exc_info.value)
 
 
 def test_production_accepts_valid_postgresql_config(monkeypatch):

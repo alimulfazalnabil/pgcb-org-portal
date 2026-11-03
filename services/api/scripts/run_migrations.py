@@ -49,25 +49,25 @@ logger = logging.getLogger("run_migrations")
 
 
 def mask_sensitive(text: str) -> str:
-    """Mask database passwords and secret values from strings."""
+    """Mask database passwords, secret keys, tokens, and query credentials from strings."""
     if not text:
         return ""
 
-    def _mask_db_url(m: re.Match) -> str:
-        user = m.group(1)
-        host = m.group(3)
-        port = m.group(4) or ""
-        path = m.group(5) or ""
-        return f"://{user}:***@{host}{port}{path}"
+    # 1. Mask standard URI credentials: ://user:password@host or ://:password@host
+    text = re.sub(r"://([^/\s:@]+):([^/\s@]+)@", r"://\1:***@", text)
+    text = re.sub(r"://:([^/\s@]+)@", r"://:***@", text)
 
+    # 2. Mask query parameter secrets: ?token=xyz or &password=xyz
     text = re.sub(
-        r"://([^\s/:@]+):(\S+)@([a-zA-Z0-9_.-]+|\[[a-fA-F0-9:]+\])(:\d+)?(/?[^\s]*)",
-        _mask_db_url,
+        r"([?&](?:password|db_password|secret|key|token|auth_token|api_key|access_token)=)[^&\s]+",
+        r"\1***",
         text,
+        flags=re.IGNORECASE,
     )
-    text = re.sub(r"://([^/\s:]+):([^/\s@]+)@", r"://\1:***@", text)
+
+    # 3. Mask key-value secrets: password=xyz or token: "xyz"
     text = re.sub(
-        r"(password|db_password|secret|key|token)\s*([=:])\s*([\"']?)([^\"'\s&,]+)\3",
+        r"(password|db_password|secret|key|token|auth_token|api_key|access_token)\s*([=:])\s*([\"']?)([^\"'\s&,]+)\3",
         r"\1\2***",
         text,
         flags=re.IGNORECASE,
@@ -89,11 +89,11 @@ def run_migrations() -> int:
         masked_url = mask_sensitive(settings.database_url)
         logger.info("Target Database URL: %s", masked_url)
 
-        if settings.is_production_like and settings.database_url.startswith("sqlite") and not getattr(settings, "allow_sqlite_in_production", False):
+        # Fail-safe database check: SQLite is strictly prohibited in production and staging
+        if settings.is_production_like and settings.database_url.lower().startswith("sqlite"):
             raise RuntimeError(
                 "CRITICAL DEPLOYMENT ERROR: Staging and Production environments require a managed "
-                "PostgreSQL database. Running migrations against SQLite in production is strictly prohibited "
-                "unless ALLOW_SQLITE_IN_PRODUCTION=true is explicitly set."
+                "PostgreSQL database. Running migrations against SQLite in production or staging is strictly prohibited."
             )
 
         ini_path = API_DIR / "alembic.ini"

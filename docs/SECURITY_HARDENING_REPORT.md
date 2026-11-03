@@ -17,7 +17,7 @@
 
 ### 1.2 Credential Masking in Telemetry & Logs
 - All database connection strings, passwords, JWT tokens, SMTP credentials, and API secrets are dynamically scrubbed by `mask_sensitive_data()`:
-  - Database URLs: `postgresql+psycopg://powergri_pgcbuser:***@localhost:5432/powergri_pgcb_prod`
+  - Database URLs: `postgresql+psycopg://<CPANEL_DB_USER>:***@localhost:5432/<CPANEL_DB_NAME>`
   - Key-value pairs: `jwt_secret=***`, `password=***`, `token=***`
 - Log files (`passenger_startup.log`, `migration_run.log`) and uncaught exception handlers never write raw credentials to disk or stderr.
 

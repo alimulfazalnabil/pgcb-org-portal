@@ -49,8 +49,11 @@ async def lifespan(app: FastAPI):
     logger.info("[SHUTDOWN] PGCB Portal API shutting down")
 
 
-_is_prod = settings.is_production_like
-_docs_enabled = getattr(settings, 'docs_enabled', False) if _is_prod else True
+# Fail-safe documentation policy:
+# Production and staging must ALWAYS disable /docs, /redoc, and /openapi.json.
+# DOCS_ENABLED=true cannot override this policy in production or staging.
+_is_prod_like = settings.is_production_like
+_docs_enabled = False if _is_prod_like else getattr(settings, 'docs_enabled', True)
 
 app = FastAPI(
     title='PGCB Organization Portal API',
